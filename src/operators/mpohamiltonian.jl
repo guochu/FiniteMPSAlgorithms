@@ -1,0 +1,227 @@
+# MPOHamiltonian: a Hamiltonian stored as a chain of matrix-of-matrices site tensors
+# (AbstractSparseMPOTensor), aligned with MPSKit's MPOHamiltonian{<:JordanMPOTensor}
+# and TEMPO's MPOHamiltonian{<:AbstractSparseMPOTensor}.
+# Dense 4-index chains (MPO) are wrapped site-wise into the same block representation.
+
+"""
+	MPOHamiltonian{M<:AbstractSparseMPOTensor}
+	MPOHamiltonian(data::AbstractVector{<:AbstractSparseMPOTensor})
+	MPOHamiltonian(data::AbstractVector{<:MPOTensor})
+	MPOHamiltonian(L::Int, terms::OpTerm...)
+
+An MPO representation of a Hamiltonian whose site tensors are matrices of local `d×d`
+operators (sparse matrix-of-matrices form). The first site tensor is the first row of
+the chain, the last site the last column; the interior encodes started operator strings.
+
+Assemble from product terms with [`OpTerm`](@ref), from a dense 4-index chain
+([`MPO`](@ref), wrapped site-wise), or convert back with `MPO(h)` / [`tompotensors`](@ref).
+This is the standard operator input of `ground_state`, `excited_state` and TDVP1.
+"""
+struct MPOHamiltonian{M<:AbstractSparseMPOTensor, T<:Number} <: AbstractMPO{T}
+	data::Vector{M}
+
+	function MPOHamiltonian{M}(data::AbstractVector) where {M<:AbstractSparseMPOTensor}
+		isempty(data) && throw(ArgumentError("empty MPOHamiltonian"))
+		(size(data[1], 1) == size(data[end], 2)) ||
+			throw(DimensionMismatch("boundary dimension mismatch: $(size(data[1],1)) != $(size(data[end],2))"))
+		for i in 1:length(data)-1
+			(size(data[i], 2) == size(data[i+1], 1)) ||
+				throw(DimensionMismatch("chain dimension mismatch at bond $i"))
+		end
+		return new{M, scalartype(M)}(convert(Vector{M}, data))
+	end
+end
+
+# from sparse site tensors
+MPOHamiltonian(data::AbstractVector{M}) where {M<:AbstractSparseMPOTensor} = MPOHamiltonian{M}(data)
+# from a vector of block matrices
+MPOHamiltonian(data::Vector{<:Matrix}) = MPOHamiltonian([SparseMPOTensor(c) for c in data])
+
+# from dense 4-index site tensors: each site wraps its full (wl×wr) block matrix
+function MPOHamiltonian(data::AbstractVector{<:MPOTensor})
+	return MPOHamiltonian(_sparse_from_dense.(data))
+end
+_sparse_from_dense(W::Array{T,4}) where {T<:Number} =
+	SparseMPOTensor([W[i, :, k, :] for i in 1:size(W, 1), k in 1:size(W, 3)])
+
+MPOHamiltonian(h::MPO) = MPOHamiltonian(h.data)
+MPOHamiltonian(h::MPOHamiltonian) = h
+
+MPO(h::MPOHamiltonian) = MPO(tompotensors(h))
+
+Base.getindex(h::MPOHamiltonian, i::Int, j::Int, k::Int) = h[i][j, k]
+Base.copy(h::MPOHamiltonian) = MPOHamiltonian(copy(h.data))
+Base.complex(h::MPOHamiltonian{M, T}) where {M, T} =
+	T <: Complex ? h : MPOHamiltonian([complex(h[i]) for i in 1:length(h)])
+
+function Base.show(io::IO, h::MPOHamiltonian)
+	print(io, "MPOHamiltonian{", scalartype(h), "} with ", length(h), " sites, block size = ",
+		size(h[1], 1), "×", size(h[1], 2))
+end
+
+# sparse-tensor virtual-space queries (block rows / columns)
+space_l(W::AbstractSparseMPOTensor) = size(W, 1)
+space_r(W::AbstractSparseMPOTensor) = size(W, 2)
+
+# finite-chain channel convention: the left boundary vector selects the vacuum channel
+# (row 1), the right boundary the closing channel (last column for Schur form, column 1
+# for the evolved W-form SparseMPOTensor), matching tompotensors' row/col selection.
+_leftrow(::MPOHamiltonian) = 1
+_rightcol(h::MPOHamiltonian{<:SchurMPOTensor}) = size(h[end], 2)
+_rightcol(h::MPOHamiltonian{<:SparseMPOTensor}) = 1
+
+function l_LL(ψA::AbstractMPS, h::MPOHamiltonian, ψB::AbstractMPS)
+	T = promote_type(scalartype(ψA), scalartype(h), scalartype(ψB))
+	v = zeros(T, space_l(ψA), space_l(h), space_l(ψB))
+	v[:, _leftrow(h), :] .= one(T)
+	return v
+end
+function r_RR(ψA::AbstractMPS, h::MPOHamiltonian, ψB::AbstractMPS)
+	T = promote_type(scalartype(ψA), scalartype(h), scalartype(ψB))
+	v = zeros(T, space_r(ψA), space_r(h), space_r(ψB))
+	v[:, _rightcol(h), :] .= one(T)
+	return v
+end
+
+# ---------- sparse -> dense conversion (ported from TEMPO def.jl) ----------
+
+"""
+	tompotensors(h::MPOHamiltonian{<:SchurMPOTensor})
+	tompotensors(h::MPOHamiltonian{<:SparseMPOTensor}; rowl=1, colr=1)
+
+Convert an `MPOHamiltonian` to the list of dense 4-index site tensors of a finite
+[`MPO`](@ref). `rowl`/`colr` select the row/column kept at the first/last site
+(Schur form defaults to `rowl = 1`, `colr = last`).
+"""
+tompotensors(h::MPOHamiltonian{<:SchurMPOTensor}) = _tompotensors(h, 1, size(h[end], 2))
+tompotensors(h::MPOHamiltonian{<:SparseMPOTensor}; rowl::Int=1, colr::Int=1) =
+	_tompotensors(h, rowl, colr)
+
+function _tompotensors(h::MPOHamiltonian, leftrow::Int, rightcol::Int)
+	L = length(h)
+	(L >= 2) || throw(ArgumentError("size of MPO must at least be 2"))
+	T = scalartype(h)
+	mpotensors = Vector{Array{T,4}}(undef, L)
+	dj = phydim(h[1])
+	tmp = zeros(T, 1, dj, size(h[1], 2), dj)
+	for i in 1:size(h[1], 2)
+		tmp[1, :, i, :] = h[1, leftrow, i]
+	end
+	mpotensors[1] = tmp
+	for n in 2:L-1
+		mpotensors[n] = tompotensor(h[n])
+	end
+	dj = phydim(h[L])
+	tmp = zeros(T, size(h[L], 1), dj, 1, dj)
+	for i in 1:size(h[L], 1)
+		tmp[i, :, 1, :] = h[L, i, rightcol]
+	end
+	mpotensors[L] = tmp
+	return mpotensors
+end
+
+function tompotensor(h::AbstractSparseMPOTensor)
+	T = scalartype(h)
+	dj = phydim(h)
+	sl, sr = size(h)
+	tmp = zeros(T, sl, dj, sr, dj)
+	for i in 1:sl, j in 1:sr
+		tmp[i, :, j, :] = h[i, j]
+	end
+	return tmp
+end
+
+# ---------- term-based Schur-form construction ----------
+
+"""
+	MPOHamiltonian(L::Int, terms::OpTerm...)
+	MPOHamiltonian(terms::OpSum)
+
+Assemble the Schur-form (Jordan upper-triangular) MPO Hamiltonian from the product
+terms `terms` (given individually for `L` sites, or as a validated
+[`OpSum`](@ref)). Each multi-site term gets its own private chain of channels (one
+per partially-completed operator string): logical channel 1 is the vacuum identity and
+the last channel the closing identity; on-site terms accumulate in the `D` corner block.
+Site tensors are built directly in the `A`/`B`/`C`/`D` block storage: interior sites
+are square `n×n` Jordan blocks, the first site keeps the vacuum row (`1×n`) and the
+last site the closing column (`n×1`).
+"""
+MPOHamiltonian(terms::OpSum) = _mpohamiltonian_from_terms(length(terms.ds), terms.data)
+MPOHamiltonian(L::Int, terms::OpTerm...) = _mpohamiltonian_from_terms(L, collect(terms))
+function _mpohamiltonian_from_terms(L::Int, terms::AbstractVector{<:OpTerm})
+	isempty(terms) && throw(ArgumentError("no terms given"))
+	for t in terms
+		all(1 .<= t.positions .<= L) || throw(ArgumentError("term positions out of range"))
+	end
+	d = size(terms[1].operators[1], 1)
+	for t in terms
+		(size(t.operators[1], 1) == d) || throw(DimensionMismatch("inconsistent physical dimensions"))
+	end
+	# a single scalar type across all sites (terms may mix real and complex operators)
+	T = Float64
+	for t in terms
+		T = promote_type(T, typeof(t.coeff))
+		for op in t.operators
+			T = promote_type(T, scalartype(op))
+		end
+	end
+
+	# per-term channel allocation: term a with n_a operators occupies interior channels
+	# bases[a] : bases[a]+n_a-2 (one per partially applied string); logical channels
+	# 1 = vacuum and n = done are the implicit identity corners
+	bases = Vector{Int}(undef, length(terms))
+	nextch = 1
+	for (a, t) in enumerate(terms)
+		bases[a] = nextch + 1
+		nextch += length(t.positions) - 1
+	end
+	n = nextch + 1
+
+	tensors = Vector{SchurMPOTensor{Matrix{T}, T}}(undef, L)
+	for s in 1:L
+		# logical shape: the first site loses the closing row, the last site the vacuum column
+		ml = s == 1 ? 1 : n
+		nr = s == L ? 1 : n
+		W = SchurMPOTensor{Matrix{T}, T}(d, (ml, nr))
+		D = getfield(W, :D)
+		# terms may carry a narrower scalar type than the unified Hamiltonian type T
+		asM = v -> convert(Matrix{T}, v)
+		for (a, t) in enumerate(terms)
+			nt = length(t.positions)
+			j = findfirst(==(s), t.positions)
+			if j === nothing
+				# idle propagation of a started string across a gap: an identity on the
+				# interior block diagonal
+				for k in 1:nt-1
+					if t.positions[k] < s < t.positions[k+1]
+						li = bases[a] + k - 2
+						W.A[li, li] = _add_block(W.A[li, li], one(T))
+					end
+				end
+			elseif nt == 1
+				# on-site term: vacuum -> closing corner
+				D[] = _add_block(D[], asM(t.coeff * t.operators[1]))
+			elseif j == 1
+				# string start: vacuum -> interior
+				li = bases[a] - 1
+				W.C[li] = _add_block(W.C[li], asM(t.coeff * t.operators[1]))
+			elseif j == nt
+				# string end: interior -> closing
+				li = bases[a] + nt - 3
+				W.B[li] = _add_block(W.B[li], asM(t.operators[end]))
+			else
+				# interior transition of the string
+				r = bases[a] + j - 3
+				c = bases[a] + j - 2
+				W.A[r, c] = _add_block(W.A[r, c], asM(t.operators[j]))
+			end
+		end
+		tensors[s] = W
+	end
+	return MPOHamiltonian(tensors)
+end
+
+_add_block(old, v) = (old == 0) ? v : (isa(old, Number) ? old * isometry(scalartype(v), size(v, 1)) : old) + v
+
+# backward-compatible alias (block-sparse MPO is the only MPO Hamiltonian form)
+const SparseMPOHamiltonian = MPOHamiltonian

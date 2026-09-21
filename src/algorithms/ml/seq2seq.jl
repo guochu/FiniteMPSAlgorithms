@@ -1,0 +1,356 @@
+# seq2seq: variational (DMRG-style ALS) fitting of an MPO to a dataset of MPS pairs,
+# following guochu/MPSLearning.jl's `OptimizeMPO`. Given training pairs {(x_n, y_n)},
+# find a finite-bond MPO W (input dims = dims of x, output dims = dims of y) minimizing
+#   F(W) = Σ_n ||W·x_n − y_n||² + alpha·||W||²_HS
+# by single-site ALS sweeps. Three environment stacks are swept simultaneously:
+#   hstorage[n]: ⟨x_n|W†(·)W|x_n⟩  quadratic stack (axes: xL_bra, W-bra, W-ket, xL_ket)
+#   bstorage[n]: ⟨x_n|W†(·)|y_n⟩   linear stack    (axes: xL, W-bond, yL)
+#   gstorage:    ⟨W|(·)⟩_HS        ridge stack    (axes: W-bra, W-ket)
+# At each site the local normal equation (Σ_n H_n + alpha·R)·w = Σ_n t_n is solved
+# densely; the gauge is moved by QR/LQ and the stacks are incremented. Every per-site
+# loss is the exact global data objective Σ_n||W·x_n − y_n||²/N at that point of the
+# sweep (the ridge regularizes the solve but is not part of the reported loss).
+
+# ---------- environment transfer primitives ----------
+# Site tensors: W[aL, po, aR, pi] (po = output/y side, pi = input/x side), x/y[aL, p, aR].
+
+"""
+	_h_updateleft(::Array{<:Any,4}, W, x) -> h′
+
+⟨x|W†W|x⟩ left transfer; `h` axes (xL_bra, W-bra, W-ket, xL_ket). The physical deltas
+(W†·po ↔ W·po, W†·pi ↔ conj(x)·p, W·pi ↔ x·p) are contracted inside.
+"""
+function _h_updateleft(hold::AbstractArray{T,4}, W::MPOTensor, x::MPSTensor) where {T}
+	@tensor hnew[-1, -2, -3, -4] :=
+		conj(x[1, 5, -1]) * conj(W[2, 8, -2, 5]) * hold[1, 2, 3, 4] * W[3, 8, -3, 7] * x[4, 7, -4]
+	return hnew
+end
+
+function _h_updateright(hold::AbstractArray{T,4}, W::MPOTensor, x::MPSTensor) where {T}
+	@tensor hnew[-1, -2, -3, -4] :=
+		conj(x[-1, 6, 1]) * conj(W[-2, 5, 2, 6]) * hold[1, 2, 3, 4] * W[-3, 5, 3, 7] * x[-4, 7, 4]
+	return hnew
+end
+
+# the ⟨x|W†|y⟩ linear transfers (`_b_updateleft` / `_b_updateright`) are shared with linsolve.jl
+
+"""
+	_g_updateleft(::Array{<:Any,2}, W) -> g′
+
+Hilbert-Schmidt ridge ⟨W|W⟩ left transfer; `g` axes (W-bra, W-ket).
+"""
+function _g_updateleft(hold::AbstractArray{T,2}, W::MPOTensor) where {T}
+	@tensor gnew[-1, -2] := conj(W[1, 3, -1, 4]) * hold[1, 2] * W[2, 3, -2, 4]
+	return gnew
+end
+
+function _g_updateright(hold::AbstractArray{T,2}, W::MPOTensor) where {T}
+	@tensor gnew[-1, -2] := conj(W[-1, 3, 1, 4]) * hold[1, 2] * W[-2, 3, 2, 4]
+	return gnew
+end
+
+# ---------- ALS cache ----------
+
+"""
+Seq2SeqCache: ALS problem carrier for [`seq2seq`](@ref) — fit W minimizing
+Σ_n ||W·x_n − y_n||² (+ alpha·||W||²_HS ridge on the local solves) with single-site
+sweeps over the three (quadratic / linear / ridge) environment stacks.
+"""
+struct Seq2SeqCache{O, X, Y, T}
+	H::O                                 # the variational MPO (mutated in place)
+	kets::Vector{X}                      # folded inputs  (scaling = 1)
+	bras::Vector{Y}                      # folded targets (scaling = 1)
+	hstorage::Vector{Vector{Array{T,4}}}
+	bstorage::Vector{Vector{Array{T,3}}}
+	gstorage::Vector{Array{T,2}}
+	alpha::Float64
+	ynorm::Float64
+end
+
+function _updateleft!(m::Seq2SeqCache, s)
+	W = m.H[s]
+	for n in eachindex(m.kets)
+		m.hstorage[n][s+1] = _h_updateleft(m.hstorage[n][s], W, m.kets[n][s])
+		m.bstorage[n][s+1] = _b_updateleft(m.bstorage[n][s], m.kets[n][s], W, m.bras[n][s])
+	end
+	m.gstorage[s+1] = _g_updateleft(m.gstorage[s], W)
+	return m
+end
+
+function _updateright!(m::Seq2SeqCache, s)
+	W = m.H[s]
+	for n in eachindex(m.kets)
+		m.hstorage[n][s] = _h_updateright(m.hstorage[n][s+1], W, m.kets[n][s])
+		m.bstorage[n][s] = _b_updateright(m.bstorage[n][s+1], m.kets[n][s], W, m.bras[n][s])
+	end
+	m.gstorage[s] = _g_updateright(m.gstorage[s+1], W)
+	return m
+end
+
+function _init_storages_right!(m::Seq2SeqCache)
+	L = length(m.H)
+	T = scalartype(m.H)
+	m.gstorage[1] = ones(T, 1, 1)
+	m.gstorage[L+1] = ones(T, 1, 1)
+	for n in eachindex(m.kets)
+		m.hstorage[n][1] = ones(T, 1, 1, 1, 1)
+		m.hstorage[n][L+1] = ones(T, 1, 1, 1, 1)
+		m.bstorage[n][1] = ones(T, 1, 1, 1)
+		m.bstorage[n][L+1] = ones(T, 1, 1, 1)
+	end
+	for s in L:-1:2
+		for n in eachindex(m.kets)
+			m.hstorage[n][s] = _h_updateright(m.hstorage[n][s+1], m.H[s], m.kets[n][s])
+			m.bstorage[n][s] = _b_updateright(m.bstorage[n][s+1], m.kets[n][s], m.H[s], m.bras[n][s])
+		end
+		m.gstorage[s] = _g_updateright(m.gstorage[s+1], m.H[s])
+	end
+	return m
+end
+
+# ---------- local normal equation at one site ----------
+
+# dense local Hessian: H[((aLb, po, aRb, piB)], [(aLk, po, aRk, piK)]) summed over samples;
+# the output physical po is diagonal (the W†W delta), so the kernel is built once per
+# sample and placed into the (po, po) diagonal blocks of the flattened matrix
+function _h_matrix!(Hmat::AbstractMatrix{T}, m::Seq2SeqCache, s) where {T}
+	fill!(Hmat, zero(T))
+	lL, dy, lR, dx = size(m.H[s])
+	H4 = reshape(Hmat, lL, dy, lR, dx, lL, dy, lR, dx)
+	for n in eachindex(m.kets)
+		x = m.kets[n][s]
+		@tensor Kkern[aLb, piB, aRb, aLk, piK, aRk] :=
+			m.hstorage[n][s][xLb, aLb, aLk, xLk] * m.hstorage[n][s+1][xRb, aRb, aRk, xRk] *
+			conj(x[xLb, piB, xRb]) * x[xLk, piK, xRk]
+		Kp = permutedims(Kkern, (1, 3, 2, 4, 6, 5))   # (aLb, aRb, piB, aLk, aRk, piK)
+		for po in 1:dy
+			@views H4[:, po, :, :, :, po, :, :] .+= Kp
+		end
+	end
+	return Hmat
+end
+
+# dense local ridge matrix alpha·R (identity on the physical legs, weighted by the HS
+# environments) added on top of the data Hessian
+function _add_ridge!(Hmat::AbstractMatrix{T}, m::Seq2SeqCache, s) where {T}
+	(m.alpha == 0) && return Hmat
+	lL, dy, lR, dx = size(m.H[s])
+	H4 = reshape(Hmat, lL, dy, lR, dx, lL, dy, lR, dx)
+	Og = reshape(m.gstorage[s], lL, 1, lL, 1) .* reshape(m.gstorage[s+1], 1, lR, 1, lR)
+	for po in 1:dy, pi in 1:dx
+		@views H4[:, po, :, pi, :, po, :, pi] .+= m.alpha .* Og
+	end
+	return Hmat
+end
+
+# t[aL, po, aR, pi]: local linear functional Σ_n ⟨x_n|W†|y_n⟩ with W's leg order
+function _b_target_sum(m::Seq2SeqCache, s)
+	W = m.H[s]
+	t = zeros(scalartype(W), size(W))
+	for n in eachindex(m.kets)
+		t .+= _w_target(m.kets[n][s], m.bras[n][s], m.bstorage[n][s], m.bstorage[n][s+1])
+	end
+	return t
+end
+
+# linear target of one sample at site `s`: the coefficient of conj(W[aL, po, aR, pi]) in
+# ⟨x|W†|y⟩, from the left env bL (xL_bra, aL_bra, yL) and right env bR (xR_bra, aR_bra, yR)
+function _w_target(x::MPSTensor, y::MPSTensor,
+				   bL::AbstractArray{T,3}, bR::AbstractArray{T,3}) where {T}
+	@tensor t[-1, -2, -3, -4] :=
+		bL[1, -1, 2] * conj(x[1, -4, 3]) * y[2, -2, 4] * bR[3, -3, 4]
+	return t
+end
+
+function _site_solve(m::Seq2SeqCache, s)
+	W = m.H[s]
+	d = prod(size(W))
+	Hdata = _h_matrix!(zeros(scalartype(W), d, d), m, s)
+	t = _b_target_sum(m, s)
+	Hsolve = copy(Hdata)
+	_add_ridge!(Hsolve, m, s)
+	w = reshape(Hsolve \ vec(t), size(W))
+	return w, t, Hdata
+end
+
+# exact global data objective Σ_n ||W·x_n − y_n||² / N, evaluated from the local
+# decomposition at site `s` with the updated tensor `w` (ridge excluded)
+function _site_loss(m::Seq2SeqCache, s, w::MPOTensor, t, Hmat::AbstractMatrix)
+	vw = vec(w)
+	q = real(dot(vw, Hmat * vw))
+	return (q - 2 * real(dot(vw, vec(t))) + m.ynorm) / length(m.kets)
+end
+
+# ---------- ALS sweeps ----------
+
+"""
+	leftsweep!(m::Seq2SeqCache, alg) -> kvals
+
+One left-to-right ALS sweep: at each site the local normal equation is solved densely,
+the chain is moved by QR and all three environment stacks are incremented. `kvals`
+collects the exact global data objective after every site update.
+"""
+function leftsweep!(m::Seq2SeqCache, alg::DMRGAlgorithm)
+	L = length(m.H)
+	kvals = zeros(Float64, L)
+	for s in 1:L-1
+		w, t, Hmat = _site_solve(m, s)
+		kvals[s] = _site_loss(m, s, w, t, Hmat)
+		q, r = _gauge_left(w)
+		m.H[s] = q
+		m.H[s+1] = _contract_first(m.H[s+1], r)
+		_updateleft!(m, s)
+	end
+	w, t, Hmat = _site_solve(m, L)
+	kvals[L] = _site_loss(m, L, w, t, Hmat)
+	m.H[L] = w
+	return kvals
+end
+
+"""
+	rightsweep!(m::Seq2SeqCache, alg) -> kvals
+
+One right-to-left ALS sweep (symmetric, LQ gauge moves). `kvals` is ordered by processing
+time (sites `L, L-1, …, 1`); the losses are non-increasing.
+"""
+function rightsweep!(m::Seq2SeqCache, alg::DMRGAlgorithm)
+	L = length(m.H)
+	kvals = zeros(Float64, L)
+	k = 1
+	for s in L:-1:2
+		w, t, Hmat = _site_solve(m, s)
+		kvals[k] = _site_loss(m, s, w, t, Hmat)
+		k += 1
+		l, q = _gauge_right(w)
+		m.H[s] = q
+		m.H[s-1] = _contract_last(m.H[s-1], l)
+		_updateright!(m, s)
+	end
+	w, t, Hmat = _site_solve(m, 1)
+	kvals[L] = _site_loss(m, 1, w, t, Hmat)
+	m.H[1] = w
+	return kvals
+end
+
+sweep!(m::Seq2SeqCache, alg::DMRGAlgorithm) = vcat(leftsweep!(m, alg), rightsweep!(m, alg))
+
+# ---------- initial guess ----------
+
+# random MPO with input dims `dxs` / output dims `dys` and the capped bond profile
+function _random_seq2seq_mpo(::Type{T}, dxs::AbstractVector{Int},
+							 dys::AbstractVector{Int}, D::Int) where {T<:Number}
+	L = length(dxs)
+	prof = max_bonddims([dxs[i] * dys[i] for i in 1:L], D)
+	data = Vector{Array{T,4}}(undef, L)
+	for i in 1:L
+		dl = i == 1 ? 1 : prof[i]
+		dr = i == L ? 1 : prof[i+1]
+		# small entries: the ALS local solves converge globally from a near-zero guess,
+		# while full-size random starts can trap the sweeps in local minima
+		data[i] = 0.1 .* randn(T, dl, dys[i], dr, dxs[i])
+	end
+	return MPO(data)
+end
+
+# ---------- validation and driver ----------
+
+function _validate_seq2seq(xs::Vector{<:CanonicalMPS}, ys::Vector{<:CanonicalMPS})
+	(isempty(xs) || length(xs) != length(ys)) &&
+		throw(DimensionMismatch("numbers of x and y must match and be nonzero"))
+	L = length(xs[1])
+	(L >= 2) || throw(ArgumentError("seq2seq requires at least 2 sites"))
+	dxs = phydims(xs[1])
+	dys = phydims(ys[1])
+	for n in eachindex(xs)
+		(length(xs[n]) == L && length(ys[n]) == L) ||
+			throw(DimensionMismatch("all x and y must have the same length"))
+		(phydims(xs[n]) == dxs) ||
+			throw(DimensionMismatch("all x must have the same physical dimensions"))
+		(phydims(ys[n]) == dys) ||
+			throw(DimensionMismatch("all y must have the same physical dimensions"))
+	end
+	return dxs, dys
+end
+
+# fold a chain's per-site scaling into every site tensor: bounded per site (a scaling^L
+# power is never materialized) and the represented chains are unchanged
+function _fold_scaling_sites(ψ::CanonicalMPS)
+	s = scaling(ψ)
+	(==(s, 1)) && return ψ
+	return CanonicalMPS([A * s for A in ψ.data]; scaling=one(s))
+end
+
+"""
+	init_seq2seqcache(xs, ys, alg::DMRG1; α=0.01, D=Defaults.D)
+
+Build the `Seq2SeqCache` of the seq2seq fit: validate the dataset, fold the per-site
+scalings of the inputs/targets into their site tensors and draw a random initial MPO
+of bond dimension `D`.
+"""
+function init_seq2seqcache(xs, ys, alg::DMRG1; α::Real=0.01, D::Int=Defaults.D)
+	dxs, dys = _validate_seq2seq(xs, ys)
+	T = promote_type(scalartype(xs[1]), scalartype(ys[1]))
+	ompo = _random_seq2seq_mpo(T, dxs, dys, D)
+	xsf = [_fold_scaling_sites(x) for x in xs]
+	ysf = [_fold_scaling_sites(y) for y in ys]
+	return Seq2SeqCache(ompo, xsf, ysf; α)
+end
+
+"""
+	Seq2SeqCache(H, kets, bras; α=0.01)
+
+Build the `Seq2SeqCache` of the seq2seq fit: allocate the per-sample h/b environment
+stacks, the ridge stack and the target norm, and initialize everything.
+"""
+function Seq2SeqCache(H::AbstractMPO, kets, bras; α::Real=0.01)
+	T = scalartype(H)
+	m = Seq2SeqCache(H, kets, bras,
+					 [Vector{Array{T,4}}(undef, length(H) + 1) for _ in eachindex(kets)],
+					 [Vector{Array{T,3}}(undef, length(H) + 1) for _ in eachindex(kets)],
+					 Vector{Array{T,2}}(undef, length(H) + 1),
+					 Float64(α),
+					 sum(norm(bras[n])^2 for n in eachindex(bras)))
+	_init_storages_right!(m)
+	return m
+end
+
+"""
+	seq2seq(xs, ys, alg::DMRG1=DMRG1(); α=0.01, D=Defaults.D) -> (W, traj)
+
+Fit an MPO `W` to a dataset of MPS pairs `(xs[n], ys[n])` by DMRG (single-site ALS)
+sweeps, following guochu/MPSLearning.jl: minimize `Σ_n ||W·x_n − y_n||²`, with a
+Hilbert-Schmidt ridge `α·||W||²` added to the local solves for conditioning
+(the default `α = 0.01` follows MPSLearning; the ridge is not part of the
+reported loss). The input (output) physical dimensions of `W` match the dimensions
+of `xs` (`ys`), so rectangular maps `dx → dy` are supported. The initial guess is a
+random MPO of bond dimension `D`; the data scalings are folded into the site tensors
+at entry. `traj` collects the exact global data objective after every site update,
+grouped per sweep; each vector is in processing-time order (the left sweep sites
+`1:L`, the right sweep sites `L:-1:1`), so the losses are non-increasing; convergence
+follows the unified `iterative_compute!` criterion (relative difference of the last
+loss of two successive sweeps below `alg.tol`).
+"""
+function seq2seq(xs::Vector{<:CanonicalMPS}, ys::Vector{<:CanonicalMPS},
+				 alg::DMRG1=DMRG1(); α::Real=0.01, D::Int=Defaults.D)
+	dxs, dys = _validate_seq2seq(xs, ys)
+	ompo = _random_seq2seq_mpo(promote_type(scalartype(xs[1]), scalartype(ys[1])), dxs, dys, D)
+	traj = seq2seq!(ompo, xs, ys, alg; α)
+	return ompo, traj
+end
+
+"""
+	seq2seq!(W::AbstractMPO, xs, ys, alg::DMRG1=DMRG1(); α=0.01) -> traj
+
+In-place variant of [`seq2seq`](@ref): fit the provided MPO `W` to the dataset
+`(xs[n], ys[n])` (its site tensors are updated in place, so `W` doubles as the initial
+guess). The data scalings are folded into the site tensors at entry. Returns `traj`,
+the per-sweep loss history of `iterative_compute!`.
+"""
+function seq2seq!(W::AbstractMPO, xs::Vector{<:CanonicalMPS}, ys::Vector{<:CanonicalMPS},
+				  alg::DMRG1=DMRG1(); α::Real=0.01)
+	_validate_seq2seq(xs, ys)
+	xsf = [_fold_scaling_sites(x) for x in xs]
+	ysf = [_fold_scaling_sites(y) for y in ys]
+	m = Seq2SeqCache(W, xsf, ysf; α)
+	return iterative_compute!(m, alg)
+end

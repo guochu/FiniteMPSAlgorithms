@@ -1,0 +1,126 @@
+# linear algebra and exact (strict) algorithms for CanonicalMPS
+# NOTE the per-site scaling convention: total scaling = scaling^L
+
+# unconventioned transfer-chain contraction (scaling not included)
+function _dot(ψA::CanonicalMPS, ψB::CanonicalMPS)
+	(length(ψA) == length(ψB)) || throw(ArgumentError("dimension mismatch"))
+	hold = l_LL(ψA, ψB)
+	for i in 1:length(ψA)
+		hold = _updateleft(hold, ψA[i], ψB[i])
+	end
+	return tr(hold)
+end
+
+"""
+	LinearAlgebra.dot(ψA, ψB)
+
+Overlap `⟨ψA|ψB⟩`, including the per-site `scaling` factors (total = `(scalingA*scalingB)^L`).
+"""
+function LinearAlgebra.dot(ψA::CanonicalMPS, ψB::CanonicalMPS)
+	return _dot(ψA, ψB) * (scaling(ψA) * scaling(ψB))^length(ψA)
+end
+
+function LinearAlgebra.norm(ψ::CanonicalMPS)
+	a = real(_dot(ψ, ψ))
+	a = (abs(a) >= 1.0e-14) ? a : zero(a)
+	return sqrt(a) * scaling(ψ)^length(ψ)
+end
+
+function LinearAlgebra.lmul!(f::Number, ψ::CanonicalMPS)
+	isempty(ψ.data) && return ψ
+	ψ[1] *= f
+	_renormalize!(ψ, ψ[1], false)
+	return ψ
+end
+
+Base.:*(ψ::CanonicalMPS, f::Number) = lmul!(f, copy(ψ))
+Base.:*(f::Number, ψ::CanonicalMPS) = ψ * f
+Base.:/(ψ::CanonicalMPS, f::Number) = ψ * (1 / f)
+Base.:-(ψ::CanonicalMPS) = (-1) * ψ
+
+"""
+	Base.:*(h::AbstractMPO, ψ::CanonicalMPS) -> CanonicalMPS
+
+Exact (strict) application of the operator `h` to `ψ`: bond dimensions grow to `D_h·D_ψ`,
+no truncation. The `scaling` of `ψ` is carried over.
+"""
+function Base.:*(h::AbstractMPO, ψ::CanonicalMPS)
+	(length(h) == length(ψ)) || throw(ArgumentError("dimension mismatch"))
+	T = promote_type(scalartype(h), scalartype(ψ))
+	data = Vector{Array{T,3}}(undef, length(ψ))
+	for i in 1:length(ψ)
+		W = h[i]
+		A = ψ[i]
+		@tensor r[aL, po, aR, bL, bR] := W[aL, po, aR, pin] * A[bL, pin, bR]
+		data[i] = tie(permute(r, (1, 4, 2, 3, 5)), (2, 1, 2))
+	end
+	return CanonicalMPS(data; scaling=scaling(ψ))
+end
+
+"""
+Base.:+(x::CanonicalMPS, y::CanonicalMPS) -> CanonicalMPS
+
+Exact (strict) sum as a block-diagonal direct product (no truncation); the `scaling` of both
+summands is folded into the data and the result has `scaling = 1`.
+"""
+function Base.:+(x::CanonicalMPS, y::CanonicalMPS)
+	(length(x) == length(y)) || throw(DimensionMismatch())
+	scaling_x = scaling(x)
+	scaling_y = scaling(y)
+	L = length(x)
+	T = promote_type(scalartype(x), scalartype(y))
+	r = Vector{Array{T,3}}(undef, L)
+	r[1] = cat(scaling_x * x[1], scaling_y * y[1]; dims=3)
+	r[L] = cat(scaling_x * x[L], scaling_y * y[L]; dims=1)
+	for i in 2:L-1
+		r[i] = cat(scaling_x * x[i], scaling_y * y[i]; dims=(1, 3))
+	end
+	return CanonicalMPS{T, real(T)}(r)
+end
+Base.:-(x::CanonicalMPS, y::CanonicalMPS) = x + (-y)
+
+"""
+	⊙(ψA::CanonicalMPS, ψB::CanonicalMPS) -> CanonicalMPS
+
+Exact (strict) element-wise (Hadamard) product of two MPS: the amplitudes of the result
+are the pointwise product `χ(i₁,…,i_L) = ψA(i₁,…,i_L)·ψB(i₁,…,i_L)`. The physical index is
+shared and the bond indices are fused pairwise, so the bond dimensions multiply
+(`D_χ = D_ψA·D_ψB`); no truncation or re-canonicalization is performed. The per-site
+`scaling` of the result is `scaling(ψA)·scaling(ψB)`.
+
+The compressed (finite-bond) approximation is obtained via [`hadamard`](@ref).
+"""
+function ⊙(ψA::CanonicalMPS, ψB::CanonicalMPS)
+	(length(ψA) == length(ψB)) || throw(DimensionMismatch("lengths must match"))
+	(phydims(ψA) == phydims(ψB)) ||
+		throw(DimensionMismatch("physical dimensions must match"))
+	T = promote_type(scalartype(ψA), scalartype(ψB))
+	data = Vector{Array{T,3}}(undef, length(ψA))
+	for i in 1:length(ψA)
+		A = ψA[i]   # (aL, p, aR)
+		B = ψB[i]   # (bL, p, bR)
+		# insert singleton bond axes (no axis reorder, so plain reshape is safe);
+		# broadcasting aligns the shared physical axis p at dim 3
+		r = reshape(A, size(A, 1), 1, size(A, 2), size(A, 3), 1) .*
+			reshape(B, 1, size(B, 1), size(B, 2), 1, size(B, 3))
+		# r: (aL, bL, p, aR, bR); fuse the pairwise bond indices
+		data[i] = tie(r, (2, 1, 2))
+	end
+	return CanonicalMPS(data; scaling=scaling(ψA) * scaling(ψB))
+end
+
+"""
+	distance(ψA, ψB)
+	distance2(ψA, ψB)
+
+Distance between two states, based on overlaps and including `scaling` factors.
+"""
+function _distance2(ψA::CanonicalMPS, ψB::CanonicalMPS)
+	sA = real(dot(ψA, ψA))
+	sB = real(dot(ψB, ψB))
+	c = dot(ψA, ψB)
+	return abs(sA + sB - 2 * real(c))
+end
+_distance(ψA::CanonicalMPS, ψB::CanonicalMPS) = sqrt(_distance2(ψA, ψB))
+distance(ψA::CanonicalMPS, ψB::CanonicalMPS) = _distance(ψA, ψB)
+distance2(ψA::CanonicalMPS, ψB::CanonicalMPS) = _distance2(ψA, ψB)
