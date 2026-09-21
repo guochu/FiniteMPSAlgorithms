@@ -1,6 +1,6 @@
 # OverlapCache: the generic "problem" carrier of all iterative (ALS) algorithms;
-# bra is the side to be optimized, ket the fixed input side (brought to
-# right-canonical form upon construction); cstorage[s] = ⟨bra[1:s-1]|ket[1:s-1]⟩ :: Matrix
+# bra is the side to be optimized, ket the fixed input side (trusted as provided:
+# a right-canonical guess is the caller's contract); cstorage[s] = ⟨bra[1:s-1]|ket[1:s-1]⟩ :: Matrix
 
 struct OverlapCache{A, B, T}
 	bra::A
@@ -10,33 +10,31 @@ end
 
 function OverlapCache(ψA::CanonicalMPS, ψB::CanonicalMPS)
 	(length(ψA) == length(ψB)) || throw(ArgumentError("dimension mismatch"))
-	B = copy(ψB)
-	rightorth!(B)
+	# bra is the optimized side: reset its Schmidt values (sweeps never touch them)
+	unset_svectors!(ψA)
 	L = length(ψB)
 	T = promote_type(scalartype(ψA), scalartype(ψB))
 	cs = Vector{Matrix{T}}(undef, L + 1)
 	cs[1] = ones(T, 1, 1)
 	cs[L+1] = ones(T, 1, 1)
 	for s in L:-1:2
-		cs[s] = _updateright(cs[s+1], ψA[s], B[s])
+		cs[s] = _updateright(cs[s+1], ψA[s], ψB[s])
 	end
-	return OverlapCache(ψA, B, cs)
+	return OverlapCache(ψA, ψB, cs)
 end
 
 function OverlapCache(hA::AbstractMPO, hB::AbstractMPO)
 	(length(hA) == length(hB)) || throw(ArgumentError("dimension mismatch"))
-	B = copy(hB)
-	# right-gauge the working ket (plain MPO chains are gauged only internally)
-	_rightorth!(B, SVD(), DefaultTruncation, false, 0)
+	hA isa CanonicalMPO && unset_svectors!(hA)
 	L = length(hB)
 	T = promote_type(scalartype(hA), scalartype(hB))
 	cs = Vector{Matrix{T}}(undef, L + 1)
 	cs[1] = ones(T, 1, 1)
 	cs[L+1] = ones(T, 1, 1)
 	for s in L:-1:2
-		cs[s] = _updateright(cs[s+1], hA[s], B[s])
+		cs[s] = _updateright(cs[s+1], hA[s], hB[s])
 	end
-	return OverlapCache(hA, B, cs)
+	return OverlapCache(hA, hB, cs)
 end
 
 """

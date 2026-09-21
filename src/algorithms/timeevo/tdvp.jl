@@ -1,21 +1,12 @@
 # TDVP1: single-site time-dependent variational principle, reusing the sweep interface.
-# One `sweep!(env, alg::TDVP1)` advances the state by `alg.stepsize` (Strang splitting:
+# One `sweep!(env, alg)` advances the state by `alg.stepsize` (Strang splitting:
 # left half-step + right half-step). `stepsize = -im*τ` gives imaginary-time evolution.
 #
 # Bond-tensor updates follow MPSKit's `C_hamiltonian`: both environments entering the
 # bond effective Hamiltonian are anchored at the *same* MPO bond (the bond where the
-# center tensor lives). The sweeps therefore keep the environment center at the sweep
-# start side and fold the neighboring site into the on-the-fly opposite environment.
-
-# rebuild the environment stack with the center at the given position
-function _retarget_center!(env::DMRGCache, center::Integer)
-	if env.center[] != center
-		fresh = DMRGCache(env.H, env.ket; center)
-		copy!(env.hstorage, fresh.hstorage)
-		env.center[] = center
-	end
-	return env
-end
+# center tensor lives). The left half-step starts from the left edge (right environments
+# precomputed by the cache), the right half-step from the right edge — the sweeps keep
+# the mixed canonical form throughout.
 
 """
 	TDVP1(; stepsize, D=Defaults.D, ishermitian=true, verbosity=Defaults.verbosity)
@@ -40,7 +31,6 @@ both environments anchored at the bond).
 """
 function leftsweep!(env::DMRGCache, alg::TDVP1)
 	L = length(env.ket)
-	_retarget_center!(env, 1)
 	dt = alg.stepsize
 	t = -im * dt / 2
 	for s in 1:L-1
@@ -72,7 +62,6 @@ Right half of one TDVP1 time step (symmetric to `leftsweep!`).
 """
 function rightsweep!(env::DMRGCache, alg::TDVP1)
 	L = length(env.ket)
-	_retarget_center!(env, L)
 	dt = alg.stepsize
 	t = -im * dt / 2
 	for s in L:-1:2

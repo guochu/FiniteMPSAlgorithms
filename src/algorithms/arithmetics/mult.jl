@@ -101,9 +101,6 @@ _mult_rightbound(m, T) = m.H isa MPOHamiltonian ? r_RR(m.bra, m.H, m.ket) : ones
 
 function _init_hstorage_right!(m::MultCache)
 	L = length(m.bra)
-	# right-gauge the working bra (plain MPO chains are gauged only internally);
-	# normalize=true keeps the scale in the data instead of a `scaling` field
-	_rightorth!(m.bra, SVD(), DefaultTruncation, true, 0)
 	T = scalartype(m.bra)
 	m.hstorage[1] = _mult_leftbound(m, T)
 	m.hstorage[L+1] = _mult_rightbound(m, T)
@@ -130,11 +127,6 @@ function leftsweep!(m::MultCache, alg::DMRG1)
 		mpsj = _reduce_site(m.ket[s], m.H[s], m.hstorage[s], m.hstorage[s+1])
 		kvals[s] = norm(mpsj)
 		q, r = _gauge_left(mpsj)
-		# normalize the gauge factor: ALS determines only the direction; leaving the
-		# scale on `r` makes the chain norm grow geometrically over the sweep and the
-		# environments numerically degenerate. The scale is restored once at the end.
-		rn = norm(r)
-		rn == 0 || (r /= rn)
 		m.bra[s] = q
 		m.bra[s+1] = _contract_first(m.bra[s+1], r)
 		_env_updateleft!(m, s)
@@ -160,8 +152,6 @@ function rightsweep!(m::MultCache, alg::DMRG1)
 		kvals[k] = norm(mpsj)
 		k += 1
 		l, q = _gauge_right(mpsj)
-		ln = norm(l)
-		ln == 0 || (l /= ln)
 		m.bra[s] = q
 		m.bra[s-1] = _contract_last(m.bra[s-1], l)
 		_env_updateright!(m, s)
@@ -272,6 +262,9 @@ function MultCache(h, x, bra)
 	T = promote_type(scalartype(h), scalartype(x))
 	cache = MultCache(h, x, bra, Vector{Array{T,3}}(undef, length(x) + 1))
 	_init_hstorage_right!(cache)
+	# the init gauging rewrites the Schmidt values, and the sweeps never touch them:
+	# reset them so "initialized" always implies "properly canonical"
+	unset_svectors!(bra)
 	return cache
 end
 
@@ -286,6 +279,10 @@ power is never materialized.
 """
 function mult!(out, h, x, alg::DMRG1)
 	bonddim(out) != alg.D && changebond!(out; D=alg.D)
+	# the ALS gauge factors fix the direction of the update only: the working bra is
+	# brought to unit norm (right-canonical + absorbed spectrum) so the sweeps stay
+	# numerically controlled; the physical scale is restored through `scaling` below
+	_rightorth!(out, SVD(), DefaultTruncation, true, 0)
 	cache = MultCache(h, x, out)
 	iterative_compute!(cache, alg)
 	s = _opscaling(h) * _opscaling(x)

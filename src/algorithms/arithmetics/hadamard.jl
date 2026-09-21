@@ -66,9 +66,6 @@ _env_updateright!(m::HadamardCache, s) =
 
 function _init_hstorage_right!(m::HadamardCache)
 	L = length(m.bra)
-	# data-level right-orthogonalization (normalize=true keeps the scale out of the
-	# `scaling` field, matching mult's initialization)
-	_rightorth!(m.bra, SVD(), DefaultTruncation, true, 0)
 	T = scalartype(m.bra)
 	m.hstorage[1] = ones(T, 1, 1, 1)
 	m.hstorage[L+1] = ones(T, 1, 1, 1)
@@ -92,10 +89,6 @@ function leftsweep!(m::HadamardCache, alg::DMRG1)
 		mpsj = _reduce_hadamard_site(m.ketx[s], m.kety[s], m.hstorage[s], m.hstorage[s+1])
 		kvals[s] = norm(mpsj)
 		q, r = _gauge_left(mpsj)
-		# normalize the gauge factor: the sweeps must stay at the data level so the
-		# per-site losses (and the final magnitude) do not drift
-		rn = norm(r)
-		rn == 0 || (r /= rn)
 		m.bra[s] = q
 		m.bra[s+1] = _contract_first(m.bra[s+1], r)
 		_env_updateleft!(m, s)
@@ -121,8 +114,6 @@ function rightsweep!(m::HadamardCache, alg::DMRG1)
 		kvals[k] = norm(mpsj)
 		k += 1
 		l, q = _gauge_right(mpsj)
-		ln = norm(l)
-		ln == 0 || (l /= ln)
 		m.bra[s] = q
 		m.bra[s-1] = _contract_last(m.bra[s-1], l)
 		_env_updateright!(m, s)
@@ -166,6 +157,9 @@ function HadamardCache(ketx, kety, bra)
 	T = scalartype(bra)
 	cache = HadamardCache(ketx, kety, bra, Vector{Array{T,3}}(undef, length(bra) + 1))
 	_init_hstorage_right!(cache)
+	# the init gauging rewrites the Schmidt values, and the sweeps never touch them:
+	# reset them so "initialized" always implies "properly canonical"
+	unset_svectors!(bra)
 	return cache
 end
 
@@ -180,6 +174,10 @@ scale is attached through the per-site `scaling` field, with the ⊙ convention
 """
 function hadamard!(χ, ψA, ψB, alg::DMRG1)
 	bonddim(χ) != alg.D && changebond!(χ; D=alg.D)
+	# the ALS gauge factors fix the direction of the update only: the working chain is
+	# brought to unit norm (right-canonical + absorbed spectrum) so the sweeps stay
+	# numerically controlled; the physical scale is restored through `scaling` below
+	_rightorth!(χ, SVD(), DefaultTruncation, true, 0)
 	cache = HadamardCache(ψA, ψB, χ)
 	iterative_compute!(cache, alg)
 	setscaling!(χ, scaling(ψA) * scaling(ψB))

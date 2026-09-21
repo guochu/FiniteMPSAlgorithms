@@ -41,12 +41,13 @@ end
 Build the `AddCache` of the iterative `add`: every per-input overlap environment
 (`OverlapCache`) is constructed and initialized here.
 """
-AddCache(bra, kets) = AddCache(bra, kets, [OverlapCache(bra, ψ) for ψ in kets])
+function AddCache(bra, kets)
+	unset_svectors!(bra)   # bra is optimized in place; sweeps never touch Schmidt values
+	return AddCache(bra, kets, [OverlapCache(bra, ψ) for ψ in kets])
+end
 
 function _init_hstorage_right!(m::AddCache)
 	L = length(m.bra)
-	# normalize=true keeps the scale in the data (no `scaling` drift during the sweeps)
-	rightorth!(m.bra; alg=Orthogonalize(SVD(), normalize=true))
 	for c in m.hstorage
 		T = scalartype(c.bra)
 		c.cstorage[1] = ones(T, 1, 1)

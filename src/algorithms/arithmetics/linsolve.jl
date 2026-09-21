@@ -93,7 +93,6 @@ _b_right!(m::LinsolveCache, s) =
 
 function _init_storages_right!(m::LinsolveCache)
 	L = length(m.ket)
-	rightorth!(m.ket)
 	T = scalartype(m.bra)
 	m.hstorage[1] = ones(T, 1, 1, 1, 1)
 	m.hstorage[L+1] = ones(T, 1, 1, 1, 1)
@@ -211,6 +210,9 @@ function LinsolveCache(A, y, x)
 					  Vector{Array{T,4}}(undef, length(y) + 1),
 					  Vector{Array{T,3}}(undef, length(y) + 1))
 	_init_storages_right!(m)
+	# the sweeps never touch Schmidt values: reset them so "initialized" always implies
+	# "properly canonical"
+	unset_svectors!(x)
 	return m
 end
 

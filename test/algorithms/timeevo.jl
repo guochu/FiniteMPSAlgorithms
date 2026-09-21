@@ -18,7 +18,6 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	nsteps = 10
 	alg = TDVP1(stepsize=dt)   # real stepsize = real time: one sweep of exp(-i H dt)
 	env = DMRGCache(H, ψ)
-	center = env.center[]
 	ψ_ref = todense(ψ)
 	for t in 1:nsteps
 		sweep!(env, alg)

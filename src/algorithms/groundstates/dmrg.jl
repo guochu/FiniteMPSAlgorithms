@@ -7,66 +7,63 @@ struct DMRGCache{M<:AbstractMPO, V<:CanonicalMPS, T}
 	H::M
 	ket::V
 	hstorage::Vector{Array{T,3}}
-	center::Base.RefValue{Int}
 end
 
 """
-	DMRGCache(h::AbstractMPO, ψ::CanonicalMPS; center=1) -> DMRGCache
+	DMRGCache(h::AbstractMPO, ψ::CanonicalMPS) -> DMRGCache
 
-Build the environment stack `⟨ψ|W|ψ⟩`: `hstorage[s]` is the environment of sites `1:s-1`,
-`hstorage[L+1]` the right boundary; the environments are exact on both sides of `center`.
-With the default `center=1` the right environments of all sites are precomputed (matching
-the left-to-right first sweep of DMRG1 / TDVP1).
+Build the environment stack `⟨ψ|W|ψ⟩` for a right-canonical guess `ψ`: `hstorage[1]` is
+the left boundary, `hstorage[L+1]` the right boundary, and the right environments of all
+sites are precomputed (matching the left-to-right first sweep of DMRG1 / TDVP1). One
+full sweep is `leftsweep!` (sites `1:L`, QR moves the orthogonality center right)
+followed by `rightsweep!` (sites `L:1`) — this order must not be exchanged.
 """
-function DMRGCache(h::AbstractMPO, ψ::CanonicalMPS; center::Integer=1)
+function DMRGCache(h::AbstractMPO, ψ::CanonicalMPS)
 	L = length(ψ)
 	T = promote_type(scalartype(h), scalartype(ψ))
+	# the sweeps keep the mixed canonical form of the data but never touch the Schmidt
+	# values: reset them on the guess, so "initialized" always implies "properly canonical"
+	unset_svectors!(ψ)
 	hs = Vector{Array{T,3}}(undef, L + 1)
 	hs[1] = l_LL(ψ, h, ψ)
 	hs[L+1] = r_RR(ψ, h, ψ)
-	for s in 1:center-1
-		hs[s+1] = _updateleft(hs[s], ψ[s], h[s], ψ[s])
-	end
-	for s in L:-1:center+1
+	for s in L:-1:2
 		hs[s] = _updateright(hs[s+1], ψ[s], h[s], ψ[s])
 	end
-	return DMRGCache(h, ψ, hs, Ref(Int(center)))
+	return DMRGCache(h, ψ, hs)
 end
 
 """
 	updateleft!(env, site)
 
-Update the left environment of site `site+1` from the environment at `site`; moves `center` to `site+1`.
+Update the left environment of site `site+1` from the environment at `site`; the
+orthogonality center moves to `site+1`.
 """
 function updateleft!(env::DMRGCache, site::Integer)
 	env.hstorage[site+1] = _updateleft(env.hstorage[site], env.ket[site], env.H[site], env.ket[site])
-	env.center[] = site + 1
 	return env
 end
 
 """
 	updateright!(env, site)
 
-Update the right environment of site `site-1` from the environment at `site`; moves `center` to `site-1`.
+Update the right environment of site `site-1` from the environment at `site`; the
+orthogonality center moves to `site-1`.
 """
 function updateright!(env::DMRGCache, site::Integer)
 	env.hstorage[site] = _updateright(env.hstorage[site+1], env.ket[site], env.H[site], env.ket[site])
-	env.center[] = site - 1
 	return env
 end
 
 """
-	recalculate!(env, ψ, center)
+	recalculate!(env, ψ)
 
-Attach a new state `ψ` and rebuild all environments up to `center`.
+Attach a new state `ψ` and rebuild all environments (right environments precomputed).
 """
-function recalculate!(env::DMRGCache, ψ::CanonicalMPS, center::Integer=length(ψ))
-	if ψ !== env.ket
-		copy!(env.ket, ψ)
-	end
-	fresh = DMRGCache(env.H, env.ket; center)
+function recalculate!(env::DMRGCache, ψ::CanonicalMPS)
+	ψ !== env.ket && copy!(env.ket, ψ)
+	fresh = DMRGCache(env.H, env.ket)
 	copy!(env.hstorage, fresh.hstorage)
-	env.center[] = Int(center)
 	return env
 end
 
@@ -78,8 +75,7 @@ then rebuild the environments.
 """
 function changebond!(env::DMRGCache; D::Int=Defaults.D)
 	changebond!(env.ket; D)
-	fresh = DMRGCache(env.H, env.ket; center=env.center[])
-	copy!(env.hstorage, fresh.hstorage)
+	recalculate!(env, env.ket)
 	return env
 end
 

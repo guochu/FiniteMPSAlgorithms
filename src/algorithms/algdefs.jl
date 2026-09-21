@@ -42,6 +42,10 @@ successive sweeps satisfies `|lₙ - lₙ₋₁| / |lₙ₋₁| < alg.tol` (or `
 reached). The per-site losses of a sweep are monotone in processing time, so the last
 value of a sweep is the best (most recently updated) loss and is comparable across
 sweeps. Returns `khist`, the loss history of every sweep.
+
+The sweeps keep the working data in mixed canonical form but never touch the Schmidt
+values; the cache constructors therefore reset them (`unset_svectors!`) on the working
+guess, so no stale spectrum can masquerade as a canonical gauge.
 """
 function iterative_compute!(cache, alg::DMRG1)
 	khist = Vector{Vector{Float64}}()

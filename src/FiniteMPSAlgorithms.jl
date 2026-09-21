@@ -3,8 +3,6 @@ module FiniteMPSAlgorithms
 using LinearAlgebra
 using LinearAlgebra: BlasFloat
 using Random
-using Statistics
-using Logging
 using TensorOperations
 import TensorOperations: scalartype
 using MatrixAlgebraKit: MatrixAlgebraKit, left_orth!, right_orth!, svd_compact!,

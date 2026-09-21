@@ -304,6 +304,9 @@ stacks, the ridge stack and the target norm, and initialize everything.
 """
 function Seq2SeqCache(H::AbstractMPO, kets, bras; α::Real=0.01)
 	T = scalartype(H)
+	# H is optimized in place; the sweeps never touch Schmidt values (a plain MPO has
+	# none at all), so reset them on the working guess
+	H isa CanonicalMPO && unset_svectors!(H)
 	m = Seq2SeqCache(H, kets, bras,
 					 [Vector{Array{T,4}}(undef, length(H) + 1) for _ in eachindex(kets)],
 					 [Vector{Array{T,3}}(undef, length(H) + 1) for _ in eachindex(kets)],

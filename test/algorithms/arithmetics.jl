@@ -225,9 +225,10 @@ end
 	env = DMRGCache(H, ψ)
 	@test env isa DMRGCache
 	@test length(env.hstorage) == L + 1
-	@test env.center[] == 1
 	@test env.H === H
 	@test env.ket === ψ
+	# the constructor resets the Schmidt values of the working guess
+	@test svectors_uninitialized(ψ)
 
 	# OverlapCache: MPS-MPS overlap environment
 	ψA = randommps(ComplexF64, ds; D=4)
@@ -253,9 +254,8 @@ end
 
 	# recalculate!: copy the new state into the cache's ket and rebuild environments
 	ψnew = randommps(ComplexF64, ds; D=8)
-	recalculate!(env, ψnew, 1)
+	recalculate!(env, ψnew)
 	@test env.ket.data == ψnew.data
-	@test env.center[] == 1
 
 	# in-place driver entry points (mult! / add! / linsolve!)
 	Hd = dense_model(p)

@@ -9,7 +9,6 @@ struct ExcitedStateCache{M<:AbstractMPO, V<:CanonicalMPS, P<:CanonicalMPS, T, OC
 	projectors::Vector{P}
 	hstorage::Vector{Array{T,3}}
 	cstorages::Vector{OC}
-	center::Base.RefValue{Int}
 end
 
 """
@@ -20,7 +19,7 @@ Environment cache for the excited-state search of `ψ`: one overlap cache per pr
 function ExcitedStateCache(h::AbstractMPO, ψ::CanonicalMPS, projectors::Vector{<:CanonicalMPS})
 	env = DMRGCache(h, ψ)
 	cs = [OverlapCache(ψ, p) for p in projectors]
-	return ExcitedStateCache(h, ψ, projectors, env.hstorage, cs, Ref(env.center[]))
+	return ExcitedStateCache(h, ψ, projectors, env.hstorage, cs)
 end
 
 function updateleft!(env::ExcitedStateCache, site::Integer)
@@ -28,7 +27,6 @@ function updateleft!(env::ExcitedStateCache, site::Integer)
 	for c in env.cstorages
 		updateleft!(c, site)
 	end
-	env.center[] = site + 1
 	return env
 end
 
@@ -37,7 +35,6 @@ function updateright!(env::ExcitedStateCache, site::Integer)
 	for c in env.cstorages
 		updateright!(c, site)
 	end
-	env.center[] = site - 1
 	return env
 end
 
