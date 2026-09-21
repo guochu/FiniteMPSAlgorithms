@@ -151,7 +151,9 @@ end
 	HadamardCache(ketx, kety, bra)
 
 Build the `HadamardCache` of the iterative hadamard product: allocate the environment
-stack and initialize it by a data-level right-orthogonalization of `bra`.
+stack and precompute the right environments from the chains as supplied — no
+regularization is performed on any chain, and `alg.D` is ignored. Callers provide a
+right-canonical `bra` (the `hadamard!` driver never re-gauges or truncates it).
 """
 function HadamardCache(ketx, kety, bra)
 	T = scalartype(bra)
@@ -167,17 +169,15 @@ end
 	hadamard!(χ, ψA, ψB, alg::DMRG1) -> χ
 
 Single-site variational (ALS) pointwise product of `ψA` and `ψB` refined in place on
-the initial guess `χ`. The gauge-normalized sweeps determine direction and magnitude
-together at the data level (the exact hadamard product is never formed); the external
-scale is attached through the per-site `scaling` field, with the ⊙ convention
+the user-supplied initial guess `χ`. The ansatz is taken exactly as supplied — its bond
+profile is neither grown nor truncated, and in particular `alg.D` is ignored (it only
+sets the bond cap when the guess is drawn automatically by `hadamard`). Supply a
+right-canonical `χ`. The sweeps determine direction and magnitude together at the data
+level (the exact hadamard product is never formed); the external scale is attached
+through the per-site `scaling` field, with the ⊙ convention
 `scaling(ψA ⊙ ψB) = scaling(ψA)·scaling(ψB)` — a scaling^L power is never materialized.
 """
 function hadamard!(χ, ψA, ψB, alg::DMRG1)
-	bonddim(χ) != alg.D && changebond!(χ; D=alg.D)
-	# the ALS gauge factors fix the direction of the update only: the working chain is
-	# brought to unit norm (right-canonical + absorbed spectrum) so the sweeps stay
-	# numerically controlled; the physical scale is restored through `scaling` below
-	_rightorth!(χ, SVD(), DefaultTruncation, true, 0)
 	cache = HadamardCache(ψA, ψB, χ)
 	iterative_compute!(cache, alg)
 	setscaling!(χ, scaling(ψA) * scaling(ψB))
@@ -202,7 +202,9 @@ end
 
 Compressed pointwise (Hadamard) product ψA ⊙ ψB: the result is a finite-bond MPS approximation
 obtained with `alg` (`SVDCompression`: exact product + one SVD sweep; `DMRG1`: site-by-site
-variational ALS on a `svdguess_hadamard(ψA, ψB, alg.D)` initial guess).
+variational ALS on a `svdguess_hadamard(ψA, ψB, alg.D)` initial guess). To refine a custom
+ansatz with its own bond profile (ignoring `alg.D` entirely), call
+`hadamard!(χ, ψA, ψB, alg)`.
 
 The exact (strict) product without compression is the operator `⊙` (`ψA ⊙ ψB`).
 """

@@ -256,7 +256,9 @@ svdguess_mult(h::MPOHamiltonian, x::MPOHamiltonian, D::Int) =
 	MultCache(h, x, bra)
 
 Build the `MultCache` of the iterative `mult`: allocate the environment stack and
-initialize it by a data-level right-orthogonalization of `bra`.
+precompute the right environments from the chains as supplied — no regularization is
+performed on any chain, and `alg.D` is ignored. Callers provide a right-canonical `bra`
+(the `mult!` driver never re-gauges or truncates it).
 """
 function MultCache(h, x, bra)
 	T = promote_type(scalartype(h), scalartype(x))
@@ -271,18 +273,15 @@ end
 """
 	mult!(out, h, x, alg::DMRG1) -> out
 
-Single-site variational (ALS) evaluation of h·x refined in place on the initial guess
-`out`. The gauge-normalized sweeps determine direction and magnitude together at the
-data level (the exact product is never formed); the external scales of canonical
-operands are attached through the per-site `scaling` field of the output — a scaling^L
-power is never materialized.
+Single-site variational (ALS) evaluation of h·x refined in place on the user-supplied
+initial guess `out`. The ansatz is taken exactly as supplied — its bond profile is
+neither grown nor truncated, and in particular `alg.D` is ignored (it only sets the bond
+cap when the guess is drawn automatically by `mult`). Supply a right-canonical `out`.
+The sweeps determine direction and magnitude together at the data level (the exact
+product is never formed); the external scales of canonical operands are attached through
+the per-site `scaling` field of the output — a scaling^L power is never materialized.
 """
 function mult!(out, h, x, alg::DMRG1)
-	bonddim(out) != alg.D && changebond!(out; D=alg.D)
-	# the ALS gauge factors fix the direction of the update only: the working bra is
-	# brought to unit norm (right-canonical + absorbed spectrum) so the sweeps stay
-	# numerically controlled; the physical scale is restored through `scaling` below
-	_rightorth!(out, SVD(), DefaultTruncation, true, 0)
 	cache = MultCache(h, x, out)
 	iterative_compute!(cache, alg)
 	s = _opscaling(h) * _opscaling(x)
@@ -317,7 +316,9 @@ Variational (ALS) evaluation of h·x with bond cap `alg.D`: the initial guess is
 `svdguess_mult(h, x, alg.D)` and refined by sweeps. The operands may be static `MPO`s or
 canonical chains (density matrices / process tensors); the external per-site scales of
 canonical operands are inherited through the output's `scaling` field (never
-materialized as a scaling^L power). The result is always a `CanonicalMPO`.
+materialized as a scaling^L power). The result is always a `CanonicalMPO`. To refine a
+custom ansatz with its own bond profile (ignoring `alg.D` entirely), call
+`mult!(out, h, x, alg)`.
 """
 function mult(h::AbstractMPO, x, alg::DMRG1)
 	(length(h) == length(x)) || throw(ArgumentError("dimension mismatch"))
