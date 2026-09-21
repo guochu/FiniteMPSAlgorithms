@@ -82,7 +82,7 @@ function compress!(out, x, alg::DMRG1)
 end
 
 """
-	compress(ψ::CanonicalMPS, alg=SVDCompression(DefaultTruncation)) -> CanonicalMPS
+	compress(ψ::CanonicalMPS, alg=SVDCompression(trunc=DefaultTruncation)) -> CanonicalMPS
 	compress(h::AbstractMPO, alg=...) -> CanonicalMPO
 	compress(x, alg::DMRG1) -> chain
 

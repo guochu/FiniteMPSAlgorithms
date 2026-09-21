@@ -65,13 +65,13 @@ E, ψ = ground_state(H, DMRG1(maxiter = 50, tol = 1e-10); D = 32)
 
 ```julia
 # exact product followed by one truncating SVD sweep
-ϕ = mult(H, ψ, SVDCompression(truncdim(16)))
+ϕ = mult(H, ψ, SVDCompression(trunc=truncdim(16)))
 
 # variational ALS route: bond cap D is set by the initial guess
-χ = mult(H, ψ, DMRG1(maxiter = 20, tol = 1e-10); D = 16)
+χ = mult(H, ψ, DMRG1(maxiter = 20, tol = 1e-10, D = 16))
 
-s = add([ψ, ψ], SVDCompression(truncdim(64)))        # 2ψ (truncated)
-c = compress(χ, DMRG1(maxiter = 20, tol = 1e-10); D = 8)
+s = add([ψ, ψ], SVDCompression(trunc=truncdim(64)))        # 2ψ (truncated)
+c = compress(χ, DMRG1(maxiter = 20, tol = 1e-10, D = 8))
 ```
 
 ### Time evolution

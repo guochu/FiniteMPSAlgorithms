@@ -301,7 +301,7 @@ _opscaling(x::Union{CanonicalMPS, CanonicalMPO}) = scaling(x)
 # ---------- exported interface ----------
 
 """
-	mult(h, x, alg=SVDCompression(DefaultTruncation)) -> CanonicalMPO
+	mult(h, x, alg=SVDCompression(trunc=DefaultTruncation)) -> CanonicalMPO
 
 Apply the operator `h` to the state / operator `x` (SVD route): the exact product is
 formed and compressed by a single SVD sweep under `alg.trunc`. For the variational ALS

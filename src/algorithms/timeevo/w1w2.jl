@@ -2,9 +2,8 @@
 # Ported from TEMPO src/mpohamiltonian/schurmpo/w1w2.jl;
 # reference: arXiv:1407.1832 "Time-evolving a matrix product state with long-ranged interactions"
 
-abstract type TimeEvoMPOAlgorithm <: TimeEvolutionAlgorithm end
-abstract type FirstOrderStepper <: TimeEvoMPOAlgorithm end
-abstract type SecondOrderStepper <: TimeEvoMPOAlgorithm end
+abstract type FirstOrderStepper <: MPSAlgorithm end
+abstract type SecondOrderStepper <: MPSAlgorithm end
 
 """
 	WI(; tol=Defaults.tol, maxiter=Defaults.maxiter)
@@ -12,7 +11,7 @@ abstract type SecondOrderStepper <: TimeEvoMPOAlgorithm end
 First-order W-type (WI) time evolution: the evolved MPO tensor is
 `W = [[I + dt·D, δ₂·C], [δ₁·B, A]]` with `δ₁δ₂ = dt`.
 """
-Base.@kwdef struct WI <: FirstOrderStepper
+@kwdef struct WI <: FirstOrderStepper
 	tol::Float64 = Defaults.tol
 	maxiter::Int = Defaults.maxiter
 end
@@ -23,7 +22,7 @@ end
 First-order W-type (WII) time evolution: each site tensor contains block submatrices
 of the block-matrix exponential, giving higher accuracy per step than [`WI`](@ref).
 """
-Base.@kwdef struct WII <: FirstOrderStepper
+@kwdef struct WII <: FirstOrderStepper
 	tol::Float64 = Defaults.tol
 	maxiter::Int = Defaults.maxiter
 end
@@ -34,8 +33,8 @@ end
 Combine a first-order stepper into a second-order stepper: two steps with
 `dt₁ = (1-im)·dt/2` and `dt₂ = (1+im)·dt/2` (real time) compose to second order.
 """
-Base.@kwdef struct ComplexStepper{F<:FirstOrderStepper} <: SecondOrderStepper
-	stepper::F
+@kwdef struct ComplexStepper{F<:FirstOrderStepper} <: SecondOrderStepper
+	stepper::F = WII()
 end
 
 """
@@ -143,7 +142,7 @@ function timeevompo(h::Union{SchurMPOTensor,MPOHamiltonian{<:SchurMPOTensor}}, d
 	return timeevompo(h, dt1, alg.stepper), timeevompo(h, dt2, alg.stepper)
 end
 
-timeevompo(h::MPOHamiltonian{<:SchurMPOTensor}, dt::Number, alg::TimeEvoMPOAlgorithm=WII()) = timeevompo(h, dt, alg)
+timeevompo(h::MPOHamiltonian{<:SchurMPOTensor}, dt::Number, alg::MPSAlgorithm=WII()) = timeevompo(h, dt, alg)
 
 # ---------- applying the evolved MPO to a state ----------
 
@@ -154,20 +153,20 @@ timeevompo(h::MPOHamiltonian{<:SchurMPOTensor}, dt::Number, alg::TimeEvoMPOAlgor
 
 """
 	timeevolve!(ψ::CanonicalMPS, h::MPOHamiltonian, dt, alg=WII(); trunc=DefaultTruncation)
-	timeevolve!(ψ, h, dt, ComplexStepper(WII()); trunc)
+	timeevolve!(ψ, h, dt, ComplexStepper(); trunc)
 
 One W-matrix time step: build the evolved MPO with [`timeevompo`](@ref) and apply it to
 `ψ` with the truncation `trunc` (via [`mult`](@ref)). `ComplexStepper` composes the two
 half steps for second-order accuracy.
 """
 function timeevolve!(ψ::CanonicalMPS, h::MPOHamiltonian{<:SchurMPOTensor}, dt::Number,
-					 alg::TimeEvoMPOAlgorithm=WII(); trunc::TruncationScheme=DefaultTruncation)
+					 alg::MPSAlgorithm=WII(); trunc::TruncationScheme=DefaultTruncation)
 	if alg isa ComplexStepper
 		dt1, dt2 = complex_stepper(dt)
 		W1, W2 = timeevompo(h, dt1, alg.stepper), timeevompo(h, dt2, alg.stepper)
-		copy!(ψ, mult(W1, ψ, SVDCompression(trunc)))
-		return copy!(ψ, mult(W2, ψ, SVDCompression(trunc)))
+		copy!(ψ, mult(W1, ψ, SVDCompression(trunc=trunc)))
+		return copy!(ψ, mult(W2, ψ, SVDCompression(trunc=trunc)))
 	end
 	W = timeevompo(h, dt, alg)
-	return copy!(ψ, mult(W, ψ, SVDCompression(trunc)))
+	return copy!(ψ, mult(W, ψ, SVDCompression(trunc=trunc)))
 end

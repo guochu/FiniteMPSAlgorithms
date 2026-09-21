@@ -1,21 +1,18 @@
 # algorithm configuration types (following TEMPO src/algorithms.jl)
 
 abstract type MPSAlgorithm end
-abstract type DMRGAlgorithm <: MPSAlgorithm end
-abstract type TimeEvolutionAlgorithm <: MPSAlgorithm end
+abstract type IterativeMPSAlgorithm <: MPSAlgorithm end
 
 """
 	SVDCompression(; trunc=truncdimcutoff(D=Defaults.D, ϵ=Defaults.tol, add_back=0), verbosity=0)
-	SVDCompression(trunc::TruncationScheme; verbosity=0)
 
 Parameters of the SVD-sweep (one-pass) compression route: the exact product is formed first
 and then compressed by an SVD right-orthogonalization sweep under the scheme `trunc`.
 """
-Base.@kwdef struct SVDCompression{T<:TruncationScheme} <: DMRGAlgorithm
+@kwdef struct SVDCompression{T<:TruncationScheme} <: MPSAlgorithm
 	trunc::T = truncdimcutoff(D = Defaults.D, ϵ = Defaults.tol, add_back = 0)
 	verbosity::Int = 0
 end
-SVDCompression(trunc::TruncationScheme; verbosity::Int=0) = SVDCompression(; trunc, verbosity)
 
 """
 	DMRG1(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D, verbosity=0)
@@ -28,14 +25,14 @@ guess with bond cap `alg.D` (`svdguess_add`, `svdguess_mult`, `svdguess_hadamard
 caller-provided guess to `alg.D` bonds with `changebond!`. `DMRG1` itself does not
 truncate.
 """
-Base.@kwdef struct DMRG1 <: DMRGAlgorithm
+@kwdef struct DMRG1 <: IterativeMPSAlgorithm
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
 	D::Int = Defaults.D
 	verbosity::Int = 0
 end
 
-const DefaultMultAlg = SVDCompression(DefaultTruncation)
+const DefaultMultAlg = SVDCompression(trunc=DefaultTruncation)
 
 """
 	iterative_compute!(cache, alg::DMRG1) -> khist

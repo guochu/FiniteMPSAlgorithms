@@ -131,7 +131,7 @@ end
 One left-to-right ALS sweep: at each site the local normal equation H z = t is solved,
 the chain is moved by QR and both environment stacks incremented.
 """
-function leftsweep!(m::LinsolveCache, alg::DMRGAlgorithm)
+function leftsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 	L = length(m.ket)
 	kvals = zeros(Float64, L)
 	for s in 1:L-1
@@ -155,7 +155,7 @@ end
 One right-to-left ALS sweep (symmetric, LQ gauge moves). `kvals` is ordered by processing
 time — sites `L, L-1, …, 1`.
 """
-function rightsweep!(m::LinsolveCache, alg::DMRGAlgorithm)
+function rightsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 	L = length(m.ket)
 	kvals = zeros(Float64, L)
 	k = 1
@@ -175,7 +175,7 @@ function rightsweep!(m::LinsolveCache, alg::DMRGAlgorithm)
 	return kvals
 end
 
-sweep!(m::LinsolveCache, alg::DMRGAlgorithm) = vcat(leftsweep!(m, alg), rightsweep!(m, alg))
+sweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm) = vcat(leftsweep!(m, alg), rightsweep!(m, alg))
 
 # ---------- global residual ||A·x - y|| ----------
 

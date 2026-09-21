@@ -168,7 +168,7 @@ function add!(out, chains, alg::DMRG1)
 end
 
 """
-	add(ψs::Vector{<:CanonicalMPS}, alg=SVDCompression(DefaultTruncation)) -> CanonicalMPS
+	add(ψs::Vector{<:CanonicalMPS}, alg=SVDCompression(trunc=DefaultTruncation)) -> CanonicalMPS
 	add(ψs::Vector{<:CanonicalMPS}, alg::DMRG1) -> CanonicalMPS
 	add(ρs::Vector{<:CanonicalMPO}, alg) / add(ρs, alg::DMRG1) -> CanonicalMPO
 

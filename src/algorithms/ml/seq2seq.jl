@@ -190,7 +190,7 @@ One left-to-right ALS sweep: at each site the local normal equation is solved de
 the chain is moved by QR and all three environment stacks are incremented. `kvals`
 collects the exact global data objective after every site update.
 """
-function leftsweep!(m::Seq2SeqCache, alg::DMRGAlgorithm)
+function leftsweep!(m::Seq2SeqCache, alg::IterativeMPSAlgorithm)
 	L = length(m.H)
 	kvals = zeros(Float64, L)
 	for s in 1:L-1
@@ -213,7 +213,7 @@ end
 One right-to-left ALS sweep (symmetric, LQ gauge moves). `kvals` is ordered by processing
 time (sites `L, L-1, …, 1`); the losses are non-increasing.
 """
-function rightsweep!(m::Seq2SeqCache, alg::DMRGAlgorithm)
+function rightsweep!(m::Seq2SeqCache, alg::IterativeMPSAlgorithm)
 	L = length(m.H)
 	kvals = zeros(Float64, L)
 	k = 1
@@ -232,7 +232,7 @@ function rightsweep!(m::Seq2SeqCache, alg::DMRGAlgorithm)
 	return kvals
 end
 
-sweep!(m::Seq2SeqCache, alg::DMRGAlgorithm) = vcat(leftsweep!(m, alg), rightsweep!(m, alg))
+sweep!(m::Seq2SeqCache, alg::IterativeMPSAlgorithm) = vcat(leftsweep!(m, alg), rightsweep!(m, alg))
 
 # ---------- initial guess ----------
 

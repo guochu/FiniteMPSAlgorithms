@@ -199,7 +199,7 @@ _validate_hadamard(ψA::CanonicalMPS, ψB::CanonicalMPS) = begin
 end
 
 """
-	hadamard(ψA, ψB, alg=SVDCompression(DefaultTruncation)) -> χ
+	hadamard(ψA, ψB, alg=SVDCompression(trunc=DefaultTruncation)) -> χ
 	hadamard(ψA, ψB, alg::DMRG1) -> χ
 
 Compressed pointwise (Hadamard) product ψA ⊙ ψB: the result is a finite-bond MPS approximation

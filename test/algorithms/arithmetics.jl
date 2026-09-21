@@ -15,10 +15,10 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	vHψ = Hd * vψ
 
 	# --- mult, SVD route (no truncation: exact) ---
-	out = mult(H, ψ, SVDCompression(truncdim(256)))
+	out = mult(H, ψ, SVDCompression(trunc=truncdim(256)))
 	@test todense(out) ≈ vHψ atol = 1e-8
 	# mult with truncation keeps the requested bond dimension and stays canonical
-	out2 = mult(H, ψ, SVDCompression(truncdimcutoff(4, 1e-12)))
+	out2 = mult(H, ψ, SVDCompression(trunc=truncdimcutoff(4, 1e-12)))
 	@test bonddim(out2) <= 4
 	@test isrightcanonical(out2[1])
 
@@ -29,7 +29,7 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	# --- mult MPO·MPO ---
 	prod_exact = H * H
 	@test todense(prod_exact) ≈ Hd * Hd atol = 1e-8
-	prod_svd = mult(H, H, SVDCompression(truncdim(64)))
+	prod_svd = mult(H, H, SVDCompression(trunc=truncdim(64)))
 	@test prod_svd isa CanonicalMPO
 	# compare the represented dense operators: a cross-gauge transfer-chain `distance`
 	# (raw bond-121 vs canonical bond-64) loses ~1e-6 to cancellation even when the
@@ -42,7 +42,7 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	# --- mult MPO·CanonicalMPO: CanonicalMPO output carrying the operand scaling ---
 	ρ = randommpo(ComplexF64, fill(2, L); D=2)
 	setscaling!(ρ, 0.7)
-	rho_svd = mult(H, ρ, SVDCompression(truncdim(8)))
+	rho_svd = mult(H, ρ, SVDCompression(trunc=truncdim(8)))
 	rho_als = mult(H, ρ, DMRG1(maxiter=20, tol=1e-10, D=8))
 	@test rho_svd isa CanonicalMPO && rho_als isa CanonicalMPO
 	@test scaling(rho_svd) ≈ 0.7 && scaling(rho_als) ≈ 0.7
@@ -55,14 +55,14 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	@test norm(todense(rho_als) - scaling(ρ)^L * todense(rho_exact)) / δ < 5e-2
 
 	# --- add ---
-	s = add([ψ, ψ], SVDCompression(truncdim(64)))
+	s = add([ψ, ψ], SVDCompression(trunc=truncdim(64)))
 	@test todense(s) ≈ 2 * vψ atol = 1e-8
 	s2 = add([ψ, ψ], DMRG1(maxiter=20, tol=1e-10, D=16))
 	@test todense(s2) ≈ 2 * vψ atol = 1e-6
 
 	# --- compress ---
-	ψbig = mult(H, ψ, SVDCompression(truncdim(256)))
-	c = compress(ψbig, SVDCompression(truncdimcutoff(4, 1e-10)))
+	ψbig = mult(H, ψ, SVDCompression(trunc=truncdim(256)))
+	c = compress(ψbig, SVDCompression(trunc=truncdimcutoff(4, 1e-10)))
 	@test bonddim(c) <= 4
 	c2 = compress(ψbig, DMRG1(maxiter=20, tol=1e-10, D=8))
 	@test isrightcanonical(c2[1])
@@ -118,7 +118,7 @@ end
 
 	# mult: the represented product must include the input scaling (both routes)
 	refm = Hd * vs
-	outs = mult(H, ψs, SVDCompression(truncdim(64)))
+	outs = mult(H, ψs, SVDCompression(trunc=truncdim(64)))
 	outa = mult(H, ψs, DMRG1(maxiter=20, tol=1e-10, D=16))
 	@test scaling(outa) ≈ scaling(ψs) atol = 1e-12
 	@test norm(todense(outs) - refm) / norm(refm) < 1e-8

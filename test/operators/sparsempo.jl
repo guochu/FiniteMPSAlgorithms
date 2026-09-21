@@ -77,7 +77,7 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	@testset "mult vs exact MPO application" begin
 		ψ = randommps(ComplexF64, fill(2, L); D=8)
 		W = MPOHamiltonian(hs)                     # any dense chain
-		ψa = mult(W, ψ, SVDCompression(NoTruncation()))
+		ψa = mult(W, ψ, SVDCompression(trunc=NoTruncation()))
 		ψe = W * ψ
 		lmul!(1 / norm(ψa), ψa)                    # compare directions (mult keeps the norm)
 		lmul!(1 / norm(ψe), ψe)
@@ -99,7 +99,7 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 
 		# second-order complex stepper: two half steps
 		ψ2 = copy(ψ0)
-		timeevolve!(ψ2, hs, dt, ComplexStepper(WII()); trunc=tr)
+		timeevolve!(ψ2, hs, dt, ComplexStepper(); trunc=tr)
 		@test norm(todense(ψ2) - Uexact(0.1) * v0) < norm(todense(ψ1) - Uexact(0.1) * v0) + 1.0e-8
 		@test norm(todense(ψ2) - Uexact(0.1) * v0) < 1.0e-2
 
@@ -114,8 +114,8 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 		ψb = copy(ψa)
 		enva = DMRGCache(hs, ψa)
 		envb = DMRGCache(hd, ψb)
-		sweep!(enva, TDVP1(-im * 0.05))
-		sweep!(envb, TDVP1(-im * 0.05))
+		sweep!(enva, TDVP1(stepsize=-im * 0.05))
+		sweep!(envb, TDVP1(stepsize=-im * 0.05))
 		@test distance(ψa, ψb) < 1.0e-6
 	end
 end

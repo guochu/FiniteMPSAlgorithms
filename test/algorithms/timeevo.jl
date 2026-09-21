@@ -16,7 +16,7 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	# --- real-time evolution vs exact ---
 	dt = 0.05
 	nsteps = 10
-	alg = TDVP1(dt)   # real stepsize = real time: one sweep of exp(-i H dt)
+	alg = TDVP1(stepsize=dt)   # real stepsize = real time: one sweep of exp(-i H dt)
 	env = DMRGCache(H, ψ)
 	center = env.center[]
 	ψ_ref = todense(ψ)
@@ -36,7 +36,7 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	ψg = randommps(ComplexF64, fill(2, L); D=8)
 	normalize!(ψg)
 	envg = DMRGCache(H, ψg)
-	alg_im = TDVP1(-im * 0.2)   # stepsize = -im*τ: exp(-H τ)
+	alg_im = TDVP1(stepsize=-im * 0.2)   # stepsize = -im*τ: exp(-H τ)
 	for _ in 1:150
 		sweep!(envg, alg_im)
 	end
@@ -69,9 +69,9 @@ end
 	@test Hevolved2 isa MPOHamiltonian
 	# stepper type hierarchy
 	@test WI() isa FirstOrderStepper && WII() isa FirstOrderStepper
-	@test ComplexStepper(WII()) isa SecondOrderStepper
-	@test WI() isa TimeEvoMPOAlgorithm && ComplexStepper(WII()) isa TimeEvoMPOAlgorithm
-	@test WI() isa FiniteMPSAlgorithms.TimeEvolutionAlgorithm   # TimeEvoMPOAlgorithm inherits
+	@test ComplexStepper() isa SecondOrderStepper
+	@test WI() isa FiniteMPSAlgorithms.MPSAlgorithm && ComplexStepper(stepper=WII()) isa FiniteMPSAlgorithms.MPSAlgorithm
+	@test ComplexStepper().stepper isa WII   # default stepper
 end
 
 @testset "Lindblad open-system evolution (WI/WII/TDVP) vs ED" begin
@@ -157,7 +157,7 @@ end
 	# --- TDVP1 on the non-Hermitian generator (stepsize im·dt: exp(𝓛·dt)) ---
 	ψt = changebond!(copy(ρ); D=16)
 	env = DMRGCache(𝓛, ψt)
-	alg = TDVP1(im * T / 40; ishermitian=false, verbosity=0)
+	alg = TDVP1(stepsize=im * T / 40, ishermitian=false, verbosity=0)
 	for _ in 1:40
 		sweep!(env, alg)
 	end
