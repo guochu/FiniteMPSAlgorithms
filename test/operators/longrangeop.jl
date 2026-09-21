@@ -84,7 +84,7 @@ end
 	end
 	Hdecay = MPOHamiltonian(ExpDecayOpSum(a, m, b, [0.3], [0.05]), L)
 	Hmixed = MPOHamiltonian(MPO(tompotensors(MPOHamiltonian(tfim))) + Hdecay)
-	E, ψ = ground_state(Hmixed, DMRG1(maxiter=30, tol=1e-10); D=16)
+	E, ψ = ground_state(Hmixed, DMRG1(maxiter=30, tol=1e-10, D=16))
 	@test isfinite(real(E))
 	# the variational energy of the converged state matches its expectation value
 	@test real(E) ≈ real(expectationvalue(Hmixed, ψ)) rtol = 1e-8

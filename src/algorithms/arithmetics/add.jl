@@ -160,6 +160,7 @@ expressed in the first input's per-site `scaling` convention (a scaling^L power 
 never materialized).
 """
 function add!(out, chains, alg::DMRG1)
+	bonddim(out) != alg.D && changebond!(out; D=alg.D)
 	cache = AddCache(out, chains)
 	iterative_compute!(cache, alg)
 	setscaling!(out, scaling(chains[1]))
@@ -168,11 +169,11 @@ end
 
 """
 	add(ψs::Vector{<:CanonicalMPS}, alg=SVDCompression(DefaultTruncation)) -> CanonicalMPS
-	add(ψs::Vector{<:CanonicalMPS}, alg::DMRG1; D=Defaults.D) -> CanonicalMPS
-	add(ρs::Vector{<:CanonicalMPO}, alg) / add(ρs, alg::DMRG1; D=...) -> CanonicalMPO
+	add(ψs::Vector{<:CanonicalMPS}, alg::DMRG1) -> CanonicalMPS
+	add(ρs::Vector{<:CanonicalMPO}, alg) / add(ρs, alg::DMRG1) -> CanonicalMPO
 
 Sum of chains: the SVD route forms the exact block-diagonal sum and compresses it with
-a single SVD sweep; the variational (ALS) route draws a `svdguess_add(ψs, D)` initial
+a single SVD sweep; the variational (ALS) route draws a `svdguess_add(ψs, alg.D)` initial
 guess and refines it by sweeps. The exact sum is `Base.:+` (block-diagonal, no
 truncation).
 """
@@ -180,19 +181,19 @@ function add(ψs::Vector{<:CanonicalMPS}, alg::SVDCompression=DefaultMultAlg)
 	isempty(ψs) && throw(ArgumentError("empty input"))
 	return svd_add(ψs, alg.trunc)[1]
 end
-function add(ψs::Vector{<:CanonicalMPS}, alg::DMRG1; D::Int=Defaults.D)
+function add(ψs::Vector{<:CanonicalMPS}, alg::DMRG1)
 	isempty(ψs) && throw(ArgumentError("empty input"))
-	return add!(svdguess_add(ψs, D), ψs, alg)
+	return add!(svdguess_add(ψs, alg.D), ψs, alg)
 end
 function add(ρs::Vector{<:CanonicalMPO}, alg::SVDCompression=DefaultMultAlg)
 	isempty(ρs) && throw(ArgumentError("empty input"))
 	return svd_add(ρs, alg.trunc)[1]
 end
-function add(ρs::Vector{<:CanonicalMPO}, alg::DMRG1; D::Int=Defaults.D)
+function add(ρs::Vector{<:CanonicalMPO}, alg::DMRG1)
 	isempty(ρs) && throw(ArgumentError("empty input"))
-	return add!(svdguess_add(ρs, D), ρs, alg)
+	return add!(svdguess_add(ρs, alg.D), ρs, alg)
 end
 add(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::SVDCompression=DefaultMultAlg) = add([ψA, ψB], alg)
 add(ρA::CanonicalMPO, ρB::CanonicalMPO, alg::SVDCompression=DefaultMultAlg) = add([ρA, ρB], alg)
-add(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::DMRG1; D::Int=Defaults.D) = add([ψA, ψB], alg; D)
-add(ρA::CanonicalMPO, ρB::CanonicalMPO, alg::DMRG1; D::Int=Defaults.D) = add([ρA, ρB], alg; D)
+add(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::DMRG1) = add([ψA, ψB], alg)
+add(ρA::CanonicalMPO, ρB::CanonicalMPO, alg::DMRG1) = add([ρA, ρB], alg)

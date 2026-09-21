@@ -74,6 +74,7 @@ input's external scale is attached through the per-site `scaling` field of the o
 (a scaling^L power is never materialized).
 """
 function compress!(out, x, alg::DMRG1)
+	bonddim(out) != alg.D && changebond!(out; D=alg.D)
 	cache = OverlapCache(out, x)
 	iterative_compute!(cache, alg)
 	x isa Union{CanonicalMPS, CanonicalMPO} && setscaling!(out, scaling(x))
@@ -83,7 +84,7 @@ end
 """
 	compress(ψ::CanonicalMPS, alg=SVDCompression(DefaultTruncation)) -> CanonicalMPS
 	compress(h::AbstractMPO, alg=...) -> CanonicalMPO
-	compress(x, alg::DMRG1; D=Defaults.D) -> chain
+	compress(x, alg::DMRG1) -> chain
 
 Compress a single chain: the SVD route canonicalizes a copy of the input with a
 truncating SVD sweep; the variational (ALS) route draws a `svdguess_compress(x, D)`
@@ -100,10 +101,10 @@ end
 compress(h::MPOHamiltonian, alg::SVDCompression=DefaultMultAlg) =
 	compress(MPO(tompotensors(h)), alg)
 
-function compress(x, alg::DMRG1; D::Int=Defaults.D)
-	out = svdguess_compress(x, D)
+function compress(x, alg::DMRG1)
+	out = svdguess_compress(x, alg.D)
 	compress!(out, x, alg)
 	return out
 end
-compress(h::MPOHamiltonian, alg::DMRG1; D::Int=Defaults.D) =
-	compress(MPO(tompotensors(h)), alg; D)
+compress(h::MPOHamiltonian, alg::DMRG1) =
+	compress(MPO(tompotensors(h)), alg)

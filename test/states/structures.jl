@@ -207,16 +207,21 @@ end
     @test length(Wrand) == L
     @test bonddim(Wrand) <= 4
 
-    # increase_bond! on MPS
+    # changebond! on MPS: grow and shrink to the same cap
     ψsmall = randommps(Float64, ds; D=2)
-    increase_bond!(ψsmall; D=8)
-    @test bonddim(ψsmall) >= 2
+    changebond!(ψsmall; D=8)
+    @test 2 <= bonddim(ψsmall) <= 8
+    @test iscanonical(ψsmall; atol=1e-8)
+    changebond!(ψsmall; D=3)
+    @test bonddim(ψsmall) <= 3
     @test iscanonical(ψsmall; atol=1e-8)
 
-    # increase_bond! on MPO
+    # changebond! on MPO
     Wsmall = randommpo(Float64, ds; D=2)
-    increase_bond!(Wsmall; D=8)
-    @test bonddim(Wsmall) >= 2
+    changebond!(Wsmall; D=8)
+    @test 2 <= bonddim(Wsmall) <= 8
+    changebond!(Wsmall; D=3)
+    @test bonddim(Wsmall) <= 3
 
     # truncate! on MPS (truncate! is exported in both tensorops and structures)
     ψtr = randommps(Float64, ds; D=8)

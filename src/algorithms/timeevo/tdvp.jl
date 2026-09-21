@@ -24,16 +24,13 @@ Configuration of single-site TDVP. `stepsize` is the time step (complex allowed;
 `stepsize = -im*τ` evolves in imaginary time). `ishermitian` selects the KrylovKit
 exponentiate driver (Lanczos for hermitian, Arnoldi otherwise).
 """
-struct TDVP1{S<:Number} <: TimeEvolutionAlgorithm
+Base.@kwdef struct TDVP1{S<:Number} <: TimeEvolutionAlgorithm
 	stepsize::S
-	D::Int
-	ishermitian::Bool
-	verbosity::Int
+	D::Int = Defaults.D
+	ishermitian::Bool = true
+	verbosity::Int = Defaults.verbosity
 end
-TDVP1(stepsize::Number; D::Int=Defaults.D, ishermitian::Bool=true, verbosity::Int=Defaults.verbosity) =
-	TDVP1(stepsize, D, ishermitian, verbosity)
-Base.similar(x::TDVP1; stepsize=x.stepsize, D::Int=x.D, ishermitian::Bool=x.ishermitian, verbosity::Int=x.verbosity) =
-	TDVP1(stepsize; D, ishermitian, verbosity)
+TDVP1(stepsize::Number; kwargs...) = TDVP1(; stepsize, kwargs...)
 
 """
 	leftsweep!(env::DMRGCache, alg::TDVP1)

@@ -66,8 +66,8 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 		@test expectation(ψ, hs, ψ) ≈ expectation(ψ, hd, ψ) rtol = 1.0e-10
 
 		tr = truncdimcutoff(24, 1.0e-12)
-		Es, ψs = ground_state(hs, DMRG1(maxiter=10); D=24)
-		Ed, ψd = ground_state(hd, DMRG1(maxiter=10); D=24)
+		Es, ψs = ground_state(hs, DMRG1(maxiter=10, D=24))
+		Ed, ψd = ground_state(hd, DMRG1(maxiter=10, D=24))
 		@test Es ≈ Ed atol = 1.0e-8
 		@test real(Es) ≈ real(eigmin(Hermitian(dense_model(p)))) atol = 1.0e-8
 		# the two runs may differ by a global sign: compare the overlap magnitude

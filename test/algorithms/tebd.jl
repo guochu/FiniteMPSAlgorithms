@@ -330,7 +330,7 @@ end
     @test iscanonical(ψg; atol=1e-8)
 
     # truncation keeps the bond dimension bounded
-    ψt = increase_bond!(copy(ψ); D=8)
+    ψt = changebond!(copy(ψ); D=8)
     apply!(gu, ψt; trunc=truncdim(4))
     @test bonddim(ψt) <= 4
 end

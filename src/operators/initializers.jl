@@ -37,13 +37,15 @@ prodmpo(::Type{T}, ds::AbstractVector{Int}, position::Integer, op::AbstractMatri
 	prodmpo(T, ds, [position], [op])
 
 """
-	increase_bond!(h::AbstractMPO; D=Defaults.D) -> h
+	changebond!(h::AbstractMPO; D=Defaults.D) -> h
 
-Grow the bond dimensions of `h` towards the profile `max_bonddims(ds, D)` by zero
-padding (the operator itself is unchanged; a plain `MPO` is never re-gauged in place).
-Used to seed the initial guess of the ALS operator products.
+Bring the bond profile of `h` to `min(D, feasible)`: bonds larger than their target are
+shrunk by slicing the leading bond indices (the first rows/columns of the bond space),
+smaller bonds are grown by zero padding (the operator itself is unchanged; a plain
+`MPO` is never re-gauged in place). Used to prepare initial guesses of the ALS
+operator products.
 """
-function increase_bond!(h::AbstractMPO; D::Int=Defaults.D)
+function changebond!(h::AbstractMPO; D::Int=Defaults.D)
 	isempty(h.data) && return h
 	T = scalartype(h)
 	L = length(h)
@@ -58,15 +60,14 @@ function increase_bond!(h::AbstractMPO; D::Int=Defaults.D)
 		Dr[i] = min(D, Dr[i+1] * ds_out[i] * ds_in[i])
 	end
 	b = min.(Dl, Dr)
-	for i in 1:L-1
-		b[i+1] = max(b[i+1], bonddim(h, i))
-	end
 	newdata = Vector{Array{T,4}}(undef, L)
 	for i in 1:L
 		dl = i == 1 ? 1 : b[i]
 		dr = i == L ? 1 : b[i+1]
 		t = zeros(T, dl, ds_out[i], dr, ds_in[i])
-		t[1:size(h[i], 1), :, 1:size(h[i], 3), :] = h[i]
+		vr = 1:min(dl, size(h[i], 1))
+		vc = 1:min(dr, size(h[i], 3))
+		t[vr, :, vc, :] = h[i][vr, :, vc, :]
 		newdata[i] = t
 	end
 	copy!(h.data, newdata)

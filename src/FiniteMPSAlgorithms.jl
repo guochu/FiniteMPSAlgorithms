@@ -31,7 +31,7 @@ export AbstractMPS, AbstractMPO, MPSTensor, MPOTensor, CanonicalMPS, CanonicalMP
 	scaling, setscaling!, svectors_uninitialized, unset_svectors!,
 	expectation, expectationvalue, entanglement_entropy, entanglement_spectrum, schmidt_values,
 	prodmps, randommps, DensityOperator, infinite_temperature_state,
-	increase_bond!, truncate!, identitympo, prodmpo, randommpo, hadamard, ⊙
+	changebond!, truncate!, identitympo, prodmpo, randommpo, hadamard, ⊙
 # algorithms
 export mult, add, compress, compress!,
 	svdguess_mult, svdguess_add, svdguess_compress, svdguess_hadamard,

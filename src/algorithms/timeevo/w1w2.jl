@@ -2,7 +2,7 @@
 # Ported from TEMPO src/mpohamiltonian/schurmpo/w1w2.jl;
 # reference: arXiv:1407.1832 "Time-evolving a matrix product state with long-ranged interactions"
 
-abstract type TimeEvoMPOAlgorithm end
+abstract type TimeEvoMPOAlgorithm <: TimeEvolutionAlgorithm end
 abstract type FirstOrderStepper <: TimeEvoMPOAlgorithm end
 abstract type SecondOrderStepper <: TimeEvoMPOAlgorithm end
 
@@ -12,11 +12,10 @@ abstract type SecondOrderStepper <: TimeEvoMPOAlgorithm end
 First-order W-type (WI) time evolution: the evolved MPO tensor is
 `W = [[I + dt·D, δ₂·C], [δ₁·B, A]]` with `δ₁δ₂ = dt`.
 """
-struct WI <: FirstOrderStepper
-	tol::Float64
-	maxiter::Int
+Base.@kwdef struct WI <: FirstOrderStepper
+	tol::Float64 = Defaults.tol
+	maxiter::Int = Defaults.maxiter
 end
-WI(; tol::Real=Defaults.tol, maxiter::Int=Defaults.maxiter) = WI(convert(Float64, tol), maxiter)
 
 """
 	WII(; tol=Defaults.tol, maxiter=Defaults.maxiter)
@@ -24,11 +23,10 @@ WI(; tol::Real=Defaults.tol, maxiter::Int=Defaults.maxiter) = WI(convert(Float64
 First-order W-type (WII) time evolution: each site tensor contains block submatrices
 of the block-matrix exponential, giving higher accuracy per step than [`WI`](@ref).
 """
-struct WII <: FirstOrderStepper
-	tol::Float64
-	maxiter::Int
+Base.@kwdef struct WII <: FirstOrderStepper
+	tol::Float64 = Defaults.tol
+	maxiter::Int = Defaults.maxiter
 end
-WII(; tol::Real=Defaults.tol, maxiter::Int=Defaults.maxiter) = WII(convert(Float64, tol), maxiter)
 
 """
 	ComplexStepper(stepper::FirstOrderStepper)
@@ -36,7 +34,7 @@ WII(; tol::Real=Defaults.tol, maxiter::Int=Defaults.maxiter) = WII(convert(Float
 Combine a first-order stepper into a second-order stepper: two steps with
 `dt₁ = (1-im)·dt/2` and `dt₂ = (1+im)·dt/2` (real time) compose to second order.
 """
-struct ComplexStepper{F<:FirstOrderStepper} <: SecondOrderStepper
+Base.@kwdef struct ComplexStepper{F<:FirstOrderStepper} <: SecondOrderStepper
 	stepper::F
 end
 

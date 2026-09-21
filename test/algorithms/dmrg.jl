@@ -13,7 +13,7 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	E_exact = eigmin(Hermitian(Hd))
 
 	# DMRG1, random initial state (bond dimension D)
-	E, ψ = ground_state(H, DMRG1(maxiter=50, tol=1e-12, verbosity=0); D=32)
+	E, ψ = ground_state(H, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32))
 	@test real(E) ≈ E_exact atol = 1e-8
 	@test norm(ψ) ≈ 1 atol = 1e-8
 
@@ -40,10 +40,10 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	Hd6 = dense_model(p6)
 	e = eigen(Hermitian(Hd6))
 	E0, ψ0d = e.values[1], e.vectors[:, 1]
-	E0gs, ψ0 = ground_state(H6, DMRG1(maxiter=50, tol=1e-12, verbosity=0); D=32)
+	E0gs, ψ0 = ground_state(H6, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32))
 	E1_exact = e.values[2]   # the first excited level (orthogonal to the exact GS)
-	E1, ψ1 = excited_state(H6, DMRG1(maxiter=50, tol=1e-12, verbosity=0), ψ0; D=32)
-        @test abs(real(E1) - E1_exact) < 1e-6
+	E1, ψ1 = excited_state(H6, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32), ψ0)
+	@test abs(real(E1) - E1_exact) < 1e-6
         @test abs(dot(todense(ψ1), todense(ψ0))) < 1e-6
 end
 
@@ -55,7 +55,7 @@ end
 	e = eigen(Hermitian(Hd6))
 
 	# excited_state! (in-place variant, caller-provided random initial state)
-	E0gs, ψ0 = ground_state(H6, DMRG1(maxiter=50, tol=1e-12, verbosity=0); D=32)
+	E0gs, ψ0 = ground_state(H6, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32))
 	ψex = randommps(ComplexF64, fill(2, 6); D=8)
 	khist = excited_state!(ψex, H6, [ψ0], DMRG1(maxiter=50, tol=1e-12, verbosity=0))
 	E1_exact = e.values[2]

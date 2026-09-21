@@ -71,6 +71,7 @@ end
 	@test WI() isa FirstOrderStepper && WII() isa FirstOrderStepper
 	@test ComplexStepper(WII()) isa SecondOrderStepper
 	@test WI() isa TimeEvoMPOAlgorithm && ComplexStepper(WII()) isa TimeEvoMPOAlgorithm
+	@test WI() isa FiniteMPSAlgorithms.TimeEvolutionAlgorithm   # TimeEvoMPOAlgorithm inherits
 end
 
 @testset "Lindblad open-system evolution (WI/WII/TDVP) vs ED" begin
@@ -154,7 +155,7 @@ end
 	@test relerr(todense(ψwi)) < 5e-2
 
 	# --- TDVP1 on the non-Hermitian generator (stepsize im·dt: exp(𝓛·dt)) ---
-	ψt = increase_bond!(copy(ρ); D=16)
+	ψt = changebond!(copy(ρ); D=16)
 	env = DMRGCache(𝓛, ψt)
 	alg = TDVP1(im * T / 40; ishermitian=false, verbosity=0)
 	for _ in 1:40

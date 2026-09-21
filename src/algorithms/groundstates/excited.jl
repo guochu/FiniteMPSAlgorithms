@@ -116,23 +116,24 @@ state `ψ` (modified in place; e.g. `ψ = randommps(ComplexF64, ophydims(h); D=D
 Returns `khist`, the per-sweep local-energy history.
 """
 function excited_state!(ψ::CanonicalMPS, h::AbstractMPO, projectors::Vector{<:CanonicalMPS}, alg::DMRG1=DMRG1())
+	bonddim(ψ) != alg.D && changebond!(ψ; D=alg.D)
 	env = ExcitedStateCache(h, ψ, projectors)
 	khist = iterative_compute!(env, alg)
 	return khist
 end
 
 """
-	excited_state(h::MPOHamiltonian, alg::DMRG1, ψ0::CanonicalMPS...; D=Defaults.D) -> (E, ψ)
+	excited_state(h::MPOHamiltonian, alg::DMRG1, ψ0::CanonicalMPS...) -> (E, ψ)
 
 The lowest excited state orthogonal to all given previous states `ψ0`, starting from a
-random initial state of bond dimension `D`.
+random initial state of bond dimension `alg.D`.
 """
-function excited_state(h::MPOHamiltonian, alg::DMRG1, ψ0::CanonicalMPS...; D::Int=Defaults.D)
-	ψ = randommps(scalartype(h), ophydims(h); D)
+function excited_state(h::MPOHamiltonian, alg::DMRG1, ψ0::CanonicalMPS...)
+	ψ = randommps(scalartype(h), ophydims(h); D=alg.D)
 	khist = excited_state!(ψ, h, collect(ψ0), alg)
 	(alg.verbosity > 0) && println("excited DMRG1 converged (delta = $(_iterative_delta(khist)))")
 	return expectation(h, ψ), ψ
 end
 
-excited_state(h::MPOHamiltonian, ψ0::CanonicalMPS...; D::Int=Defaults.D) =
-	excited_state(h, DMRG1(), ψ0...; D)
+excited_state(h::MPOHamiltonian, ψ0::CanonicalMPS...) =
+	excited_state(h, DMRG1(), ψ0...)

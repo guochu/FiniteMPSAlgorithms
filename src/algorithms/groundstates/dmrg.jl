@@ -71,13 +71,13 @@ function recalculate!(env::DMRGCache, ψ::CanonicalMPS, center::Integer=length(�
 end
 
 """
-	increase_bond!(env; D)
+	changebond!(env; D)
 
-Grow the bond dimensions of the cached state by zero padding (see `increase_bond!(::CanonicalMPS)`),
+Re-fit the bond profile of the cached state to `D` (see `changebond!(::CanonicalMPS)`),
 then rebuild the environments.
 """
-function increase_bond!(env::DMRGCache; D::Int=Defaults.D)
-	increase_bond!(env.ket; D)
+function changebond!(env::DMRGCache; D::Int=Defaults.D)
+	changebond!(env.ket; D)
 	fresh = DMRGCache(env.H, env.ket; center=env.center[])
 	copy!(env.hstorage, fresh.hstorage)
 	return env
@@ -154,6 +154,7 @@ The returned state is data-normalized: the external scale is reset through the
 `scaling` field, never materialized as a scaling^L power.
 """
 function ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::DMRG1=DMRG1())
+	bonddim(ψ) != alg.D && changebond!(ψ; D=alg.D)
 	env = DMRGCache(h, ψ)
 	khist = iterative_compute!(env, alg)
 	setscaling!(ψ, 1.0)
@@ -162,13 +163,13 @@ function ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::DMRG1=DMRG1())
 end
 
 """
-	ground_state(h::MPOHamiltonian, alg=DMRG1(); D=Defaults.D) -> (E, ψ)
+	ground_state(h::MPOHamiltonian, alg=DMRG1()) -> (E, ψ)
 
 Ground-state energy and (canonical) state of the Hamiltonian `h`, starting from a
-random initial state of bond dimension `D`.
+random initial state of bond dimension `alg.D`.
 """
-function ground_state(h::MPOHamiltonian, alg::DMRG1=DMRG1(); D::Int=Defaults.D)
-	ψ = randommps(scalartype(h), ophydims(h); D)
+function ground_state(h::MPOHamiltonian, alg::DMRG1=DMRG1())
+	ψ = randommps(scalartype(h), ophydims(h); D=alg.D)
 	khist = ground_state!(ψ, h, alg)
 	(alg.verbosity > 0) && println("DMRG1 converged (delta = $(_iterative_delta(khist)))")
 	return expectation(h, ψ), ψ

@@ -42,7 +42,7 @@ prodmpo
 identitympo
 DensityOperator
 infinite_temperature_state
-increase_bond!
+changebond!
 ```
 
 ## Observables

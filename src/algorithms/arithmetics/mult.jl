@@ -285,6 +285,7 @@ operands are attached through the per-site `scaling` field of the output — a s
 power is never materialized.
 """
 function mult!(out, h, x, alg::DMRG1)
+	bonddim(out) != alg.D && changebond!(out; D=alg.D)
 	cache = MultCache(h, x, out)
 	iterative_compute!(cache, alg)
 	s = _opscaling(h) * _opscaling(x)
@@ -313,33 +314,33 @@ function mult(h::AbstractMPO, x, alg::SVDCompression=DefaultMultAlg)
 end
 
 """
-	mult(h, x, alg::DMRG1; D=Defaults.D) -> CanonicalMPO
+	mult(h, x, alg::DMRG1) -> CanonicalMPO
 
-Variational (ALS) evaluation of h·x with bond cap `D`: the initial guess is drawn by
-`svdguess_mult(h, x, D)` and refined by sweeps. The operands may be static `MPO`s or
+Variational (ALS) evaluation of h·x with bond cap `alg.D`: the initial guess is drawn by
+`svdguess_mult(h, x, alg.D)` and refined by sweeps. The operands may be static `MPO`s or
 canonical chains (density matrices / process tensors); the external per-site scales of
 canonical operands are inherited through the output's `scaling` field (never
 materialized as a scaling^L power). The result is always a `CanonicalMPO`.
 """
-function mult(h::AbstractMPO, x, alg::DMRG1; D::Int=Defaults.D)
+function mult(h::AbstractMPO, x, alg::DMRG1)
 	(length(h) == length(x)) || throw(ArgumentError("dimension mismatch"))
-	return mult!(svdguess_mult(h, x, D), h, x, alg)
+	return mult!(svdguess_mult(h, x, alg.D), h, x, alg)
 end
 
 # block-sparse operands are expanded into the dense MPO layer (the three-chain ALS /
 # exact products are written on 4-index tensors)
 mult(hA::MPOHamiltonian, x, alg::SVDCompression=DefaultMultAlg) =
 	mult(MPO(tompotensors(hA)), x, alg)
-mult(hA::MPOHamiltonian, x, alg::DMRG1; D::Int=Defaults.D) =
-	mult(MPO(tompotensors(hA)), x, alg; D)
+mult(hA::MPOHamiltonian, x, alg::DMRG1) =
+	mult(MPO(tompotensors(hA)), x, alg)
 mult(h::AbstractMPO, hB::MPOHamiltonian, alg::SVDCompression=DefaultMultAlg) =
 	mult(h, MPO(tompotensors(hB)), alg)
-mult(h::AbstractMPO, hB::MPOHamiltonian, alg::DMRG1; D::Int=Defaults.D) =
-	mult(h, MPO(tompotensors(hB)), alg; D)
+mult(h::AbstractMPO, hB::MPOHamiltonian, alg::DMRG1) =
+	mult(h, MPO(tompotensors(hB)), alg)
 mult(hA::MPOHamiltonian, hB::MPOHamiltonian, alg::SVDCompression=DefaultMultAlg) =
 	mult(MPO(tompotensors(hA)), MPO(tompotensors(hB)), alg)
-mult(hA::MPOHamiltonian, hB::MPOHamiltonian, alg::DMRG1; D::Int=Defaults.D) =
-	mult(MPO(tompotensors(hA)), MPO(tompotensors(hB)), alg; D)
+mult(hA::MPOHamiltonian, hB::MPOHamiltonian, alg::DMRG1) =
+	mult(MPO(tompotensors(hA)), MPO(tompotensors(hB)), alg)
 
 # `hA * hB` contracts the raw data; a canonical operand keeps its per-site scale in the
 # `scaling` field, so the wrapped CanonicalMPO inherits that factor through its own

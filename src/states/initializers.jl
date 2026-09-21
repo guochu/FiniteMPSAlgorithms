@@ -115,13 +115,14 @@ function infinite_temperature_state(::Type{T}, ds::AbstractVector{Int}) where {T
 end
 
 """
-	increase_bond!(ψ::CanonicalMPS; D) -> ψ
+	changebond!(ψ::CanonicalMPS; D=Defaults.D) -> ψ
 
-Grow the bond dimensions of `ψ` towards the profile `max_bonddims(ds, D)` by
-zero padding (the state is unchanged), then re-canonicalize without truncation.
-Used to seed the initial guess of `DMRG1`.
+Bring the bond profile of `ψ` to `min(D, feasible)`: every bond larger than its target
+is shrunk by slicing the leading bond indices (the first rows/columns of the bond
+space), smaller bonds are grown by zero padding (the state is unchanged); the chain is
+re-canonicalized without truncation. Used to prepare initial guesses of `DMRG1`.
 """
-function increase_bond!(ψ::CanonicalMPS; D::Int=Defaults.D)
+function changebond!(ψ::CanonicalMPS; D::Int=Defaults.D)
 	isempty(ψ.data) && return ψ
 	T = scalartype(ψ)
 	ds = phydims(ψ)
@@ -135,15 +136,14 @@ function increase_bond!(ψ::CanonicalMPS; D::Int=Defaults.D)
 		Dr[i] = min(D, Dr[i+1] * ds[i])
 	end
 	b = min.(Dl, Dr)
-	for i in 1:L-1   # never shrink below the current bond dimension
-		b[i+1] = max(b[i+1], bonddim(ψ, i))
-	end
 	newdata = Vector{Array{T,3}}(undef, L)
 	for i in 1:L
 		dl = i == 1 ? 1 : b[i]
 		dr = i == L ? 1 : b[i+1]
 		t = zeros(T, dl, ds[i], dr)
-		t[1:size(ψ[i], 1), :, 1:size(ψ[i], 3)] = ψ[i]
+		vr = 1:min(dl, size(ψ[i], 1))
+		vc = 1:min(dr, size(ψ[i], 3))
+		t[vr, :, vc] = ψ[i][vr, :, vc]
 		newdata[i] = t
 	end
 	copy!(ψ.data, newdata)

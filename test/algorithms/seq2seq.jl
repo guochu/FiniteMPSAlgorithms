@@ -12,7 +12,7 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	# D = 2 matches the bond profile of the ground-truth MPO exactly (tight
 	# parametrization -> fast ALS convergence); α tiny so the ridge only
 	# conditions the local solves without biasing the fit
-	alg = DMRG1(maxiter=25, tol=1e-12, verbosity=0)
+	alg = DMRG1(maxiter=25, tol=1e-12, verbosity=0, D=2)
 
 	# ground truth: random bond-2 MPO mapping dx → dy; targets y = Wtrue·x
 	prof = [1, 2, 2, 2, 2, 2, 1]
@@ -20,7 +20,7 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	xs = [randommps(ComplexF64, dxs; D=4) for _ in 1:N]
 	ys = [Wtrue * x for x in xs]
 
-	W, traj = seq2seq(xs, ys, alg; α=1e-8, D=2)
+	W, traj = seq2seq(xs, ys, alg; α=1e-8)
 	@test ophydims(W) == dys
 	@test iphydims(W) == dxs
 	# phydim is only defined for square MPOTensors; the seq2seq MPO itself is rectangular
@@ -43,7 +43,7 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	@test minimum(traj[end]) < 1e-8
 
 	# default-algorithm form
-	Wk, _ = seq2seq(xs, ys; α=1e-8, D=2)
+	Wk, _ = seq2seq(xs, ys, DMRG1(maxiter=25, tol=1e-12, verbosity=0, D=2); α=1e-8)
 	@test distance(Wk * xs[1], ys[1]) / norm(ys[1]) < 1e-6
 
 	# dimension mismatch: a y with wrong physical dimensions
@@ -57,7 +57,7 @@ end
 	N = 16                                 # over-determined system: robust ALS fit
 	dxs = fill(2, L)
 	dys = fill(3, L)                       # rectangular map dx → dy
-	alg = DMRG1(maxiter=40, tol=1e-12, verbosity=0)
+	alg = DMRG1(maxiter=40, tol=1e-12, verbosity=0, D=2)
 	prof = vcat(1, fill(2, L-1), 1)
 
 	# ground truth: random bond-2 MPO; targets y = Wtrue·x

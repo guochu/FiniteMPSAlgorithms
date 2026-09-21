@@ -179,6 +179,7 @@ scale is attached through the per-site `scaling` field, with the ⊙ convention
 `scaling(ψA ⊙ ψB) = scaling(ψA)·scaling(ψB)` — a scaling^L power is never materialized.
 """
 function hadamard!(χ, ψA, ψB, alg::DMRG1)
+	bonddim(χ) != alg.D && changebond!(χ; D=alg.D)
 	cache = HadamardCache(ψA, ψB, χ)
 	iterative_compute!(cache, alg)
 	setscaling!(χ, scaling(ψA) * scaling(ψB))
@@ -199,11 +200,11 @@ end
 
 """
 	hadamard(ψA, ψB, alg=SVDCompression(DefaultTruncation)) -> χ
-	hadamard(ψA, ψB, alg::DMRG1; D=Defaults.D) -> χ
+	hadamard(ψA, ψB, alg::DMRG1) -> χ
 
 Compressed pointwise (Hadamard) product ψA ⊙ ψB: the result is a finite-bond MPS approximation
 obtained with `alg` (`SVDCompression`: exact product + one SVD sweep; `DMRG1`: site-by-site
-variational ALS on a `svdguess_hadamard(ψA, ψB, D)` initial guess).
+variational ALS on a `svdguess_hadamard(ψA, ψB, alg.D)` initial guess).
 
 The exact (strict) product without compression is the operator `⊙` (`ψA ⊙ ψB`).
 """
@@ -212,7 +213,7 @@ function hadamard(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::SVDCompression=Defa
 	return _svd_hadamard(ψA, ψB, alg)[1]
 end
 
-function hadamard(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::DMRG1; D::Int=Defaults.D)
+function hadamard(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::DMRG1)
 	_validate_hadamard(ψA, ψB)
-	return hadamard!(svdguess_hadamard(ψA, ψB, D), ψA, ψB, alg)
+	return hadamard!(svdguess_hadamard(ψA, ψB, alg.D), ψA, ψB, alg)
 end

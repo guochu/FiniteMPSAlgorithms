@@ -223,6 +223,7 @@ expressed in the right-hand side's per-site scaling convention (a scaling^L powe
 never materialized).
 """
 function linsolve!(x, A, y, alg::DMRG1)
+	bonddim(x) != alg.D && changebond!(x; D=alg.D)
 	m = LinsolveCache(A, y, x)
 	prev = Inf
 	for _ in 1:alg.maxiter
@@ -248,19 +249,19 @@ function _validate_linsolve(A::AbstractMPO, y::CanonicalMPS)
 end
 
 """
-	linsolve(A, y, alg=DMRG1(); D=Defaults.D) -> x
+	linsolve(A, y, alg=DMRG1()) -> x
 
-Solve `A·x ≈ y` variationally: find a finite-bond MPS `x` of bond dimension `D`
+Solve `A·x ≈ y` variationally: find a finite-bond MPS `x` of bond dimension `alg.D`
 minimizing the residual norm `||A·x - y||` by single-site ALS sweeps (normal equation
 A†A x = A† y). The initial guess is a random state. Block-sparse (Hamiltonian) inputs
 are expanded to the dense MPO layer.
 """
-function linsolve(A::AbstractMPO, y::CanonicalMPS, alg::DMRG1=DMRG1(); D::Int=Defaults.D)
+function linsolve(A::AbstractMPO, y::CanonicalMPS, alg::DMRG1=DMRG1())
 	_validate_linsolve(A, y)
 	T = promote_type(scalartype(A), scalartype(y))
-	x = randommps(T, ophydims(A); D, normalize=false)
+	x = randommps(T, ophydims(A); D=alg.D, normalize=false)
 	return linsolve!(x, A, y, alg)
 end
 
-linsolve(A::MPOHamiltonian, y::CanonicalMPS, alg::DMRG1=DMRG1(); D::Int=Defaults.D) =
-	linsolve(MPO(tompotensors(A)), y, alg; D)
+linsolve(A::MPOHamiltonian, y::CanonicalMPS, alg::DMRG1=DMRG1()) =
+	linsolve(MPO(tompotensors(A)), y, alg)
