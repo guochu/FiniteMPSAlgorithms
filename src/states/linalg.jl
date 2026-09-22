@@ -123,4 +123,26 @@ function _distance2(ψA::CanonicalMPS, ψB::CanonicalMPS)
 end
 _distance(ψA::CanonicalMPS, ψB::CanonicalMPS) = sqrt(_distance2(ψA, ψB))
 distance(ψA::CanonicalMPS, ψB::CanonicalMPS) = _distance(ψA, ψB)
+
+"""
+	fidelity(ψA::CanonicalMPS, ψB::CanonicalMPS) -> Real
+
+The fidelity `|⟨ψA|ψB⟩| / (‖ψA‖·‖ψB‖)` of the represented chains. Like [`distance`](@ref)
+it includes the per-site `scaling` factors, but the absolute value discards the overall
+phase: two chains differing by a global phase (or external scale) have `fidelity = 1`,
+while their `distance` is generically nonzero. Computed from raw (scale-free) transfer
+contractions — the `scaling` factors cancel exactly (equivalent to the direct formula
+with `dot`/`norm`), so it stays finite for arbitrarily large scalings.
+"""
+function fidelity(ψA::CanonicalMPS, ψB::CanonicalMPS)
+	(length(ψA) == length(ψB)) || throw(ArgumentError("dimension mismatch"))
+	return abs(_dot(ψA, ψB)) / sqrt(_dot(ψA, ψA) * _dot(ψB, ψB))
+end
+
+"""
+	infidelity(ψA::CanonicalMPS, ψB::CanonicalMPS) -> Real
+
+The complement of [`fidelity`](@ref): `1 - fidelity`.
+"""
+infidelity(ψA::CanonicalMPS, ψB::CanonicalMPS) = 1 - fidelity(ψA, ψB)
 distance2(ψA::CanonicalMPS, ψB::CanonicalMPS) = _distance2(ψA, ψB)

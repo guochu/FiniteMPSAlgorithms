@@ -46,6 +46,18 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	ψ2 = ψ * 3.0
 	@test norm(ψ2) ≈ 3.0 atol = 1e-8
 	@test distance(ψ, ψ2) ≈ 2 * norm(ψ) atol = 1e-6
+	# fidelity: normalized overlap, invariant under global phase and external scale
+	# (distance sees both, fidelity sees neither)
+	ψph = complex(ψ) * cis(0.7)
+	@test fidelity(ψ, ψ) ≈ 1 atol = 1e-12
+	@test fidelity(ψ, ψ2) ≈ 1 atol = 1e-12
+	@test fidelity(ψph, ψ) ≈ 1 atol = 1e-12
+	@test distance(ψph, ψ) > 1e-3
+	@test infidelity(ψph, ψ) ≈ 0 atol = 1e-12
+	# generic pair vs the direct dense formula
+	φo = randommps(ComplexF64, ds; D=4)
+	vψ, vφ = todense(ψ), todense(φo)
+	@test fidelity(ψ, φo) ≈ abs(dot(vψ, vφ)) / (norm(vψ) * norm(vφ)) atol = 1e-10
 	# exact sum (block-diagonal)
 	ψs = ψ + ψ
 	@test norm(ψs) ≈ 2.0 atol = 1e-6

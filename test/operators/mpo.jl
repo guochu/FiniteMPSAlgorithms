@@ -70,3 +70,24 @@ end
 	# tompotensors: dense expansion keeps the operator
 	@test maximum(abs.(todense(MPO(tompotensors(H))) - Hd)) < 1e-12
 end
+
+@testset "operator fidelity" begin
+	Random.seed!(46)
+	L = 4
+	ds = fill(2, L)
+	hA = randommpo(ComplexF64, ds; D=4)
+	hB = randommpo(ComplexF64, ds; D=4)
+	dA, dB = todense(hA), todense(hB)
+	# generic pair vs the direct dense Hilbert-Schmidt formula
+	@test fidelity(hA, hB) ≈ abs(sum(conj.(dA) .* dB)) / (norm(dA) * norm(dB)) atol = 1e-10
+	@test fidelity(hA, hA) ≈ 1 atol = 1e-12
+	@test infidelity(hA, hA) ≈ 0 atol = 1e-12
+	# global phase and external scaling are invisible to fidelity (unlike distance)
+	hAs = copy(hA)
+	setscaling!(hAs, 2.5)
+	hAph = hA * cis(0.9)
+	@test fidelity(hAs, hB) ≈ fidelity(hA, hB) atol = 1e-10
+	@test fidelity(hAph, hB) ≈ fidelity(hA, hB) atol = 1e-10
+	@test distance(hAs, hB) > distance(hA, hB)
+	@test distance(hAph, hB) > 1e-3
+end

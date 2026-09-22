@@ -106,6 +106,29 @@ Base.:-(hA::AbstractMPO, hB::AbstractMPO) = hA + (-hB)
 distance(hA::AbstractMPO, hB::AbstractMPO) = _distance(hA, hB)
 distance2(hA::AbstractMPO, hB::AbstractMPO) = _distance2(hA, hB)
 
+"""
+	fidelity(hA::AbstractMPO, hB::AbstractMPO) -> Real
+
+The Hilbert-Schmidt fidelity `|tr(conj(hA)·hB)| / (‖hA‖_HS·‖hB‖_HS)` of the operator
+chains. Like [`distance`](@ref) it includes the `scaling` of `CanonicalMPO` inputs, but
+the absolute value discards the overall phase: two chains differing by a global phase
+(or external scale) have `fidelity = 1`, while their `distance` is generically nonzero.
+Computed from raw (scale-free) transfer contractions — the `scaling` factors cancel
+exactly (equivalent to the direct formula with `dot`/`norm`), so it stays finite for
+arbitrarily large scalings.
+"""
+function fidelity(hA::AbstractMPO, hB::AbstractMPO)
+	(length(hA) == length(hB)) || throw(ArgumentError("dimension mismatch"))
+	return abs(_dot(hA, hB)) / sqrt(_dot(hA, hA) * _dot(hB, hB))
+end
+
+"""
+	infidelity(hA::AbstractMPO, hB::AbstractMPO) -> Real
+
+The complement of [`fidelity`](@ref): `1 - fidelity`.
+"""
+infidelity(hA::AbstractMPO, hB::AbstractMPO) = 1 - fidelity(hA, hB)
+
 # exact block-native application MPOHamiltonian · MPS: sum over non-zero blocks, with the
 # finite-chain boundary slicing (first site keeps the start row, last keeps the closing col)
 function Base.:*(h::MPOHamiltonian, ψ::CanonicalMPS)
