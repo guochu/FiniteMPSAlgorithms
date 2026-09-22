@@ -65,10 +65,10 @@ Parameters of the two-site DMRG ground-state search. At each update the two cent
 tensors are optimized jointly and truncated with the `trunc::TruncationScheme`; it is
 only consulted when the algorithm generates the initial ansatz itself.
 """
-@kwdef struct DMRG2 <: IterativeMPSAlgorithm
+@kwdef struct DMRG2{TR<:TruncationScheme} <: IterativeMPSAlgorithm
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
-	trunc::TruncationScheme = truncdim(D=Defaults.D)
+	trunc::TR = truncdim(D=Defaults.D)
 	verbosity::Int = 0
 end
 

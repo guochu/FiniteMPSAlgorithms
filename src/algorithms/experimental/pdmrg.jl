@@ -347,13 +347,18 @@ Free energy `F = -log(Z)/β` and the PMPA equilibrium state of `h` at inverse te
 function thermalstate(h::AbstractMPO, β::Real, alg::PDMRG=PDMRG())
 	rho = randompmpa(scalartype(h), ophydims(h); D=alg.D, R=alg.R)
 	rho = thermalstate!(rho, h, β, alg)
-	F = _free_energy(h, rho, β)
+	F = freeenergy(h, rho, β)
 	return F, rho
 end
 
-# full-chain free energy of a converged PMPA: F = tr(H ρ) - T S(ρ), with the entropy
-# from the center's local spectrum (the spectrum of ρ equals that of its center block)
-function _free_energy(h::AbstractMPO, rho::PositiveMPA, β::Real)
+"""
+	freeenergy(h::AbstractMPO, rho::PositiveMPA, β::Real) -> Real
+
+Full-chain free energy `F = tr(H ρ) - T S(ρ)` of the PMPA state `rho` at inverse
+temperature `β` (`T = 1/β`), with the entropy from the center's local spectrum (the
+spectrum of `ρ` equals that of its center block).
+"""
+function freeenergy(h::AbstractMPO, rho::PositiveMPA, β::Real)
 	env = ThermalDMRGCache(h, rho)
 	s = rho.center[]
 	M = rho.mcenter[]
