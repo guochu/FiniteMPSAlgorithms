@@ -111,3 +111,26 @@ end
 	@test ac_prime(xc, heff_s) ≈ yref atol = 1e-12
 	@test heff_s.W === Ws && heff_s.left === hl && heff_s.right === hr
 end
+
+@testset "dmrg2" begin
+	Random.seed!(77)
+	L = 8
+	p = model_params(L)
+	H = mpo_model(p)
+	Hd = dense_model(p)
+	E_exact = eigmin(Hermitian(Hd))
+
+	# DMRG2, random initial state
+	E2, ψ2 = ground_state(H, DMRG2(maxiter=50, tol=1e-12, verbosity=0, D=32))
+	@test real(E2) ≈ E_exact atol = 1e-8
+	@test norm(ψ2) ≈ 1 atol = 1e-8
+
+	# DMRG2 from a caller-provided initial state (alg.D is ignored)
+	ψ0 = randommps(ComplexF64, fill(2, L); D=4)
+	ground_state!(ψ0, H, DMRG2(maxiter=50, tol=1e-12, verbosity=0, D=32))
+	@test real(expectation(H, ψ0)) ≈ E_exact atol = 1e-8
+
+	# agreement with DMRG1 on the same model
+	E1, _ = ground_state(H, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32))
+	@test real(E2) ≈ real(E1) atol = 1e-8
+end

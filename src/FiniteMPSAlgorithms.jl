@@ -36,7 +36,7 @@ export mult, add, compress, compress!,
 	mult!, add!, linsolve!, hadamard!,
 	ground_state, ground_state!, excited_state, excited_state!,
 	leftsweep!, rightsweep!, sweep!,
-	SVDCompression, DMRG1, TDVP1, DefaultMultAlg, Defaults, IterativeMPSAlgorithm,
+	SVDCompression, DMRG1, DMRG2, TDVP1, DefaultMultAlg, Defaults, IterativeMPSAlgorithm,
 	ac_prime, c_prime, Heff,
 	FirstOrderStepper, SecondOrderStepper,
 	iterative_compute!, AddCache, MultCache, HadamardCache, LinsolveCache, Seq2SeqCache,
@@ -45,7 +45,7 @@ export mult, add, compress, compress!,
 	DMRGCache, ExcitedStateCache, OverlapCache, recalculate!,
 	TraceCache,
 	# experimental
-	PDMRG, CADMRG1, PositiveMPA, ThermalDMRGCache,
+	PDMRG, CADMRG, PositiveMPA, ThermalDMRGCache,
 	randompmpa, thermalstate, thermalstate!, tr,
 	CAMPS, CliffordGate, PauliTerm
 # gates

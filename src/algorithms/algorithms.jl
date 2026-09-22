@@ -9,6 +9,7 @@ include("arithmetics/hadamard.jl")
 include("arithmetics/linsolve.jl")
 # groundstates: ground and excited state search
 include("groundstates/dmrg.jl")
+include("groundstates/dmrg2.jl")
 include("groundstates/excited.jl")
 # ml: machine learning applications
 include("ml/seq2seq.jl")

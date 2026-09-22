@@ -13,12 +13,12 @@
 # ---------- algorithm type ----------
 
 """
-	CADMRG1(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D, verbosity=0)
+	CADMRG(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D, verbosity=0)
 
 Parameters of the Clifford-augmented two-site DMRG ground-state search. `D` caps the
 bond dimension used in the SVD truncation after each two-site update.
 """
-@kwdef struct CADMRG1 <: IterativeMPSAlgorithm
+@kwdef struct CADMRG <: IterativeMPSAlgorithm
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
 	D::Int = Defaults.D
@@ -117,57 +117,7 @@ end
 
 const TWO_QUBIT_CLIFFORDS = two_qubit_cliffords()
 
-# ---------- two-site effective Hamiltonian ----------
-
-"""
-	TwoSiteHeff{W1,W2,T}
-
-Two-site effective Hamiltonian: the MPO tensors of sites `s` and `s+1` together with
-their left and right environments.
-"""
-struct TwoSiteHeff{W1<:Union{MPOTensor,AbstractSparseMPOTensor},
-				   W2<:Union{MPOTensor,AbstractSparseMPOTensor},T}
-	W1::W1
-	W2::W2
-	left::Array{T,3}
-	right::Array{T,3}
-end
-
-function ac2_prime(x::AbstractArray{T,4}, heff::TwoSiteHeff) where {T}
-	# x[aL, p1, p2, aR]; W1[aLw, p1o, b, p1i], W2[b, p2o, aRw, p2i]
-	W1, W2 = heff.W1, heff.W2
-	hl, hr = heff.left, heff.right
-	@tensor Wcomb[aLw, p1o, p2o, aRw, p1i, p2i] := W1[aLw, p1o, b, p1i] * W2[b, p2o, aRw, p2i]
-	@tensor m1[aL, q1, q2, wR, c] := x[aL, q1, q2, r] * hr[c, wR, r]
-	@tensor m2[aL, wL, p1o, p2o, c] := m1[aL, q1, q2, wR, c] * Wcomb[wL, p1o, p2o, wR, q1, q2]
-	@tensor y[aL, p1o, p2o, c] := hl[aL, wL, b] * m2[b, wL, p1o, p2o, c]
-	return y
-end
-
-# sparse MPO tensors: materialize the two-site operator block by block
-function ac2_prime(x::AbstractArray{T,4},
-				   heff::TwoSiteHeff{<:AbstractSparseMPOTensor,<:AbstractSparseMPOTensor}) where {T}
-	W1, W2 = heff.W1, heff.W2
-	hl, hr = heff.left, heff.right
-	d1, d2 = phydim(W1), phydim(W2)
-	y = zeros(T, size(hl, 1), d1, d2, size(hr, 1))
-	# sum over the combined MPO bond (wL from W1, wR from W2) and the connecting bond b
-	for (wL, b) in keys(W1)
-		O1 = W1[wL, b]   # d1×d1 operator (or scalar)
-		O1m = O1 isa Number ? O1 * I : O1
-		for (b2, wR) in keys(W2)
-			b2 == b || continue
-			O2 = W2[b2, wR]  # d2×d2 operator (or scalar)
-			O2m = O2 isa Number ? O2 * I : O2
-			hl_s = hl[:, wL, :]
-			hr_s = hr[:, wR, :]
-			@tensor yn[aL, p1, p2, c] := hl_s[aL, bl] * x[bl, q1, q2, br] *
-										  O1m[p1, q1] * O2m[p2, q2] * hr_s[c, br]
-			y .+= yn
-		end
-	end
-	return y
-end
+# TwoSiteHeff / ac2_prime live in groundstates/dmrg2.jl (shared with DMRG2)
 
 # ---------- Clifford-augmented state types ----------
 
@@ -292,7 +242,7 @@ end
 
 # ---------- local two-site update with Clifford search ----------
 
-function _cadmrg_local_update!(env::CADMRGCache, s::Integer, alg::CADMRG1; move_right::Bool=true)
+function _cadmrg_local_update!(env::CADMRGCache, s::Integer, alg::CADMRG; move_right::Bool=true)
 	L = length(env.ket)
 	@assert s < L
 	W1, W2 = env.H[s], env.H[s+1]
@@ -386,7 +336,7 @@ end
 # ---------- sweeps ----------
 
 """
-	leftsweep!(env::CADMRGCache, alg::CADMRG1) -> kvals
+	leftsweep!(env::CADMRGCache, alg::CADMRG) -> kvals
 
 Left-to-right CA-DMRG sweep: two-site local minimization (sites s, s+1) with Clifford
 augmentation. The SVD itself moves the orthogonality center (singular values absorbed
@@ -394,7 +344,7 @@ into site s+1); no QR gauge moves are performed, so the not-yet-swept tensors st
 right-canonical and the precomputed right environments remain valid. Every applied
 Clifford circuit is recorded on `env.gates`.
 """
-function leftsweep!(env::CADMRGCache, alg::CADMRG1)
+function leftsweep!(env::CADMRGCache, alg::CADMRG)
 	L = length(env.ket)
 	kvals = zeros(Float64, L)
 	for s in 1:L-1
@@ -409,13 +359,13 @@ function leftsweep!(env::CADMRGCache, alg::CADMRG1)
 end
 
 """
-	rightsweep!(env::CADMRGCache, alg::CADMRG1) -> kvals
+	rightsweep!(env::CADMRGCache, alg::CADMRG) -> kvals
 
 Right-to-left CA-DMRG sweep (symmetric to `leftsweep!`): singular values are absorbed
 into the left site of each pair, keeping the already-swept tensors right-canonical.
 Every applied Clifford circuit is recorded on `env.gates`.
 """
-function rightsweep!(env::CADMRGCache, alg::CADMRG1)
+function rightsweep!(env::CADMRGCache, alg::CADMRG)
 	L = length(env.ket)
 	kvals = zeros(Float64, L)
 	k = 1
@@ -430,12 +380,12 @@ function rightsweep!(env::CADMRGCache, alg::CADMRG1)
 	return kvals
 end
 
-sweep!(env::CADMRGCache, alg::CADMRG1) = vcat(leftsweep!(env, alg), rightsweep!(env, alg))
+sweep!(env::CADMRGCache, alg::CADMRG) = vcat(leftsweep!(env, alg), rightsweep!(env, alg))
 
 # ---------- driver ----------
 
 """
-	ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::CADMRG1) -> khist
+	ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::CADMRG) -> khist
 
 Clifford-augmented ground-state search starting from the user-provided ansatz `ψ`
 (modified in place; `alg.D` is ignored when an explicit ansatz is given). The MPO `h`
@@ -444,7 +394,7 @@ circuits). Returns `khist`, the per-sweep local-energy history. To obtain the ap
 Clifford circuits together with the state, use `ground_state(h, alg)` which returns a
 [`CAMPS`](@ref).
 """
-function ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::CADMRG1)
+function ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::CADMRG)
 	hd = _dense_mpo(h)   # CA-DMRG rewrites MPO tensors in place; use dense form
 	env = CADMRGCache(hd, ψ)
 	khist = iterative_compute!(env, alg)
@@ -454,7 +404,7 @@ function ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::CADMRG1)
 end
 
 """
-	ground_state(h::MPOHamiltonian, alg::CADMRG1) -> CAMPS
+	ground_state(h::MPOHamiltonian, alg::CADMRG) -> CAMPS
 
 Ground state of `h` found by CA-DMRG, starting from a random MPS of bond `alg.D`,
 returned as a [`CAMPS`](@ref): the canonical MPS in the Clifford-rotated picture
@@ -463,7 +413,7 @@ Observables on the original Hamiltonian picture are evaluated with
 `expectation(::PauliTerm, ::CAMPS)`; e.g. the ground-state energy is the sum of the
 Hamiltonian's Pauli-term expectations.
 """
-function ground_state(h::MPOHamiltonian, alg::CADMRG1)
+function ground_state(h::MPOHamiltonian, alg::CADMRG)
 	TC = complex(scalartype(h))
 	ψ = randommps(TC, ophydims(h); D=alg.D)
 	hd = _dense_mpo(h)   # CA-DMRG rewrites MPO tensors in place; use dense form
