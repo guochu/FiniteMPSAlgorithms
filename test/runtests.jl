@@ -14,6 +14,7 @@ using FiniteMPSAlgorithms
 		include("operators/mpo.jl")
 		include("operators/longrangeop.jl")
 		include("operators/sparsempo.jl")
+		include("operators/vectorize.jl")
 	end
 	@testset "algorithms" begin
 		include("algorithms/arithmetics.jl")
@@ -21,5 +22,6 @@ using FiniteMPSAlgorithms
 		include("algorithms/timeevo.jl")
 		include("algorithms/tebd.jl")
 		include("algorithms/seq2seq.jl")
+		include("algorithms/experimental.jl")
 	end
 end

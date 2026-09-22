@@ -17,3 +17,6 @@ include("timeevo/tdvp.jl")
 include("timeevo/w1w2.jl")
 include("timeevo/tebd.jl")
 include("expec.jl")
+# experimental: positive DMRG (thermal states) and Clifford-augmented DMRG
+include("experimental/pdmrg.jl")
+include("experimental/cadmrg.jl")

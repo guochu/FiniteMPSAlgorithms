@@ -316,8 +316,8 @@ end
 	# per-site loss monotonicity inside every sweep (random guess -> actual movement).
 	# All losses are in processing-time order. A full sweep processes sites 1:L then
 	# L:1, and the local-target norm is non-decreasing throughout
-	cache = FiniteMPSAlgorithms.HadamardCache(ψ, φ, randommps(ComplexF64, ds; D=32))
-	khist = FiniteMPSAlgorithms.iterative_compute!(cache, DMRG1(maxiter=12, tol=1e-11, verbosity=0, D=32))
+	cache = HadamardCache(ψ, φ, randommps(ComplexF64, ds; D=32))
+	khist = iterative_compute!(cache, DMRG1(maxiter=12, tol=1e-11, verbosity=0, D=32))
 	χr = cache.bra
 	@test all(kv -> length(kv) == 2 * L, khist)
 	for kv in khist

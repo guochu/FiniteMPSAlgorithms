@@ -108,7 +108,7 @@ function _op_trace_raw(op::OpTerm, ρ::CanonicalMPO, left::AbstractVector,
 	d = phydim(ρ[1])
 	di = Matrix{T}(I, d, d)   # identity on the physical legs (sites outside the support)
 	firstpos, lastpos = first(op.positions), last(op.positions)
-	e = reshape(left, :, 1)
+	e = reshape(left, 1, :)
 	for i in firstpos:lastpos
 		j = findfirst(==(i), op.positions)
 		Wρ = ρ[i]
@@ -120,7 +120,7 @@ function _op_trace_raw(op::OpTerm, ρ::CanonicalMPO, left::AbstractVector,
 		end
 		e = e2
 	end
-	r = reshape(right, :, 1)
+	r = reshape(right, 1, :)
 	return @tensor val = e[1, 2] * r[1, 2]
 end
 
@@ -129,8 +129,8 @@ end
 
 Pre-computed physical-trace environments of the density-matrix chain `ρ` (the crossed
 transfer contractions with an identity on the physical legs, built from both chain
-ends; stored as flat vectors, `left[k]` / `right[k]` being the environment at bond
-`k-1` / `k`). Passing a cache to `expectation(op, ρ, cache)` /
+ends; stored as flat vectors, `left[k]` / `right[k]` being the environment at bond `k-1`,
+to the left / right of site `k`). Passing a cache to `expectation(op, ρ, cache)` /
 `expectationvalue(op, ρ, cache)` avoids rebuilding the identity transfer for every
 observable of a fixed `ρ`. The cache keeps a reference to `ρ`; the callers pass `ρ`
 again and it is checked with `===` against the cached one.
@@ -146,14 +146,14 @@ function TraceCache(ρ::CanonicalMPO)
 	di = Matrix{T}(I, d, d)
 	L = length(ρ)
 	left = Vector{Vector{T}}(undef, L + 1)
-	left[1] = ones(T, 1)
+	left[1] = ones(T, size(ρ[1], 1))
 	for i in 1:L
-		c = reshape(left[i], :, 1)
+		c = reshape(left[i], 1, :)
 		@tensor c2[-1, -2] := c[-1, 2] * ρ[i][2, 3, -2, 4] * di[3, 4]
 		left[i+1] = vec(c2)
 	end
 	right = Vector{Vector{T}}(undef, L + 1)
-	right[L+1] = ones(T, 1)
+	right[L+1] = ones(T, size(ρ[L], 3))
 	for i in L:-1:1
 		c = reshape(right[i+1], :, 1)
 		@tensor c2[-1, -2] := ρ[i][-1, 3, 2, 4] * di[3, 4] * c[2, -2]
@@ -181,7 +181,7 @@ function expectation(op::OpTerm, ρ::CanonicalMPO, cache::TraceCache)
 	(ρ === cache.ρ) || throw(ArgumentError("the cache was built for a different ρ"))
 	firstpos, lastpos = first(op.positions), last(op.positions)
 	(1 <= firstpos && lastpos <= length(ρ)) || throw(BoundsError())
-	return op.coeff * _op_trace_raw(op, ρ, cache.left[firstpos], cache.right[lastpos]) *
+	return op.coeff * _op_trace_raw(op, ρ, cache.left[firstpos], cache.right[lastpos+1]) *
 		   scaling(ρ)^length(ρ)
 end
 
@@ -258,7 +258,7 @@ function expectationvalue(op::OpTerm, ρ::CanonicalMPO, cache::TraceCache = Trac
 	(ρ === cache.ρ) || throw(ArgumentError("the cache was built for a different ρ"))
 	firstpos, lastpos = first(op.positions), last(op.positions)
 	(1 <= firstpos && lastpos <= length(ρ)) || throw(BoundsError())
-	num = op.coeff * _op_trace_raw(op, ρ, cache.left[firstpos], cache.right[lastpos])
+	num = op.coeff * _op_trace_raw(op, ρ, cache.left[firstpos], cache.right[lastpos+1])
 	# the raw trace of ρ is the single entry of the completed left environment
 	return num / only(cache.left[length(ρ)+1])
 end

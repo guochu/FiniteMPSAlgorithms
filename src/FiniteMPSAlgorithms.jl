@@ -21,7 +21,7 @@ export AbstractMPS, AbstractMPO, MPSTensor, MPOTensor, CanonicalMPS, CanonicalMP
 	MPO, MPOHamiltonian, Orthogonalize,
 	AbstractSparseMPOTensor, SparseMPOTensor, SchurMPOTensor, SparseMPOHamiltonian,
 	OpTerm, OpSum, term, tompotensors,
-	todense,
+	todense, vectorize, devectorize, superoperator,
 	ExpDecayOpTerm, ExpDecayOpSum,
 	isleftcanonical, isrightcanonical, iscanonical, canonicalize!, canonicalize,
 	space_l, space_r, phydim, ophydim, iphydim, phydims,
@@ -43,7 +43,11 @@ export mult, add, compress, compress!,
 	WI, WII, ComplexStepper, complex_stepper, timeevompo, timeevolve!,
 	linsolve, seq2seq, seq2seq!,
 	DMRGCache, ExcitedStateCache, OverlapCache, recalculate!,
-	TraceCache
+	TraceCache,
+	# experimental
+	PDMRG, CADMRG1, PositiveMPA, ThermalDMRGCache,
+	randompmpa, thermalstate, thermalstate!, tr,
+	CAMPS, CliffordGate, PauliTerm
 # gates
 export AbstractGate, UnitaryGate, GeneralGate, apply!, swap!, positions, operator, shift
 

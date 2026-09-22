@@ -47,15 +47,15 @@ The sweeps keep the working data in mixed canonical form but never touch the Sch
 values; the cache constructors therefore reset them (`unset_svectors!`) on the working
 guess, so no stale spectrum can masquerade as a canonical gauge.
 """
-function iterative_compute!(cache, alg::DMRG1)
+function iterative_compute!(cache, alg; kwargs...)
 	khist = Vector{Vector{Float64}}()
 	prev = Inf
 	for _ in 1:alg.maxiter
-		kvals = sweep!(cache, alg)
+		kvals = sweep!(cache, alg; kwargs...)
 		push!(khist, kvals)
 		last = kvals[end]
 		delta = isfinite(prev) ? (prev == 0 ? abs(last) : abs(last - prev) / abs(prev)) : Inf
-		(alg.verbosity > 1) && println("DMRG1 iteration: delta = ", delta)
+		(alg.verbosity > 1) && println("DMRG iteration: delta = ", delta)
 		delta < alg.tol && break
 		prev = last
 	end
