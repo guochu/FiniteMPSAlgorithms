@@ -71,6 +71,21 @@ function unset_svectors!(ρ::CanonicalMPO)
 	return ρ
 end
 
+"""
+    normalize_tr!(ρ::CanonicalMPO) -> ρ
+
+Normalize the density-matrix chain to unit trace **without touching the site tensors**:
+the trace deficit is folded into the `scaling` field (the represented state
+`scaling^L · (data contraction)` is rescaled to unit trace by rescaling `scaling`).
+"""
+function normalize_tr!(ρ::CanonicalMPO)
+	t = tr(ρ)
+	real(t) ≈ 0 && throw(ArgumentError("cannot normalize a chain with vanishing trace"))
+	# tr(ρ) = scaling^L · tr(data)  =>  scaling_new = scaling / tr^(1/L)
+	setscaling!(ρ, scaling(ρ) / real(t)^(1 / length(ρ)))
+	return ρ
+end
+
 function _default_mpo_s(data::AbstractVector{<:MPOTensor}, R::Type)
 	s = Vector{Union{Missing, Vector{R}}}(undef, length(data) + 1)
 	fill!(s, missing)
