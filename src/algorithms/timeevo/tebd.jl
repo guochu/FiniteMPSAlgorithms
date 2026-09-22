@@ -32,16 +32,10 @@ end
 
 """
 	UnitaryGate(positions, op; atol=1e-10)
-	UnitaryGate(positions::Pair{Int,Int}, op::AbstractMatrix; atol=1e-10)
 
-A unitary gate acting on the `N` ascending sites `positions`. The operator `op` may be
-given in either of two index conventions:
-
-* a rank-`2N` tensor `(i1', i2', …, iN', i1, …, iN)` — all bra (output) indices first,
-  all ket (input) indices second, each block ordered with site 1 the slowest index;
-* for `positions::Pair{Int,Int}` (`N = 2`), a `d²×d²` matrix in the Kronecker
-  convention `(i1 i2)', (i1 i2)` with site `i1` the slower index (i1 slowest); it is
-  permuted into the tensor convention on construction.
+A unitary gate acting on the `N` ascending sites `positions`. The operator `op` is a
+rank-`2N` tensor `(i1', i2', …, iN', i1, …, iN)` — all bra (output) indices first, all
+ket (input) indices second, each block ordered with site 1 the slowest index.
 
 The input is copied and materialized as a dense array of concrete element type, then
 checked for unitarity (`op'*op ≈ I` within `atol`), throwing `ArgumentError` otherwise.
@@ -66,29 +60,16 @@ function UnitaryGate(positions::NTuple{N, Int}, op::AbstractArray; atol::Real=1.
 	T = scalartype(op)
 	return UnitaryGate{N, T, M}(positions, Array{T, M}(op); atol)
 end
-function UnitaryGate(positions::Pair{Int, Int}, op::AbstractMatrix; atol::Real=1.0e-10)
-	d2 = size(op, 1)
-	d = isqrt(d2)
-	d^2 == d2 || throw(ArgumentError("operator dimension must be a perfect square"))
-	positions.first < positions.second || throw(ArgumentError("positions must be ascending"))
-	# matrix convention (i1 i2)',(i1 i2) with i1 the slowest index; the column-major
-	# reshape yields (i2', i1', i2, i1), so permute to the documented (i1', i2', i1, i2)
-	t = reshape(Matrix{scalartype(op)}(op), d, d, d, d)
-	t = permutedims(t, (2, 1, 4, 3))
-	return UnitaryGate((positions.first, positions.second), t; atol)
-end
 
 """
 	GeneralGate(positions, op)
-	GeneralGate(positions::Pair{Int,Int}, op::AbstractMatrix)
 
 A general gate with the same data storage, index conventions and application as
-[`UnitaryGate`](@ref) (rank-`2N` tensor `(i1', …, iN', i1, …, iN)`, or for
-`positions::Pair{Int,Int}` a `d²×d²` Kronecker-convention matrix `(i1 i2)', (i1 i2)`
-with i1 the slowest index), but the input is **not** checked for unitarity. The input
-is copied and materialized as a dense array of concrete element type. Since a
-non-unitary gate does not preserve the canonical form under the Hastings update,
-`apply!` re-canonicalizes the state with `canonicalize!` afterwards.
+[`UnitaryGate`](@ref) (rank-`2N` tensor `(i1', …, iN', i1, …, iN)`), but the input is
+**not** checked for unitarity. The input is copied and materialized as a dense array of
+concrete element type. Since a non-unitary gate does not preserve the canonical form
+under the Hastings update, `apply!` re-canonicalizes the state with `canonicalize!`
+afterwards.
 """
 struct GeneralGate{N, T, M} <: AbstractGate{N, T}
 	positions::NTuple{N, Int}
@@ -106,17 +87,6 @@ function GeneralGate(positions::NTuple{N, Int}, op::AbstractArray) where {N}
 	M == 2N || throw(ArgumentError("the operator tensor must have rank $(2N)"))
 	T = scalartype(op)
 	return GeneralGate{N, T, M}(positions, Array{T, M}(op))
-end
-function GeneralGate(positions::Pair{Int, Int}, op::AbstractMatrix)
-	d2 = size(op, 1)
-	d = isqrt(d2)
-	d^2 == d2 || throw(ArgumentError("operator dimension must be a perfect square"))
-	positions.first < positions.second || throw(ArgumentError("positions must be ascending"))
-	# matrix convention (i1 i2)',(i1 i2) with i1 the slowest index; the column-major
-	# reshape yields (i2', i1', i2, i1), so permute to the documented (i1', i2', i1, i2)
-	t = reshape(Matrix{scalartype(op)}(op), d, d, d, d)
-	t = permutedims(t, (2, 1, 4, 3))
-	return GeneralGate((positions.first, positions.second), t)
 end
 
 # nearest-neighbor Hastings gate core (shared by UnitaryGate and GeneralGate): the

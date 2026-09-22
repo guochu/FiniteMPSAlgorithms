@@ -4,6 +4,15 @@ using FiniteMPSAlgorithms: SVD, QR, QRpos, LQ, LQpos, SDD, Polar
 
 include(joinpath(@__DIR__, "..", "helpers.jl"))
 
+# matrix in the Kronecker convention (i1 i2)',(i1 i2), i1 slowest -> documented gate
+# tensor (i1', i2', i1, i2)
+function gate_tensor(M::AbstractMatrix)
+	d2r, d2c = size(M)
+	dr, dc = isqrt(d2r), isqrt(d2c)
+	(dr^2 == d2r && dc^2 == d2c) || throw(ArgumentError("dimensions must be perfect squares"))
+	return permutedims(reshape(M, dr, dc, dr, dc), (2, 1, 4, 3))
+end
+
 # dense L-site matrix of the documented (i1',...,iN',i1,...,iN) gate tensor on sites (i, i+1)
 function two_site_dense(op4, i, L, d::Int=2)
 	M = reshape(permutedims(op4, (2, 1, 4, 3)), d^2, d^2)   # (i1 i2)',(i1 i2), i1 slowest
@@ -41,22 +50,22 @@ end
 	Random.seed!(55)
 	# UnitaryGate rejects non-unitary input
 	h = randn(4, 4) + im * randn(4, 4)
-	@test_throws ArgumentError UnitaryGate(1 => 2, h)
+	@test_throws ArgumentError UnitaryGate((1, 2), gate_tensor(h))
 	# the unitarity-check tolerance is a keyword: a loose atol admits a perturbed unitary
 	Up = exp(Matrix(-im * (h + h'))) + 1e-6 * randn(4, 4) + 1e-6im * randn(4, 4)
-	@test_throws ArgumentError UnitaryGate(1 => 2, Up)            # rejected at default tol
-	UnitaryGate(1 => 2, Up; atol=1e-3)                            # accepted with atol=1e-3
+	@test_throws ArgumentError UnitaryGate((1, 2), gate_tensor(Up))            # rejected at default tol
+	UnitaryGate((1, 2), gate_tensor(Up); atol=1e-3)               # accepted with atol=1e-3
 	hh = h + h'                          # hermitian → exp(-im·hh) is unitary
 	U = exp(Matrix(-im * hh))
-	g = UnitaryGate(1 => 2, U)          # ok
+	g = UnitaryGate((1, 2), gate_tensor(U))          # ok
 	@test positions(g) == (1, 2)
 	# adjoint of a unitary gate is unitary and equals conj-transposed
 	gt = adjoint(g)
 	@test operator(gt) ≈ permutedims(conj(operator(g)), (3, 4, 1, 2))
 
 	# GeneralGate stores the given op verbatim (no unitarity check, caller builds exp);
-	# matrix (i1 slowest) → documented (i1',i2',i1,i2) tensor
-	gg = GeneralGate(2 => 3, exp(Matrix(-im * hh * 0.1)))
+	# gate_tensor converts the Kronecker-convention matrix to the documented tensor
+	gg = GeneralGate((2, 3), gate_tensor(exp(Matrix(-im * hh * 0.1))))
 	@test operator(gg) ≈ permutedims(reshape(exp(Matrix(-im * hh * 0.1)), 2, 2, 2, 2), (2, 1, 4, 3)) atol = 1e-12
 
 	# apply! of an exact unitary vs dense contraction
@@ -80,7 +89,7 @@ end
 	vref = todense(ψ2)
 	gateAt = Dict{Int,Matrix{ComplexF64}}()
 	for i in 1:2:L-1
-		ggl = UnitaryGate(i => i + 1, exp(Matrix(-im * hh * 0.07)))
+		ggl = UnitaryGate((i, i + 1), gate_tensor(exp(Matrix(-im * hh * 0.07))))
 		gateAt[i] = reshape(permutedims(operator(ggl), (2, 1, 4, 3)), 4, 4)
 		apply!(ggl, ψ2; trunc=NoTruncation())
 	end
@@ -143,8 +152,8 @@ end
 	L = 6
 	# GeneralGate accepts non-unitary input that UnitaryGate rejects
 	h = randn(4, 4) + im * randn(4, 4)
-	@test_throws ArgumentError UnitaryGate(1 => 2, h)
-	gg = GeneralGate(1 => 2, h)
+	@test_throws ArgumentError UnitaryGate((1, 2), gate_tensor(h))
+	gg = GeneralGate((1, 2), gate_tensor(h))
 	@test operator(gg) ≈ permutedims(reshape(Matrix{ComplexF64}(h), 2, 2, 2, 2), (2, 1, 4, 3))
 	# adjoint swaps the ket/bra index blocks and conjugates
 	@test operator(adjoint(gg)) ≈ permutedims(conj(operator(gg)), (3, 4, 1, 2))
@@ -165,7 +174,7 @@ end
 	canonicalize!(ψu)
 	ψuref = todense(ψu)
 	hh = h + h'
-	gu = GeneralGate(3 => 4, exp(Matrix(-im * hh)))
+	gu = GeneralGate((3, 4), gate_tensor(exp(Matrix(-im * hh))))
 	Vd = two_site_dense(operator(gu), 3, L)
 	apply!(gu, ψu; trunc=NoTruncation())
 	@test todense(ψu) ≈ Vd * ψuref atol = 1e-10
@@ -178,9 +187,9 @@ end
     hh = randn(4, 4) + im * randn(4, 4)
     hh = hh + hh'
     U = exp(Matrix(-im * hh))
-    g = UnitaryGate(1 => 2, U)
+    g = UnitaryGate((1, 2), gate_tensor(U))
     @test g isa AbstractGate
-    @test GeneralGate(1 => 2, exp(Matrix(-im * hh * 0.1))) isa AbstractGate
+    @test GeneralGate((1, 2), gate_tensor(exp(Matrix(-im * hh * 0.1)))) isa AbstractGate
     # shift: move gate by 2 sites
     g2 = shift(g, 2)
     @test positions(g2) == (3, 4)
@@ -189,7 +198,7 @@ end
     g3 = shift(g2, -2)
     @test positions(g3) == (1, 2)
     # shift a GeneralGate (possibly non-unitary)
-    gg = GeneralGate(1 => 2, exp(Matrix(-im * hh * 0.1)))
+    gg = GeneralGate((1, 2), gate_tensor(exp(Matrix(-im * hh * 0.1))))
     gg2 = shift(gg, 1)
     @test positions(gg2) == (2, 3)
 end
@@ -219,15 +228,15 @@ end
     # independent factors and commute, so one Trotter layer is EXACT
     dt = 0.37
     ψ = copy(ψ0)
-    apply!(GeneralGate(1 => 2, exp(-im * dt * hs[1])), ψ; trunc=truncdimcutoff(64, 1e-12))
-    apply!(GeneralGate(3 => 4, exp(-im * dt * hs[3])), ψ; trunc=truncdimcutoff(64, 1e-12))
+    apply!(GeneralGate((1, 2), gate_tensor(exp(-im * dt * hs[1]))), ψ; trunc=truncdimcutoff(64, 1e-12))
+    apply!(GeneralGate((3, 4), gate_tensor(exp(-im * dt * hs[3]))), ψ; trunc=truncdimcutoff(64, 1e-12))
     Ulayer = kron(exp(-im * dt * hs[1]), exp(-im * dt * hs[3]))
     @test norm(todense(ψ) - Ulayer * v0) / norm(v0) < 1e-12
 
     # second-order Trotter time evolution vs exp(-i t H) from exact diagonalization
     dt = 0.01
     nsteps = 20
-    G(k, τ) = GeneralGate(pairs[k][1] => pairs[k][2], exp(-im * τ * hs[k]))
+    G(k, τ) = GeneralGate((pairs[k][1], pairs[k][2]), gate_tensor(exp(-im * τ * hs[k])))
     ψt = copy(ψ0)
     for _ in 1:nsteps
         for k in 1:3
@@ -312,7 +321,7 @@ end
     # long-range unitary gate on a non-adjacent pair vs the dense embedding
     hh = randn(4, 4) + im * randn(4, 4)
     U = exp(Matrix(-im * (hh + hh')))
-    gu = UnitaryGate(2 => 5, U)
+    gu = UnitaryGate((2, 5), gate_tensor(U))
     ψu = copy(ψ)
     apply!(gu, ψu; trunc=NoTruncation())
     Vu = two_site_dense_pair(operator(gu), 2, 5, L)
@@ -322,7 +331,7 @@ end
     @test norm(ψu) ≈ 1 atol = 1e-10
 
     # long-range non-unitary general gate vs the dense embedding (re-canonicalized)
-    gg = GeneralGate(2 => 5, randn(ComplexF64, 4, 4))
+    gg = GeneralGate((2, 5), gate_tensor(randn(ComplexF64, 4, 4)))
     ψg = copy(ψ)
     apply!(gg, ψg; trunc=NoTruncation())
     Vg = two_site_dense_pair(operator(gg), 2, 5, L)
@@ -401,7 +410,7 @@ end
     # U(τ) = e^{-i τ ad_H} via the symmetric local-gate sequence
     #   fields(τ/2), even(τ/2), odd(τ/2), odd(τ/2), even(τ/2), fields(τ/2)
     function apply_unitary!(ψ, τ)
-        ev(pos, M) = apply!(GeneralGate(pos => pos + 1, exp(Matrix(-im * (τ / 2) * M))), ψ; trunc=tr)
+        ev(pos, M) = apply!(GeneralGate((pos, pos + 1), gate_tensor(exp(Matrix(-im * (τ / 2) * M)))), ψ; trunc=tr)
         for (pos, M) in fraw; ev(pos, M); end
         for (pos, M) in even; ev(pos, M); end
         for (pos, M) in odd; ev(pos, M); end
@@ -414,7 +423,7 @@ end
     function lindblad_step!(ψ, dt)
         apply_unitary!(ψ, dt / 2)
         for (pos, M) in diss
-            apply!(GeneralGate(pos => pos + 1, exp(Matrix(dt * M))), ψ; trunc=tr)
+            apply!(GeneralGate((pos, pos + 1), gate_tensor(exp(Matrix(dt * M)))), ψ; trunc=tr)
         end
         apply_unitary!(ψ, dt / 2)
     end
