@@ -72,6 +72,11 @@ only consulted when the algorithm generates the initial ansatz itself.
 	verbosity::Int = 0
 end
 
+# the bond cap carried by a truncation scheme (`nothing` for schemes without one)
+_truncation_bond(t::TruncateDim) = t.D
+_truncation_bond(t::TruncateDimCutoff) = t.D
+_truncation_bond(t::TruncationScheme) = nothing
+
 # ---------- sweeps ----------
 
 """
@@ -182,7 +187,10 @@ Ground-state energy and state of `h` found by two-site DMRG, starting from a ran
 of bond `Defaults.D`.
 """
 function ground_state(h::MPOHamiltonian, alg::DMRG2)
-	ψ = randommps(scalartype(h), ophydims(h); D=Defaults.D)
+	# when the truncation scheme carries a bond cap, use it for the random initial
+	# ansatz; otherwise fall back to the default bond dimension
+	D = _truncation_bond(alg.trunc)
+	ψ = randommps(scalartype(h), ophydims(h); D = D === nothing ? Defaults.D : D)
 	khist = ground_state!(ψ, h, alg)
 	(alg.verbosity > 0) && println("DMRG2 converged (delta = $(_iterative_delta(khist)))")
 	return expectation(h, ψ), ψ
