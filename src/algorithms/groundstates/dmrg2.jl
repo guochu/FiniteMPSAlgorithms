@@ -59,16 +59,16 @@ end
 # ---------- algorithm type ----------
 
 """
-	DMRG2(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D, verbosity=0)
+	DMRG2(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=truncdim(D=Defaults.D), verbosity=0)
 
 Parameters of the two-site DMRG ground-state search. At each update the two center
-tensors are optimized jointly and truncated to bond `alg.D`; `alg.D` is only used
-when the algorithm generates the initial ansatz itself.
+tensors are optimized jointly and truncated with the `trunc::TruncationScheme`; it is
+only consulted when the algorithm generates the initial ansatz itself.
 """
 @kwdef struct DMRG2 <: IterativeMPSAlgorithm
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
-	D::Int = Defaults.D
+	trunc::TruncationScheme = truncdim(D=Defaults.D)
 	verbosity::Int = 0
 end
 
@@ -98,18 +98,27 @@ end
 
 Right-to-left two-site DMRG sweep (symmetric to `leftsweep!`): singular values are
 absorbed into the left site of each pair, keeping the already-swept tensors
-right-canonical.
+right-canonical. The SVD singular values are the true Schmidt spectrum at the swept
+bond and are recorded on the state (`ket.s[bond+1]`); the final center (site 1) is
+normalized, so the returned MPS satisfies `iscanonical`.
 """
 function rightsweep!(env::DMRGCache, alg::DMRG2)
 	L = length(env.ket)
 	kvals = zeros(Float64, L)
 	k = 1
 	for s in L:-1:2
-		kvals[k], _ = _dmrg2_local_update!(env, s - 1, alg; move_right=false)
+		kvals[k], _, sv = _dmrg2_local_update!(env, s - 1, alg; move_right=false)
+		# the SVD singular values are the Schmidt spectrum at bond s - 1
+		env.ket.s[s] = collect(sv)
 		k += 1
 		# rebuild the right environment with the updated site s
 		updateright!(env, s)
 	end
+	# the remaining center at site 1 carries the boundary bond's spectrum: normalize it
+	# (and the recorded spectrum with it) so the full state is right-canonical, unit norm
+	nrm = norm(env.ket[1])
+	env.ket.data[1] = env.ket[1] ./ nrm
+	env.ket.s[2] = collect(env.ket.s[2] ./ nrm)
 	kvals[L] = kvals[L-1]
 	return kvals
 end
@@ -133,7 +142,7 @@ function _dmrg2_local_update!(env::DMRGCache, s::Integer, alg::DMRG2; move_right
 	# SVD truncate the optimal two-site tensor.
 	# `move_right=true`  (left sweep):  absorb singular values into the right site (s+1).
 	# `move_right=false` (right sweep): absorb singular values into the left  site (s).
-	u, sv, v, _ = tsvd!(Ψ, (1, 2), (3, 4); trunc=truncdim(D=alg.D))
+	u, sv, v, _ = tsvd!(Ψ, (1, 2), (3, 4); trunc=alg.trunc)
 	if move_right
 		env.ket[s] = u
 		sm = Diagonal(sv)
@@ -146,7 +155,7 @@ function _dmrg2_local_update!(env::DMRGCache, s::Integer, alg::DMRG2; move_right
 		env.ket[s] = unew
 	end
 
-	return E, info
+	return E, info, sv
 end
 
 # ---------- driver ----------
@@ -155,7 +164,7 @@ end
 	ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::DMRG2) -> khist
 
 Two-site DMRG ground-state search starting from the user-provided ansatz `ψ`
-(modified in place; `alg.D` is ignored when an explicit ansatz is given). Returns
+(modified in place; `alg.trunc` only affects the sweep truncations). Returns
 `khist`, the per-sweep local-energy history.
 """
 function ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::DMRG2)
@@ -170,10 +179,10 @@ end
 	ground_state(h::MPOHamiltonian, alg::DMRG2) -> (E, ψ)
 
 Ground-state energy and state of `h` found by two-site DMRG, starting from a random MPS
-of bond `alg.D`.
+of bond `Defaults.D`.
 """
 function ground_state(h::MPOHamiltonian, alg::DMRG2)
-	ψ = randommps(scalartype(h), ophydims(h); D=alg.D)
+	ψ = randommps(scalartype(h), ophydims(h); D=Defaults.D)
 	khist = ground_state!(ψ, h, alg)
 	(alg.verbosity > 0) && println("DMRG2 converged (delta = $(_iterative_delta(khist)))")
 	return expectation(h, ψ), ψ

@@ -120,17 +120,33 @@ end
 	Hd = dense_model(p)
 	E_exact = eigmin(Hermitian(Hd))
 
-	# DMRG2, random initial state
-	E2, ψ2 = ground_state(H, DMRG2(maxiter=50, tol=1e-12, verbosity=0, D=32))
+	# DMRG2, random initial state (dimension truncation)
+	E2, ψ2 = ground_state(H, DMRG2(maxiter=50, tol=1e-12, verbosity=0, trunc=truncdim(D=32)))
 	@test real(E2) ≈ E_exact atol = 1e-8
 	@test norm(ψ2) ≈ 1 atol = 1e-8
 
-	# DMRG2 from a caller-provided initial state (alg.D is ignored)
+	# other truncation schemes work as the truncation policy
+	E2n, ψ2n = ground_state(H, DMRG2(maxiter=50, tol=1e-12, verbosity=0, trunc=NoTruncation()))
+	@test real(E2n) ≈ E_exact atol = 1e-8
+
+	# DMRG2 from a caller-provided initial state (alg.trunc only affects the sweeps)
 	ψ0 = randommps(ComplexF64, fill(2, L); D=4)
-	ground_state!(ψ0, H, DMRG2(maxiter=50, tol=1e-12, verbosity=0, D=32))
+	ground_state!(ψ0, H, DMRG2(maxiter=50, tol=1e-12, verbosity=0, trunc=truncdim(D=32)))
 	@test real(expectation(H, ψ0)) ≈ E_exact atol = 1e-8
 
 	# agreement with DMRG1 on the same model
 	E1, _ = ground_state(H, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32))
 	@test real(E2) ≈ real(E1) atol = 1e-8
+
+	# the right sweep keeps the SVD singular values as the bond Schmidt spectra and
+	# normalizes the remaining center: the output MPS is canonical
+	@test iscanonical(ψ2)
+	# the recorded spectra match the exact ground-state Schmidt values (no truncation
+	# at D = 32 for L = 8): bond-b spectrum = SVD of the ground state reshaped
+	# (2^(L-b), 2^b), i.e. the first b sites on one side
+	ψgs = vec(eigen(Hermitian(Hd)).vectors[:, 1])
+	for b in (2, 4, 6)
+		sv_ed = svdvals(reshape(ψgs, 2^(L - b), 2^b))
+		@test schmidt_values(ψ2; bond=b) ≈ sv_ed atol = 1e-8
+	end
 end

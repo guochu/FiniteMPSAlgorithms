@@ -15,7 +15,7 @@ export TruncationScheme, NoTruncation, TruncateDim, TruncateRelError, TruncateDi
 	truncdim, truncrelerr, truncdimcutoff, truncate!,
 	QR, QRpos, LQ, LQpos, SVD, SDD, Polar,
 	tsvd!, tsvd, leftorth!, leftorth, rightorth!, rightorth,
-	tie, permute, scalar, isometry, renyi_entropy, distance, distance2
+	tie, permute, scalar, isometry, renyi_entropy, distance, distance2, fidelity, infidelity
 # structures
 export AbstractMPS, AbstractMPO, MPSTensor, MPOTensor, CanonicalMPS, CanonicalMPO,
 	MPO, MPOHamiltonian, Orthogonalize,
