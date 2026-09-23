@@ -1,13 +1,15 @@
 # direct sampling of configuration amplitudes from a canonical MPS (Born distribution)
 
 """
-	sample(ψ::CanonicalMPS, N::Integer) -> Vector{NTuple{L,Int}}
+	sample(ψ::CanonicalMPS, N::Integer) -> Vector{Vector{Int}}
 
 Draw `N` configuration samples `𝐱 = (x₁, …, x_L)` from `ψ` by direct sequential
 sampling: the chain is swept right to left, at each site the conditional distribution
 over the local index is obtained from the stored bond spectrum
 (`P(x_s, aL | suffix) ∝ s[s][aL]²·‖A_s[aL, x_s, :]·w‖²` with `w` the sampled-suffix
 amplitude vector), and one index is drawn per site.
+
+Samples follow the package's **1-based convention**: `x[s] ∈ 1:ds[s]` for every site.
 
 !!! warning "assumptions"
 	The function ASSUMES that `ψ` is right-canonical and represents a PURE quantum
@@ -20,7 +22,7 @@ function sample(ψ::CanonicalMPS, N::Integer)
 	svectors_uninitialized(ψ) && canonicalize!(ψ; alg=Orthogonalize(SVD(), NoTruncation(), false))
 	L = length(ψ)
 	T = scalartype(ψ)
-	samples = Vector{NTuple{L,Int}}(undef, N)
+	samples = Vector{Vector{Int}}(undef, N)
 	for n in 1:N
 		x = Vector{Int}(undef, L)
 		w = ones(T, 1)                     # sampled-suffix amplitude (empty at bond L)
@@ -47,7 +49,25 @@ function sample(ψ::CanonicalMPS, N::Integer)
 			x[s] = (idx - 1) ÷ D + 1
 			w = reshape(A[:, x[s], :], D, size(A, 3)) * w
 		end
-		samples[n] = ntuple(i -> x[i], L)
+		samples[n] = x
 	end
 	return samples
+end
+
+"""
+	amplitude(ψ::CanonicalMPS, 𝐱) -> Number
+
+The amplitude `ψ(𝐱) = ⟨𝐱|ψ⟩` of the represented state at the configuration `𝐱`
+(`𝐱[s] ∈ 1:ds[s]`, following the package's **1-based convention**; a `Vector{Int}` or
+a tuple), including the per-site `scaling` factor as `scaling(ψ)^L` (matching
+[`todense`](@ref)). The rows of the site tensors are contracted left to right.
+"""
+function amplitude(ψ::CanonicalMPS, 𝐱)
+	L = length(ψ)
+	(length(𝐱) == L) || throw(DimensionMismatch("configuration length must match the number of sites"))
+	v = reshape(ψ[1][1, 𝐱[1], :], 1, :)
+	for s in 2:L
+		v = v * reshape(ψ[s][:, 𝐱[s], :], size(ψ[s], 1), :)
+	end
+	return v[] * scaling(ψ)^L
 end
