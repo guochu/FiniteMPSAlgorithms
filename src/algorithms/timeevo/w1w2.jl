@@ -142,7 +142,9 @@ function timeevompo(h::Union{SchurMPOTensor,MPOHamiltonian{<:SchurMPOTensor}}, d
 	return timeevompo(h, dt1, alg.stepper), timeevompo(h, dt2, alg.stepper)
 end
 
-timeevompo(h::MPOHamiltonian{<:SchurMPOTensor}, dt::Number, alg::MPSAlgorithm=WII()) = timeevompo(h, dt, alg)
+# two-argument convenience (defaults to WII); a fallback on alg::MPSAlgorithm would be
+# ambiguous with the ComplexStepper method above
+timeevompo(h::MPOHamiltonian{<:SchurMPOTensor}, dt::Number) = timeevompo(h, dt, WII())
 
 # ---------- applying the evolved MPO to a state ----------
 
