@@ -3,22 +3,28 @@
 # environment contraction the single-site ALS uses — is formed for both sites jointly
 # and re-split by a truncating SVD (`alg.trunc`), so the bond dimension adapts during
 # the sweeps (growth where the environment demands it, truncation where the scheme
-# caps it). The singular values are absorbed into the sweep direction WITHOUT
+# caps it). The raw singular values are absorbed into the sweep direction WITHOUT
 # normalization (as in the single-site ALS gauge moves): the data carries the scale of
-# the local targets through the sweeps, so the drivers only attach the operand external
-# scales through the `scaling` field. The convergence measure is the norm of the
-# two-site optimal target, monotone in processing time, exactly as in the single-site
-# sweeps.
+# the local targets through the sweeps, and their normalized spectra are recorded as
+# the bond Schmidt values. Each driver ends by attaching the operand external scales
+# and folding the center tensor's norm (the total data norm) into the `scaling` field —
+# the output is canonical (isometric sites, initialized Schmidt values) and its
+# represented value equals the strict operation up to the sweep truncations. The
+# convergence measure is the norm of the two-site optimal target, monotone in
+# processing time, exactly as in the single-site sweeps.
 
 # ---------- generic two-site re-split ----------
 
 # re-split the optimal two-site block of a rank-3 bra (MPS case): block legs
-# (bL, p1, p2, bR); the singular values are absorbed into the sweep direction without
-# normalization — the data keeps the scale of the local target (as in the single-site
-# ALS gauge moves)
+# (bL, p1, p2, bR); the raw singular values are absorbed into the sweep direction
+# without normalization (the data keeps the scale of the local target, as in the
+# single-site ALS gauge moves), and their normalized spectrum is recorded as the bond's
+# Schmidt values
 function _als2_update!(bra, s::Integer, t2::AbstractArray{T,4}, alg::DMRG2;
 					   move_right::Bool) where {T}
 	u, sv, v, _ = tsvd!(t2, (1, 2), (3, 4); trunc=alg.trunc)
+	n = norm(sv)
+	n == 0 || (bra.s[s+1] = sv ./ n)
 	if move_right
 		bra[s] = u
 		sm = Diagonal(sv)
@@ -39,6 +45,8 @@ function _als2_update!(bra, s::Integer, t2::AbstractArray{T,6}, alg::DMRG2;
 					   move_right::Bool) where {T}
 	u, sv, v, _ = tsvd!(t2, (1, 2, 4), (3, 5, 6); trunc=alg.trunc)
 	# u: (bL, po1, pi1, md); v: (md, po2, pi2, bR)
+	n = norm(sv)
+	n == 0 || (bra.s[s+1] = sv ./ n)
 	sm = Diagonal(sv)
 	if move_right
 		bra[s] = permutedims(u, (1, 2, 4, 3))            # (bL, po1, aR, pi1)
@@ -322,16 +330,20 @@ sweep!(m::LinsolveCache, alg::DMRG2) = vcat(leftsweep!(m, alg), rightsweep!(m, a
 # (`_guess_bond`); the two-site sweeps adapt the bond dimension during the iterations,
 # so the guess may be smaller than the final bond
 #
-# the sweeps keep the natural data scale (as in DMRG1): the drivers only attach the
-# operand external scales through the `scaling` field — no scale restoration pass
+# the sweeps keep the natural data scale (as in DMRG1) and record the bond spectra:
+# each driver attaches the operand external scales through the `scaling` field and
+# folds the center norm into it — the output is `iscanonical` and its represented value
+# equals the strict operation up to the sweep truncations
 
 function mult!(out, h, x, alg::DMRG2)
 	cache = MultCache(h, x, out)
 	iterative_compute!(cache, alg)
-	# the sweeps keep the natural data scale: only the external operand scales are
-	# attached through the `scaling` field (as in the DMRG1 driver)
+	# attach the external operand scales and fold the center tensor's norm (the total
+	# data norm — the swept chain is isometric on the other sites) into the `scaling`
+	# field; the bond spectra recorded during the sweeps initialize the Schmidt values
 	s = _opscaling(h) * _opscaling(x)
 	s == 1 || setscaling!(out, s)
+	_renormalize!(out, out[1], false)
 	return out
 end
 
@@ -374,8 +386,9 @@ add(ρA::CanonicalMPO, ρB::CanonicalMPO, alg::DMRG2) = add([ρA, ρB], alg)
 function compress!(out, x, alg::DMRG2)
 	cache = OverlapCache(out, x)
 	iterative_compute!(cache, alg)
-	# the sweeps keep the natural data scale: only the external operand scale is attached
+	# attach the external operand scale and fold the center norm into `scaling` (see `mult!`)
 	x isa Union{CanonicalMPS, CanonicalMPO} && setscaling!(out, scaling(x))
+	_renormalize!(out, out[1], false)
 	return out
 end
 
@@ -389,9 +402,10 @@ compress(h::MPOHamiltonian, alg::DMRG2) = compress(MPO(tompotensors(h)), alg)
 function hadamard!(χ, ψA, ψB, alg::DMRG2)
 	cache = HadamardCache(ψA, ψB, χ)
 	iterative_compute!(cache, alg)
-	# the sweeps keep the natural data scale: only the ⊙ convention scale
-	# scaling(ψA)·scaling(ψB) is attached
+	# attach the ⊙ convention scale scaling(ψA)·scaling(ψB) and fold the center norm
+	# into `scaling` (see `mult!`)
 	setscaling!(χ, scaling(ψA) * scaling(ψB))
+	_renormalize!(χ, χ[1], false)
 	return χ
 end
 
@@ -409,10 +423,10 @@ function linsolve!(x, A, y, alg::DMRG2)
 		abs(r - prev) < alg.tol && break
 		prev = r
 	end
-	# the sweeps keep the natural data scale: the solution is expressed in the
-	# right-hand side's per-site scaling convention (attached through the `scaling`
-	# field — a scaling^L power is never materialized)
+	# the solution is expressed in the right-hand side's per-site scaling convention;
+	# fold the center norm into `scaling` (see `mult!`)
 	setscaling!(m.ket, scaling(y))
+	_renormalize!(m.ket, m.ket[1], false)
 	return x
 end
 

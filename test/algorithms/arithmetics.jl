@@ -380,6 +380,7 @@ end
 	out = mult(H, ψ, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(8), verbosity=0))
 	@test todense(out) ≈ vHψ atol = 1e-6
 	@test bonddim(out) <= 8
+	@test iscanonical(out)
 
 	# mult MPO·MPO
 	prod2 = mult(H, H, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(16), verbosity=0))
@@ -394,18 +395,21 @@ end
 	# add: the pair updates can express the exact bond-16 sum within the cap
 	s2 = add([ψ, ψ], DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(8), verbosity=0))
 	@test todense(s2) ≈ 2 * vψ atol = 1e-5
+	@test iscanonical(s2)
 
 	# compress: bond cap respected and the represented chain recovered
 	ψbig = mult(H, ψ, SVDCompression(trunc=truncdim(64)))
 	c2 = compress(ψbig, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(8), verbosity=0))
 	@test bonddim(c2) <= 8
 	@test norm(todense(c2) - vHψ) / norm(vHψ) < 1e-6
+	@test iscanonical(c2)
 
 	# hadamard: two-site updates handle the bond-16 exact product within the cap
 	φ = randommps(ComplexF64, ds; D=4)
 	χ = hadamard(ψ, φ, DMRG2(maxiter=15, tol=1e-10, trunc=truncdim(16), verbosity=0))
 	refχ = vψ .* todense(φ)
 	@test norm(todense(χ) - refχ) / norm(refχ) < 1e-5
+	@test iscanonical(χ)
 
 	# linsolve: unitary system U·x = y recovered with a small guess (bonds grow)
 	U = timeevompo(H, 0.15, WII())
@@ -413,6 +417,7 @@ end
 	yU = mult(U, x_exact)
 	xsol = linsolve(U, yU, DMRG2(maxiter=20, tol=1e-10, trunc=truncdim(8), verbosity=0))
 	@test abs(dot(xsol, x_exact)) / (norm(xsol) * norm(x_exact)) ≈ 1 atol = 1e-5
+	@test iscanonical(xsol)
 
 	# the DMRG2 sweeps keep the working chain right-canonical (final sweep direction)
 	@test isrightcanonical(out[end-1]) || isrightcanonical(out[end])
