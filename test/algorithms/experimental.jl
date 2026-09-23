@@ -110,10 +110,11 @@ end
         ψ3, traj3 = reconstruct(Sn, Tuple(ds), ALSRecon(D=6, α=1e-8, maxiter=100, tol=1e-12))
         @test norm(todense(ψ3) - vref) / norm(vref) < 1e-4
 
-        # in-place route: bond re-fitted to alg.D, scaling folded (result scaling 1)
+        # in-place route: bond re-fitted to alg.D; the input scaling is folded into the
+        # data and the fit targets the sample amplitudes as represented (scaling 1 out)
         ψ4 = randommps(ComplexF64, ds; D=4)
         setscaling!(ψ4, 1.5)
         ψ4, traj4 = reconstruct!(ψ4, S, ALSRecon(D=6, α=1e-10, maxiter=100, tol=1e-14))
         @test scaling(ψ4) == 1
-        @test todense(ψ4) ≈ 1.5^L * vref atol = 1e-5 rtol = 1e-5
+        @test todense(ψ4) ≈ vref atol = 1e-5 rtol = 1e-5
 end

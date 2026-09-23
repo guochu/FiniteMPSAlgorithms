@@ -192,7 +192,7 @@ function _ls_reduce_site(c::ALSReconCache, s)
 		p = c.X[s, k]
 		f = vec(reshape(@view(Lm[k, :]), Dl, 1) * reshape(@view(Rm[k, :]), 1, Dr))
 		@views M6[:, p, :, :, p, :] .+= reshape(conj(f) * transpose(f), Dl, Dr, Dl, Dr)
-		@views b6[:, p, :] .+= conj(c.a[k]) .* reshape(f, Dl, Dr)
+		@views b6[:, p, :] .+= c.a[k] .* conj(reshape(f, Dl, Dr))
 	end
 	return M6, b6
 end
