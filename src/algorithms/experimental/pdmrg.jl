@@ -24,7 +24,7 @@ applied to the center-movement SVDs (its bond cap bounds the MPS bond dimension 
 isometric part of the PMPA) and `R` the rank of the orthogonal center (the maximal
 Schmidt number of the represented mixed state).
 """
-@kwdef struct PDMRG{TR<:TruncationScheme} <: IterativeMPSAlgorithm
+@kwdef struct PDMRG{TR<:TruncationScheme} <: TwoSiteUpdate
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
 	trunc::TR = truncdim(D=Defaults.D)

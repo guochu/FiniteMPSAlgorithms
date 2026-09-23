@@ -198,3 +198,77 @@ add(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::SVDCompression=DefaultMultAlg) = 
 add(ρA::CanonicalMPO, ρB::CanonicalMPO, alg::SVDCompression=DefaultMultAlg) = add([ρA, ρB], alg)
 add(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::DMRG1) = add([ψA, ψB], alg)
 add(ρA::CanonicalMPO, ρB::CanonicalMPO, alg::DMRG1) = add([ρA, ρB], alg)
+
+# ---------- two-site (DMRG2) sweeps and interface ----------
+
+# the two-site target of the sum: the accumulated overlap blocks of all chains
+function _reduce_two_site(m::AddCache, s::Integer)
+	acc = missing
+	for c in m.hstorage
+		t = _reduce_two_site(c, s)
+		acc = acc isa Missing ? t : acc + t
+	end
+	acc isa Missing && throw(ArgumentError("empty AddCache"))
+	return acc
+end
+
+function leftsweep!(m::AddCache, alg::DMRG2)
+	L = length(m.bra)
+	kvals = zeros(Float64, L)
+	for s in 1:L-1
+		t2 = _reduce_two_site(m, s)
+		kvals[s] = norm(t2)
+		_als2_update!(m.bra, s, t2, alg; move_right=true)
+		for c in m.hstorage
+			updateleft!(c, s)
+		end
+	end
+	kvals[L] = kvals[L-1]
+	return kvals
+end
+
+function rightsweep!(m::AddCache, alg::DMRG2)
+	L = length(m.bra)
+	kvals = zeros(Float64, L)
+	k = 1
+	for s in L:-1:2
+		t2 = _reduce_two_site(m, s - 1)
+		kvals[k] = norm(t2)
+		k += 1
+		_als2_update!(m.bra, s - 1, t2, alg; move_right=false)
+		for c in m.hstorage
+			updateright!(c, s)
+		end
+	end
+	kvals[L] = kvals[L-1]
+	return kvals
+end
+
+sweep!(m::AddCache, alg::DMRG2) = vcat(leftsweep!(m, alg), rightsweep!(m, alg))
+
+# the KKT eigenvalue of the converged ALS direction: (linear form) / ⟨dir|dir⟩
+_kkt_ratio(form::Number, dirnorm2::Number) = form / dirnorm2
+
+function add!(out, chains, alg::DMRG2)
+	cache = AddCache(out, chains)
+	iterative_compute!(cache, alg)
+	# Σ kets = β·bra at convergence: β = Σ_n ⟨bra|ket_n⟩ / ⟨bra|bra⟩. Unlike the other
+	# DMRG2 drivers, `add` restores the physical scale of the (cancellation-prone) sum
+	# from the problem's KKT eigenvalue; `setscaling!` first, `lmul!` second (the
+	# folding `lmul!` must not be overwritten by a later `setscaling!`)
+	setscaling!(out, scaling(chains[1]))
+	form = sum(_dot(out, c) for c in chains)
+	lmul!(_kkt_ratio(form, _dot(out, out)), out)
+	return out
+end
+
+function add(ψs::Vector{<:CanonicalMPS}, alg::DMRG2)
+	isempty(ψs) && throw(ArgumentError("empty input"))
+	return add!(svdguess_add(ψs, _guess_bond(alg.trunc)), ψs, alg)
+end
+function add(ρs::Vector{<:CanonicalMPO}, alg::DMRG2)
+	isempty(ρs) && throw(ArgumentError("empty input"))
+	return add!(svdguess_add(ρs, _guess_bond(alg.trunc)), ρs, alg)
+end
+add(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::DMRG2) = add([ψA, ψB], alg)
+add(ρA::CanonicalMPO, ρB::CanonicalMPO, alg::DMRG2) = add([ρA, ρB], alg)

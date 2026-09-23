@@ -59,15 +59,18 @@ end
 
 The amplitude `ψ(𝐱) = ⟨𝐱|ψ⟩` of the represented state at the configuration `𝐱`
 (`𝐱[s] ∈ 1:ds[s]`, following the package's **1-based convention**; a `Vector{Int}` or
-a tuple), including the per-site `scaling` factor as `scaling(ψ)^L` (matching
-[`todense`](@ref)). The rows of the site tensors are contracted left to right.
+a tuple), including the per-site `scaling` factor (matching [`todense`](@ref)). The
+scaling is applied **per site during the contraction** — no `scaling^L` power is ever
+materialized, so the amplitude stays finite even for scalings whose `scaling(ψ)^L`
+would overflow. The rows of the site tensors are contracted left to right.
 """
 function amplitude(ψ::CanonicalMPS, 𝐱)
 	L = length(ψ)
 	(length(𝐱) == L) || throw(DimensionMismatch("configuration length must match the number of sites"))
-	v = reshape(ψ[1][1, 𝐱[1], :], 1, :)
+	f = scaling(ψ)
+	v = f * reshape(ψ[1][1, 𝐱[1], :], 1, :)
 	for s in 2:L
-		v = v * reshape(ψ[s][:, 𝐱[s], :], size(ψ[s], 1), :)
+		v = f * (v * reshape(ψ[s][:, 𝐱[s], :], size(ψ[s], 1), :))
 	end
-	return v[] * scaling(ψ)^L
+	return v[]
 end

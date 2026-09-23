@@ -17,8 +17,8 @@
 # normal equations are inhomogeneous, the data fixes the scale.
 
 """
-	ALSRecon(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D,
-	        α=0.01, nadd=8, nbuffer=1024, verbosity=0)
+	ALSRecon(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D, α=1.0e-4,
+	         solver=DefaultLinearSolver, nadd=8, nbuffer=1024, verbosity=0)
 
 Sample-amplitude MPS reconstruction by quadratic (least-squares) optimization —
 the variational alternative to tensor cross interpolation. Given the sample set
@@ -33,14 +33,16 @@ Single-site ALS sweeps with a fixed bond profile `alg.D` (the DMRG1 discipline: 
 out-of-place entry points draw a random guess of bond `alg.D`, the in-place route
 re-fits the caller's guess with `changebond!`). `α ≥ 0` is the Hilbert-Schmidt ridge
 added to the local normal equations for conditioning (the seq2seq regularization; not
-part of the reported loss); `nadd`/`nbuffer` drive the adaptive
+part of the reported loss). The local normal equations are solved by the KrylovKit
+iterative solver `alg.solver`. `nadd`/`nbuffer` drive the adaptive
 sample-enrichment loop of [`reconstruct`](@ref).
 """
-@kwdef struct ALSRecon <: IterativeMPSAlgorithm
+@kwdef struct ALSRecon{S<:KrylovKit.LinearSolver} <: SingleSiteUpdate
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
 	D::Int = Defaults.D
-	α::Float64 = 0.01        # HS ridge on the local solves (seq2seq regularizer)
+	α::Float64 = 1.0e-4      # HS ridge on the local solves (seq2seq regularizer)
+	solver::S = DefaultLinearSolver
 	nadd::Int = 8            # samples added per adaptive enrichment round
 	nbuffer::Int = 1024      # random candidate pool of the residual evaluation
 	verbosity::Int = 0
@@ -48,28 +50,32 @@ end
 
 # ---------- sample bookkeeping ----------
 
-# samples: Vector of Pair{NTuple{L,Int},T} or (𝐱, a) tuples → (X::Matrix{L×N}, a::Vector)
-function _normalize_samples(ds::NTuple{L,Int}, samples) where {L}
+# samples: Vector of Pair{Vector{Int},T} or (𝐱, a) tuples with 𝐱::Vector{Int}
+# → (X::Vector{Vector{Int}} (the coordinates), a::Vector (the amplitudes))
+function _normalize_samples(ds::Vector{Int}, samples)
 	N = length(samples)
 	N > 0 || throw(ArgumentError("empty sample set"))
-	X = Matrix{Int}(undef, L, N)
+	X = Vector{Vector{Int}}(undef, N)
 	vals = [smp isa Pair ? last(smp) : smp[2] for smp in samples]
 	T = promote_type(eltype(vals), Float64)
 	a = Vector{T}(undef, N)
 	for (k, smp) in enumerate(samples)
 		𝐱 = smp isa Pair ? first(smp) : smp[1]
-		length(𝐱) == L || throw(DimensionMismatch("sample coordinates must have length $L"))
-		for j in 1:L
-			1 <= 𝐱[j] <= ds[j] ||
-				throw(ArgumentError("sample coordinate out of range: site $j value $(𝐱[j])"))
-			X[j, k] = 𝐱[j]
+		length(𝐱) == length(ds) ||
+			throw(DimensionMismatch("sample coordinates must have length $(length(ds))"))
+		for (j, xj) in enumerate(𝐱)
+			1 <= xj <= ds[j] ||
+				throw(ArgumentError("sample coordinate out of range: site $j value $xj"))
 		end
+		X[k] = convert(Vector{Int}, 𝐱)
 		a[k] = vals[k]
 	end
 	return X, a
 end
 
 # ---------- per-sample context transfers ----------
+
+
 
 # left context transfer: row k of the output is `C[k, :] * A[:, xₖ, :]` (N×Dl → N×Dr)
 function _left_context_transfer(C::AbstractMatrix{T}, A::AbstractArray{T,3},
@@ -110,14 +116,14 @@ end
 """
 struct ALSReconCache{CP,T}
 	ψ::CP
-	X::Matrix{Int}
+	X::Vector{Vector{Int}}
 	a::Vector{T}
 	Lmat::Vector{Matrix{T}}
 	Rmat::Vector{Matrix{T}}
 	gstorage::Vector{Matrix{T}}
 end
 
-function ALSReconCache(ψ::CanonicalMPS, X::Matrix{Int}, a::Vector)
+function ALSReconCache(ψ::CanonicalMPS, X::Vector{Vector{Int}}, a::Vector)
 	# fold the per-site scaling into the data (bounded per site): the sweeps match the
 	# REPRESENTED amplitudes, and the result keeps `scaling == 1`
 	s = scaling(ψ)
@@ -145,13 +151,16 @@ function ALSReconCache(ψ::CanonicalMPS, X::Matrix{Int}, a::Vector)
 	return c
 end
 
+# the site-`s` physical value of every sample: [X[1][s], …, X[N][s]]
+_xcol(c::ALSReconCache, s::Integer) = [x[s] for x in c.X]
+
 # right-to-left initialization of the right contexts and the ridge stack: Rmat[s]
 # covers sites s+1..L, gstorage[s] is the HS overlap over sites s..L; Lmat[1] is the
 # trivial boundary (the left contexts are transferred during the sweeps)
 function _init_contexts_right!(c::ALSReconCache)
 	L = length(c.ψ)
 	for s in L:-1:1
-		s < L && (c.Rmat[s] = _right_context_transfer(c.Rmat[s+1], c.ψ[s+1], @view(c.X[s+1, :])))
+		s < L && (c.Rmat[s] = _right_context_transfer(c.Rmat[s+1], c.ψ[s+1], _xcol(c, s + 1)))
 		c.gstorage[s] = _g_transfer_right(c.gstorage[s+1], c.ψ[s])
 	end
 	return c
@@ -161,9 +170,9 @@ end
 # left ridge); the right contexts of the not-yet-reached sites stay untouched
 # (the dmrg2.jl double-update lesson)
 _left_transfer!(c::ALSReconCache, s) =
-	(c.Lmat[s+1] = _left_context_transfer(c.Lmat[s], c.ψ[s], @view(c.X[s, :])); c)
+	(c.Lmat[s+1] = _left_context_transfer(c.Lmat[s], c.ψ[s], _xcol(c, s)); c)
 _right_transfer!(c::ALSReconCache, s) =
-	(c.Rmat[s-1] = _right_context_transfer(c.Rmat[s], c.ψ[s], @view(c.X[s, :])); c)
+	(c.Rmat[s-1] = _right_context_transfer(c.Rmat[s], c.ψ[s], _xcol(c, s)); c)
 _g_transfer_left!(c::ALSReconCache, s) =
 	(c.gstorage[s+1] = _g_transfer_left(c.gstorage[s], c.ψ[s]); c)
 _g_transfer_right!(c::ALSReconCache, s) =
@@ -200,8 +209,9 @@ function _ls_apply(c::ALSReconCache, s::Integer, z::AbstractArray{T,3}, α::Real
 	Dl, d, Dr = size(z)
 	out = zeros(T, Dl, d, Dr)
 	Lm, Rm = c.Lmat[s], c.Rmat[s]
+	xs = _xcol(c, s)
 	for k in eachindex(c.a)
-		p = c.X[s, k]
+		p = xs[k]
 		gk = _model_amplitude(Lm, Rm, z, k, p)
 		@views out[:, p, :] .+= gk .* conj(reshape(Lm[k, :], Dl, 1) .*
 										   reshape(Rm[k, :], 1, Dr))
@@ -221,10 +231,10 @@ end
 function _ls_rhs(c::ALSReconCache, s::Integer)
 	Dl, d, Dr = size(c.ψ[s])
 	b = zeros(eltype(c.a), Dl, d, Dr)
-	Lm, Rm = c.Lmat[s], c.Rmat[s]
+	Lm, Rm, xs = c.Lmat[s], c.Rmat[s], _xcol(c, s)
 	for k in eachindex(c.a)
-		@views b[:, c.X[s, k], :] .+= c.a[k] .* conj(reshape(Lm[k, :], Dl, 1) .*
-													 reshape(Rm[k, :], 1, Dr))
+		@views b[:, xs[k], :] .+= c.a[k] .* conj(reshape(Lm[k, :], Dl, 1) .*
+											  reshape(Rm[k, :], 1, Dr))
 	end
 	return b
 end
@@ -239,18 +249,17 @@ tensor `w` of shape (Dl, d, Dr).
 """
 function _ls_solve(c::ALSReconCache, s::Integer, alg::ALSRecon)
 	b = _ls_rhs(c, s)
-	w, _ = KrylovKit.linsolve(z -> _ls_apply(c, s, z, alg.α), b, c.ψ[s];
-							  ishermitian=true, tol=Defaults.tol, krylovdim=25, maxiter=100)
+	w, _ = KrylovKit.linsolve(z -> _ls_apply(c, s, z, alg.α), b, c.ψ[s], alg.solver)
 	return w
 end
 
 # exact global data objective after the site update (ridge excluded), from the
 # per-sample model amplitudes of the updated tensor: ℒ = Σₖ |gₖ − aₖ|²
 function _site_loss(c::ALSReconCache, s::Integer, w::AbstractArray)
-	Lm, Rm = c.Lmat[s], c.Rmat[s]
+	Lm, Rm, xs = c.Lmat[s], c.Rmat[s], _xcol(c, s)
 	loss = 0.0
 	for k in eachindex(c.a)
-		gk = _model_amplitude(Lm, Rm, w, k, c.X[s, k])
+		gk = _model_amplitude(Lm, Rm, w, k, xs[k])
 		loss += abs2(gk - c.a[k])
 	end
 	return loss
@@ -315,9 +324,9 @@ sweep!(c::ALSReconCache, alg::ALSRecon) = vcat(leftsweep!(c, alg), rightsweep!(c
 
 # amplitudes ⟨𝐱⁽ᵏ⁾|ψ⟩ of all samples, by per-sample chain folding
 function _amplitudes(c::ALSReconCache)
-	v = ones(eltype(c.a), size(c.X, 2), 1)
+	v = ones(eltype(c.a), length(c.a), 1)
 	for s in 1:length(c.ψ)
-		v = _left_context_transfer(v, c.ψ[s], @view(c.X[s, :]))
+		v = _left_context_transfer(v, c.ψ[s], _xcol(c, s))
 	end
 	return vec(v)
 end
@@ -325,7 +334,8 @@ end
 _ls_loss(c::ALSReconCache) = sum(abs2, _amplitudes(c) .- c.a)
 
 # amplitude ⟨𝐱|ψ⟩ at one coordinate (adaptive-residual evaluation)
-function _amplitude(ψ::CanonicalMPS, 𝐱::NTuple{L,Int}) where {L}
+function _amplitude(ψ::CanonicalMPS, 𝐱::Vector{Int})
+	L = length(ψ)
 	L == 1 && return ψ[1][1, 𝐱[1], 1]
 	v = reshape(ψ[1][1, 𝐱[1], :], 1, :)
 	for s in 2:L-1
@@ -334,8 +344,8 @@ function _amplitude(ψ::CanonicalMPS, 𝐱::NTuple{L,Int}) where {L}
 	return (v * ψ[L][:, 𝐱[L], :])[1]
 end
 
-_random_coords(ds::NTuple{L,Int}, n::Integer) where {L} =
-	Vector{NTuple{L,Int}}([Tuple(rand(1:ds[j]) for j in 1:L) for _ in 1:n])
+_random_coords(ds::Vector{Int}, n::Integer) =
+	[[rand(1:ds[j]) for j in eachindex(ds)] for _ in 1:n]
 
 # ---------- drivers ----------
 
@@ -343,12 +353,13 @@ _random_coords(ds::NTuple{L,Int}, n::Integer) where {L} =
 	reconstruct(samples, ds, alg::ALSRecon = ALSRecon()) -> (ψ, traj)
 
 Fit an MPS `ψ` to a fixed sample set of tensor amplitudes by single-site ALS sweeps
-(`samples::Vector` of `Pair{NTuple{L,Int},T}` or `(𝐱, a)` tuples). The initial guess
+(`samples::Vector` of `Pair{Vector{Int},T}` or `(𝐱, a)` tuples with
+`𝐱::Vector{Int}`). The initial guess
 is a random chain of bond `alg.D`. Returns `ψ` (scaling 1; the represented amplitudes
 are fitted) and `traj`, the per-sweep loss history of `iterative_compute!`.
 """
-function reconstruct(samples, ds::NTuple{L,Int}, alg::ALSRecon = ALSRecon()) where {L}
-	ψ = randommps(ComplexF64, collect(ds); D=alg.D, normalize=false)
+function reconstruct(samples, ds::Vector{Int}, alg::ALSRecon = ALSRecon())
+	ψ = randommps(ComplexF64, ds; D=alg.D, normalize=false)
 	ψ, traj = reconstruct!(ψ, samples, alg)
 	return ψ, traj
 end
@@ -361,7 +372,7 @@ sample set (the per-site scaling is folded into the data and the bond profile is
 re-fitted to `alg.D` with `changebond!`). Returns `(ψ, traj)`.
 """
 function reconstruct!(ψ::CanonicalMPS, samples, alg::ALSRecon = ALSRecon())
-	ds = Tuple(phydims(ψ))
+	ds = phydims(ψ)
 	X, a = _normalize_samples(ds, samples)
 	bonddim(ψ) != alg.D && changebond!(ψ; D=alg.D)
 	c = ALSReconCache(ψ, X, a)
@@ -381,8 +392,8 @@ on the current sample set with residual-driven sample enrichment — each round 
 selection). Stops when the maximal pool residual drops below `alg.tol` or after
 `alg.maxiter` rounds.
 """
-function reconstruct(Afun::Function, ds::NTuple{L,Int}, alg::ALSRecon = ALSRecon()) where {L}
-	ψ = randommps(ComplexF64, collect(ds); D=alg.D, normalize=false)
+function reconstruct(Afun::Function, ds::Vector{Int}, alg::ALSRecon = ALSRecon())
+	ψ = randommps(ComplexF64, ds; D=alg.D, normalize=false)
 	S = [(𝐱, Afun(𝐱)) for 𝐱 in _random_coords(ds, alg.nbuffer)]
 	maxres = Inf
 	rounds = 0

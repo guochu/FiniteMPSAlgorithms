@@ -21,15 +21,17 @@ The matrix element `⟨ψA|h|ψB⟩` of the represented chains (no normalization
 """
 function expectation(ψA::CanonicalMPS, h::AbstractMPO, ψB::CanonicalMPS)
 	(length(ψA) == length(h) == length(ψB)) || throw(ArgumentError("dimension mismatch"))
+	sA = scaling(ψA)
+	sB = scaling(ψB)
 	hold = l_LL(ψA, h, ψB)
 	for i in 1:length(h)
-		hold = _updateleft(hold, ψA[i], h[i], ψB[i])
+		hold = (sA * sB) * _updateleft(hold, ψA[i], h[i], ψB[i])
 	end
 	# contract with the right boundary vector: for block-sparse chains it selects the
 	# closing column (a dense MPO chain has a single column, so this is its scalar too)
 	r = r_RR(ψA, h, ψB)
 	@tensor val = conj(r[a, w, c]) * hold[a, w, c]
-	return val * scaling(ψA)^length(ψA) * scaling(ψB)^length(ψB)
+	return val
 end
 
 """
@@ -48,15 +50,16 @@ expectation(h::AbstractMPO, ψ::CanonicalMPS) = expectation(ψ, h, ψ)
 
 function expectation(h::AbstractMPO, ρ::CanonicalMPO)
 	(length(h) == length(ρ)) || throw(ArgumentError("dimension mismatch"))
+	s = scaling(ρ)
 	T = promote_type(scalartype(h), scalartype(ρ))
 	c = ones(T, 1, 1)
 	for i in eachindex(h)
 		Wh = h[i]
 		Wρ = ρ[i]
 		@tensor c2[-1, -2] := c[1, 2] * Wh[1, 3, -1, 5] * Wρ[2, 5, -2, 3]
-		c = c2
+		c = s * c2
 	end
-	return scalar(c) * scaling(ρ)^length(ρ)
+	return scalar(c)
 end
 
 """
@@ -77,36 +80,45 @@ function expectation(op::OpTerm, ψ::CanonicalMPS)
 	firstpos, lastpos = first(op.positions), last(op.positions)
 	(1 <= firstpos && lastpos <= L) || throw(BoundsError())
 	svectors_uninitialized(ψ) && canonicalize!(ψ)
-	# right environment of the support: identity (right-canonical form)
+	s2 = scaling(ψ)^2
+	# right environment of the support: identity (right-canonical form); the per-site
+	# s² (bra·ket) is folded into every contracted site
 	e = r_RR(ψ, ψ)   # (1, 1)
 	for i in L:-1:lastpos+1
-		e = _updateright(e, ψ[i], ψ[i])
+		e = s2 * _updateright(e, ψ[i], ψ[i])
 	end
 	# walk down through the support, inserting the term's operators (bra side conjugated)
 	for i in lastpos:-1:firstpos
 		j = findfirst(==(i), op.positions)
 		if j === nothing
-			e = _updateright(e, ψ[i], ψ[i])
+			e = s2 * _updateright(e, ψ[i], ψ[i])
 		else
 			A = op.operators[j]
 			@tensor e2[-1, -2] := conj(ψ[i][-1, -3, 1]) * A[-3, -4] * ψ[i][-2, -4, 2] * e[1, 2]
-			e = e2
+			e = s2 * e2
 		end
 	end
-	# left reduced environment: Diagonal(s²) at bond firstpos-1; the represented state
-	# contributes scaling^(2L) (one power per side, L sites each)
+	# left reduced environment: Diagonal(s²) at bond firstpos-1; the per-site s² of the
+	# sites left of the support is folded into the weight vector incrementally (the
+	# total applied scale is scaling^(2L) — one power per side, L sites each)
 	s = ψ.s[firstpos]
 	ismissing(s) && throw(ArgumentError("Schmidt values left of site $firstpos are not initialized"))
-	return op.coeff * dot(abs2.(s), diag(e)) * scaling(ψ)^(2 * length(ψ))
+	w = abs2.(s)
+	for _ in 1:firstpos-1
+		w .*= s2
+	end
+	return op.coeff * dot(w, diag(e))
 end
 
-# raw (scale-free) crossed-physical-index contraction of `op` into `ρ` between the
-# pre-computed trace environments `left` and `right` (flat vectors, reshaped on entry)
+# crossed-physical-index contraction of `op` into `ρ` between the pre-computed trace
+# environments `left` and `right` (flat vectors, reshaped on entry); the per-site
+# `scaling` of `ρ` is folded into every contracted support site
 function _op_trace_raw(op::OpTerm, ρ::CanonicalMPO, left::AbstractVector,
 					   right::AbstractVector)
 	T = promote_type(scalartype(op), scalartype(ρ))
 	d = phydim(ρ[1])
 	di = Matrix{T}(I, d, d)   # identity on the physical legs (sites outside the support)
+	s = scaling(ρ)
 	firstpos, lastpos = first(op.positions), last(op.positions)
 	e = reshape(left, 1, :)
 	for i in firstpos:lastpos
@@ -118,7 +130,7 @@ function _op_trace_raw(op::OpTerm, ρ::CanonicalMPO, left::AbstractVector,
 			O = op.operators[j]
 			@tensor e2[-1, -2] := e[-1, 2] * O[3, 5] * Wρ[2, 5, -2, 3]
 		end
-		e = e2
+		e = s * e2
 	end
 	r = reshape(right, 1, :)
 	return @tensor val = e[1, 2] * r[1, 2]
@@ -130,10 +142,11 @@ end
 Pre-computed physical-trace environments of the density-matrix chain `ρ` (the crossed
 transfer contractions with an identity on the physical legs, built from both chain
 ends; stored as flat vectors, `left[k]` / `right[k]` being the environment at bond `k-1`,
-to the left / right of site `k`). Passing a cache to `expectation(op, ρ, cache)` /
-`expectationvalue(op, ρ, cache)` avoids rebuilding the identity transfer for every
-observable of a fixed `ρ`. The cache keeps a reference to `ρ`; the callers pass `ρ`
-again and it is checked with `===` against the cached one.
+to the left / right of site `k`; the per-site `scaling` of `ρ` is folded in site by
+site — no `scaling^L` power is ever materialized). Passing a cache to
+`expectation(op, ρ, cache)` / `expectationvalue(op, ρ, cache)` avoids rebuilding the
+identity transfer for every observable of a fixed `ρ`. The cache keeps a reference to
+`ρ`; the callers pass `ρ` again and it is checked with `===` against the cached one.
 """
 struct TraceCache{V<:CanonicalMPO, T<:Number}
 	ρ::V
@@ -144,20 +157,21 @@ function TraceCache(ρ::CanonicalMPO)
 	T = scalartype(ρ)
 	d = phydim(ρ[1])
 	di = Matrix{T}(I, d, d)
+	s = scaling(ρ)
 	L = length(ρ)
 	left = Vector{Vector{T}}(undef, L + 1)
 	left[1] = ones(T, size(ρ[1], 1))
 	for i in 1:L
 		c = reshape(left[i], 1, :)
 		@tensor c2[-1, -2] := c[-1, 2] * ρ[i][2, 3, -2, 4] * di[3, 4]
-		left[i+1] = vec(c2)
+		left[i+1] = vec(s * c2)
 	end
 	right = Vector{Vector{T}}(undef, L + 1)
 	right[L+1] = ones(T, size(ρ[L], 3))
 	for i in L:-1:1
 		c = reshape(right[i+1], :, 1)
 		@tensor c2[-1, -2] := ρ[i][-1, 3, 2, 4] * di[3, 4] * c[2, -2]
-		right[i] = vec(c2)
+		right[i] = vec(s * c2)
 	end
 	return TraceCache{typeof(ρ), T}(ρ, left, right)
 end
@@ -181,8 +195,8 @@ function expectation(op::OpTerm, ρ::CanonicalMPO, cache::TraceCache)
 	(ρ === cache.ρ) || throw(ArgumentError("the cache was built for a different ρ"))
 	firstpos, lastpos = first(op.positions), last(op.positions)
 	(1 <= firstpos && lastpos <= length(ρ)) || throw(BoundsError())
-	return op.coeff * _op_trace_raw(op, ρ, cache.left[firstpos], cache.right[lastpos+1]) *
-		   scaling(ρ)^length(ρ)
+	# the cache environments and the support walk carry the per-site `scaling` already
+	return op.coeff * _op_trace_raw(op, ρ, cache.left[firstpos], cache.right[lastpos+1])
 end
 
 # raw (scale-free) trace of a CanonicalMPO

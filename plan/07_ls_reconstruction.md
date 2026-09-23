@@ -171,8 +171,9 @@ reconstruct!(ψ::CanonicalMPS, samples, alg::ALSRecon) -> (ψ, loss)
 ```
 
 **复杂度**：每 site `O(N·D⁴)` 桶构造 + `O(d³·D⁶)` 稠密解 + `O(N·d·D²)` 语境传递；
-样本存储 `O(L·N·D)`。大 `N`/大 `D` 时局域解可换 CG（`M` 只需 mat-vec：
-`z ↦ Σₖ fₖ(fₖ†z)`，`O(N·d·D²)` 每次迭代）——首版用稠密解，预留分派。
+样本存储 `O(L·N·D)`。局域解已改为 **KrylovKit 迭代**（matrix-free：线性算子按样本
+逐个作用 `z ↦ Σₖ conj(fₖ)·(fₖᵀz)`，`O(N·d·D²)` 每次迭代，当前位点张量作 warm start，
+`ishermitian=true` 走 CG），稠密 Hessian 组装不再需要。
 
 ## 7.5 自适应采样（替代 cross 的 pivot 选取）
 

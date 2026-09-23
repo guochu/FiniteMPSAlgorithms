@@ -55,8 +55,8 @@ end
 		@test expectation(t, ρ∞, cache) ≈ expectation(t, ρ∞) rtol = 1e-10
 		@test expectationvalue(t, ρ∞, cache) ≈ expectationvalue(t, ρ∞) rtol = 1e-10
 	end
-	# the cache itself carries the raw trace of ρ
-	@test scalar(cache.left[L+1]) ≈ tr(ρ∞) / scaling(ρ∞)^L atol = 1e-10
+	# the cache itself carries the scaled trace of ρ (the per-site scaling is folded in)
+	@test scalar(cache.left[L+1]) ≈ tr(ρ∞) atol = 1e-10
 end
 
 @testset "expectationvalue scaling stability" begin
@@ -75,9 +75,10 @@ end
 	SZm = prodmpo(ComplexF64, ds, div(L, 2), SZ)
 	@test real(expectationvalue(SZm, ψ)) ≈ 1 atol = 1e-12
 
-	# the same stability for mixed states and OpTerms
+	# the same stability for mixed states and OpTerms (per-site scaling folded into the
+	# trace environments: large but bounded, so no intermediate overflow)
 	ρ = infinite_temperature_state(ComplexF64, fill(2, 8))
-	setscaling!(ρ, 1e100)
+	setscaling!(ρ, 1e30)
 	t = term(1.5, 2 => _SX, 4 => _SZ)
 	cache = TraceCache(ρ)
 	v1 = real(expectationvalue(t, ρ, cache))

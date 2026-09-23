@@ -345,3 +345,82 @@ mult(hA::MPOHamiltonian, hB::MPOHamiltonian, alg::DMRG1) =
 # are initialized lazily.
 _wrap_canonicalmpo(out::CanonicalMPO) = out
 _wrap_canonicalmpo(out::AbstractMPO) = CanonicalMPO(out.data)
+
+# ---------- two-site (DMRG2) sweeps and interface ----------
+
+# the two-site optimal block: left environment · ket pair · MPO pair · right environment
+function _reduce_site2(m::MultCache, s::Integer)
+	cL, cR = m.hstorage[s], m.hstorage[s+2]
+	W2 = @tensor W[u, q1, q2, v, r1, r2] := m.H[s][u, q1, c, r1] * m.H[s+1][c, q2, v, r2]
+	if m.ket[s] isa MPSTensor
+		k2 = @tensor k[a, q1, q2, b] := m.ket[s][a, q1, c] * m.ket[s+1][c, q2, b]
+		return @tensor t[-1, -2, -3, -4] := cL[-1, 1, 2] * k2[2, q1, q2, 3] *
+										   W2[1, -2, -3, 4, q1, q2] * cR[-4, 4, 3]
+	end
+	# explicit binary contraction steps (the n-ary tree is unreliable at 6 free legs).
+	# W2 legs: (wL, po1, po2, wR, pi1, pi2); the ket's OUT legs contract W2's IN legs
+	# (the H·ket matrix product, matching `_updateleft3`), the bra's free pair is
+	# (W2.po, ket.pi)
+	k2 = @tensor k[a, o1, o2, b, i1, i2] := m.ket[s][a, o1, c, i1] * m.ket[s+1][c, o2, b, i2]
+	hh = @tensor hh[b, w1, o1, o2, bR, i1, i2] := cL[b, w1, kL] * k2[kL, o1, o2, bR, i1, i2]
+	hw = @tensor hw[b, p1, p2, w2, bR, i1, i2] := hh[b, w1, o1, o2, bR, i1, i2] *
+												 W2[w1, p1, p2, w2, o1, o2]
+	return @tensor t[b, -2, -3, -4, -5, -6] := hw[b, -2, -3, w2, bR, -4, -5] *
+											   cR[-6, w2, bR]
+end
+
+function leftsweep!(m::MultCache, alg::DMRG2)
+	L = length(m.bra)
+	kvals = zeros(Float64, L)
+	for s in 1:L-1
+		t2 = _reduce_site2(m, s)
+		kvals[s] = norm(t2)
+		_als2_update!(m.bra, s, t2, alg; move_right=true)
+		# hstorage[s+1] = left env over sites 1..s — exactly the next pair's left env;
+		# the right envs hstorage[s+2..] must stay untouched
+		_env_updateleft!(m, s)
+	end
+	kvals[L] = kvals[L-1]
+	return kvals
+end
+
+function rightsweep!(m::MultCache, alg::DMRG2)
+	L = length(m.bra)
+	kvals = zeros(Float64, L)
+	k = 1
+	for s in L:-1:2
+		t2 = _reduce_site2(m, s - 1)
+		kvals[k] = norm(t2)
+		k += 1
+		_als2_update!(m.bra, s - 1, t2, alg; move_right=false)
+		_env_updateright!(m, s)
+	end
+	kvals[L] = kvals[L-1]
+	return kvals
+end
+
+sweep!(m::MultCache, alg::DMRG2) = vcat(leftsweep!(m, alg), rightsweep!(m, alg))
+
+# the initial guesses are drawn with the bond cap carried by `alg.trunc`
+# (`_guess_bond`); the two-site sweeps adapt the bond dimension during the iterations,
+# so the guess may be smaller than the final bond
+function mult!(out, h, x, alg::DMRG2)
+	cache = MultCache(h, x, out)
+	iterative_compute!(cache, alg)
+	# attach the external operand scales and fold the center tensor's norm (the total
+	# data norm — the swept chain is isometric on the other sites) into the `scaling`
+	# field; the bond spectra recorded during the sweeps initialize the Schmidt values
+	s = _opscaling(h) * _opscaling(x)
+	s == 1 || setscaling!(out, s)
+	_renormalize!(out, out[1], false)
+	return out
+end
+
+function mult(h::AbstractMPO, x, alg::DMRG2)
+	(length(h) == length(x)) || throw(ArgumentError("dimension mismatch"))
+	return mult!(svdguess_mult(h, x, _guess_bond(alg.trunc)), h, x, alg)
+end
+mult(hA::MPOHamiltonian, x, alg::DMRG2) = mult(MPO(tompotensors(hA)), x, alg)
+mult(h::AbstractMPO, hB::MPOHamiltonian, alg::DMRG2) = mult(h, MPO(tompotensors(hB)), alg)
+mult(hA::MPOHamiltonian, hB::MPOHamiltonian, alg::DMRG2) =
+	mult(MPO(tompotensors(hA)), MPO(tompotensors(hB)), alg)

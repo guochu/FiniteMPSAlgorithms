@@ -19,7 +19,7 @@ Parameters of the Clifford-augmented two-site DMRG ground-state search. `trunc` 
 truncation scheme applied to the SVD after each two-site update (its bond cap bounds
 the bond dimension).
 """
-@kwdef struct CADMRG{TR<:TruncationScheme} <: IterativeMPSAlgorithm
+@kwdef struct CADMRG{TR<:TruncationScheme} <: TwoSiteUpdate
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
 	trunc::TR = truncdim(D=Defaults.D)
@@ -311,7 +311,7 @@ function _cadmrg_local_update!(env::CADMRGCache, s::Integer, alg::CADMRG; move_r
 		Wc_in = permutedims(Wcomb, (1, 3, 2, 4, 6, 5))  # [aLw, p2o, p1o, aRw, p2i, p1i]
 		w1 = size(Wc_in, 1); w2 = size(Wc_in, 4)
 		Wc = reshape(Wc_in, w1, 4, w2, 4)   # (aLw, po, aRw, pi) with po,pi in std basis order
-		@tensor Wct[aLw, po, aRw, pi] := best_C[po, qo] * Wc[aLw, qo, aRw, ri] * conj(best_C[pi, ri])
+		@tensor Wct[aLw, po, aRw, pin] := best_C[po, qo] * Wc[aLw, qo, aRw, ri] * conj(best_C[pin, ri])
 		# split back to individual physical indices, restoring (p1, p2) order
 		Wt4 = reshape(Wct, w1, 2, 2, w2, 2, 2)  # [aLw, p2o, p1o, aRw, p2i, p1i]
 		Wt = permutedims(Wt4, (1, 3, 2, 4, 6, 5))  # [aLw, p1o, p2o, aRw, p1i, p2i]

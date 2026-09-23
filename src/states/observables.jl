@@ -55,21 +55,23 @@ physical index:
   Julia's column-major memory layout, which is also what a left-to-right TT-SVD
   sweep produces natively.
 
-The chain `scaling` is included as `scaling(ψ)^L`; the Schmidt vectors are not used
+The chain `scaling` is included as `scaling(ψ)^L`, applied **per site during the
+contraction** (no `scaling^L` power is materialized); the Schmidt vectors are not used
 (the site tensors carry the full state).
 """
 function todense(ψ::CanonicalMPS; order::Symbol=:msb)
 	L = length(ψ)
 	A1 = ψ[1]
-	T = reshape(A1, size(A1, 2), size(A1, 3))                      # (p1, a)
+	T = scaling(ψ) * reshape(A1, size(A1, 2), size(A1, 3))          # (p1, a)
 	for i in 2:L
 		A = ψ[i]
 		t3 = reshape(T, :, size(A, 1)) * reshape(A, size(A, 1), :) # (r, p·b)
 		# append p_i as the fastest row dimension: rows stay (p1,...,p_i), p1 slowest
 		T = reshape(permutedims(reshape(t3, size(T, 1), size(A, 2), size(A, 3)), (2, 1, 3)),
 			size(A, 2) * size(T, 1), size(A, 3))
+		T = scaling(ψ) * T
 	end
-	v = vec(T) * scaling(ψ)^L
+	v = vec(T)
 	order === :msb && return v
 	order === :lsb || throw(ArgumentError("order must be :msb or :lsb"))
 	# reverse the site order: site 1 becomes the fastest index

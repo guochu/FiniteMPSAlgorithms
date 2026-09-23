@@ -107,4 +107,52 @@ function compress(x, alg::DMRG1)
 	return out
 end
 compress(h::MPOHamiltonian, alg::DMRG1) =
-	compress(MPO(tompotensors(h)), alg)
+        compress(MPO(tompotensors(h)), alg)
+
+# ---------- two-site (DMRG2) sweeps and interface ----------
+
+function leftsweep!(c::OverlapCache, alg::DMRG2)
+	L = length(c.bra)
+	kvals = zeros(Float64, L)
+	for s in 1:L-1
+		t2 = _reduce_two_site(c, s)
+		kvals[s] = norm(t2)
+		_als2_update!(c.bra, s, t2, alg; move_right=true)
+		updateleft!(c, s)
+	end
+	kvals[L] = kvals[L-1]
+	return kvals
+end
+
+function rightsweep!(c::OverlapCache, alg::DMRG2)
+	L = length(c.bra)
+	kvals = zeros(Float64, L)
+	k = 1
+	for s in L:-1:2
+		t2 = _reduce_two_site(c, s - 1)
+		kvals[k] = norm(t2)
+		k += 1
+		_als2_update!(c.bra, s - 1, t2, alg; move_right=false)
+		updateright!(c, s)
+	end
+	kvals[L] = kvals[L-1]
+	return kvals
+end
+
+sweep!(c::OverlapCache, alg::DMRG2) = vcat(leftsweep!(c, alg), rightsweep!(c, alg))
+
+function compress!(out, x, alg::DMRG2)
+	cache = OverlapCache(out, x)
+	iterative_compute!(cache, alg)
+	# attach the external operand scale and fold the center norm into `scaling` (see `mult!`)
+	x isa Union{CanonicalMPS, CanonicalMPO} && setscaling!(out, scaling(x))
+	_renormalize!(out, out[1], false)
+	return out
+end
+
+function compress(x, alg::DMRG2)
+	out = svdguess_compress(x, _guess_bond(alg.trunc))
+	compress!(out, x, alg)
+	return out
+end
+compress(h::MPOHamiltonian, alg::DMRG2) = compress(MPO(tompotensors(h)), alg)

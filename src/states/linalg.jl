@@ -14,16 +14,27 @@ end
 """
 	LinearAlgebra.dot(ψA, ψB)
 
-Overlap `⟨ψA|ψB⟩`, including the per-site `scaling` factors (total = `(scalingA*scalingB)^L`).
+Overlap `⟨ψA|ψB⟩`, including the per-site `scaling` factors (total = `(scalingA*scalingB)^L`,
+applied per site during the transfer contraction — no `scaling^L` power is materialized).
 """
 function LinearAlgebra.dot(ψA::CanonicalMPS, ψB::CanonicalMPS)
-	return _dot(ψA, ψB) * (scaling(ψA) * scaling(ψB))^length(ψA)
+	(length(ψA) == length(ψB)) || throw(ArgumentError("dimension mismatch"))
+	f = scaling(ψA) * scaling(ψB)
+	hold = l_LL(ψA, ψB)
+	for i in 1:length(ψA)
+		hold = f * _updateleft(hold, ψA[i], ψB[i])
+	end
+	return tr(hold)
 end
 
 function LinearAlgebra.norm(ψ::CanonicalMPS)
-	a = real(_dot(ψ, ψ))
-	a = (abs(a) >= 1.0e-14) ? a : zero(a)
-	return sqrt(a) * scaling(ψ)^length(ψ)
+	s2 = scaling(ψ)^2
+	hold = l_LL(ψ, ψ)
+	for i in 1:length(ψ)
+		hold = s2 * _updateleft(hold, ψ[i], ψ[i])
+	end
+	n2 = real(tr(hold))
+	return sqrt(max(n2, zero(n2)))
 end
 
 function LinearAlgebra.lmul!(f::Number, ψ::CanonicalMPS)
@@ -165,16 +176,18 @@ distance2(ψA::CanonicalMPS, ψB::CanonicalMPS) = _distance2(ψA, ψB)
 	Base.sum(ψ::CanonicalMPS) -> Number
 
 Sum of all amplitudes `Σ_{i₁,…,i_L} ψ(i₁,…,i_L)` of the represented state (all
-physical indices contracted with all-ones vectors), including the `scaling^L` factor.
+physical indices contracted with all-ones vectors). The `scaling` is applied **per
+site during the contraction** (no `scaling^L` power is materialized).
 """
 function Base.sum(ψ::CanonicalMPS)
+	s = scaling(ψ)
 	v = ones(scalartype(ψ), 1)
 	for i in length(ψ):-1:1
 		A = ψ[i]
 		# v_new[aL] = Σ_{p, aR} A[aL, p, aR]·v[aR]: the all-ones vector broadcast over p
-		v = reshape(A, size(A, 1), :) * repeat(v; inner=size(A, 2))
+		v = s * (reshape(A, size(A, 1), :) * repeat(v; inner=size(A, 2)))
 	end
-	return v[1] * scaling(ψ)^length(ψ)
+	return v[1]
 end
 
 """

@@ -19,7 +19,7 @@ function _h_updateleft(hold::AbstractArray{T,4},
 					   x::MPSTensor, W::MPOTensor, xk::MPSTensor) where {T}
 	@tensor hnew[-1, -2, -3, -4] :=
 		conj(x[1, pb, -1]) * conj(W[2, po, -2, pb]) * hold[1, 2, 3, 4] *
-		W[3, po, -3, pi] * xk[4, pi, -4]
+		W[3, po, -3, pin] * xk[4, pin, -4]
 	return hnew
 end
 
@@ -27,7 +27,7 @@ function _h_updateright(hold::AbstractArray{T,4},
 						x::MPSTensor, W::MPOTensor, xk::MPSTensor) where {T}
 	@tensor hnew[-1, -2, -3, -4] :=
 		conj(x[-1, pb, 1]) * conj(W[-2, po, 2, pb]) * hold[1, 2, 3, 4] *
-		W[-3, po, 3, pi] * xk[-4, pi, 4]
+		W[-3, po, 3, pin] * xk[-4, pin, 4]
 	return hnew
 end
 
@@ -57,7 +57,7 @@ function _h_apply(z::MPSTensor, W::MPOTensor,
 				  hL::AbstractArray{T,4}, hR::AbstractArray{T,4}) where {T}
 	@tensor y[-1, -2, -3] :=
 		hL[-1, cL, aL, 1] * conj(W[cL, po, cR, -2]) *
-		W[aL, po, kR, pi] * z[1, pi, 4] * hR[-3, cR, kR, 4]
+		W[aL, po, kR, pin] * z[1, pin, 4] * hR[-3, cR, kR, 4]
 	return y
 end
 
@@ -107,17 +107,22 @@ function _init_storages_right!(m::LinsolveCache)
 	return m
 end
 
-function _site_solve(m::LinsolveCache, s::Integer)
-	W = m.mpo[s]
-	t = _b_target(W, m.bra[s], m.bstorage[s], m.bstorage[s+1])
-	shape = (size(m.hstorage[s], 1), size(W, 2), size(m.hstorage[s+1], 1))
-	z0 = size(m.ket[s]) == shape ? m.ket[s] : zero(t)
-	# the local normal equation is solved iteratively (KrylovKit) on the linear
-	# operator action — the dense H matrix is never formed
-	z, _ = KrylovKit.linsolve(y -> _h_apply(y, W, m.hstorage[s], m.hstorage[s+1]), t, z0;
-							  ishermitian=true, tol=Defaults.tol, krylovdim=25, maxiter=100)
-	return z, t
+function _site_solve(m::LinsolveCache, s::Integer, solver::KrylovKit.LinearSolver)
+        W = m.mpo[s]
+        t = _b_target(W, m.bra[s], m.bstorage[s], m.bstorage[s+1])
+        shape = (size(m.hstorage[s], 1), size(W, 2), size(m.hstorage[s+1], 1))
+        z0 = size(m.ket[s]) == shape ? m.ket[s] : zero(t)
+        # the local normal equation is solved iteratively (KrylovKit) on the linear
+        # operator action — the dense H matrix is never formed
+        z, _ = KrylovKit.linsolve(y -> _h_apply(y, W, m.hstorage[s], m.hstorage[s+1]), t, z0, solver)
+        return z, t
 end
+
+# the local-solve algorithm of the sweep: the linsolve algorithm types carry their own
+# solver, the other iterative algorithms use the package default
+_solverof(alg::ALSLinSolve) = alg.solver
+_solverof(alg::ALSLinSolve2) = alg.solver
+_solverof(alg) = DefaultLinearSolver
 
 # the exact global residual² ‖A·x − y‖², evaluated from the local decomposition at the
 # site with the updated tensor z — no global contraction is needed
@@ -137,7 +142,7 @@ function leftsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 	L = length(m.ket)
 	kvals = zeros(Float64, L)
 	for s in 1:L-1
-		z, t = _site_solve(m, s)
+		z, t = _site_solve(m, s, _solverof(alg))
 		kvals[s] = _site_loss(m, s, z, t)
 		q, r = _gauge_left(z)
 		m.ket[s] = q
@@ -145,7 +150,7 @@ function leftsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 		_h_left!(m, s)
 		_b_left!(m, s)
 	end
-	z, t = _site_solve(m, L)
+	z, t = _site_solve(m, L, _solverof(alg))
 	kvals[L] = _site_loss(m, L, z, t)
 	m.ket[L] = z
 	return kvals
@@ -163,7 +168,7 @@ function rightsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 	kvals = zeros(Float64, L)
 	k = 1
 	for s in L:-1:2
-		z, t = _site_solve(m, s)
+		z, t = _site_solve(m, s, _solverof(alg))
 		kvals[k] = _site_loss(m, s, z, t)
 		k += 1
 		l, q = _gauge_right(z)
@@ -172,7 +177,7 @@ function rightsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 		_h_right!(m, s)
 		_b_right!(m, s)
 	end
-	z, t = _site_solve(m, 1)
+	z, t = _site_solve(m, 1, _solverof(alg))
 	kvals[L] = _site_loss(m, 1, z, t)
 	m.ket[1] = z
 	return kvals
@@ -203,14 +208,14 @@ function LinsolveCache(A, y, x)
 end
 
 """
-	linsolve!(x, A, y, alg::DMRG1) -> x
+	linsolve!(x, A, y, alg::ALSLinSolve = ALSLinSolve()) -> x
 
 Single-site variational (ALS) solve of `A·x ≈ y` refined in place on the initial guess
 `x`; iterated by the generic `iterative_compute!` on the exact global residual². The
 solution is expressed in the right-hand side's per-site scaling convention (a scaling^L
 power is never materialized).
 """
-function linsolve!(x, A, y, alg::DMRG1)
+function linsolve!(x, A, y, alg::ALSLinSolve = ALSLinSolve())
 	bonddim(x) != alg.D && changebond!(x; D=alg.D)
 	m = LinsolveCache(A, y, x)
 	iterative_compute!(m, alg)
@@ -230,19 +235,127 @@ function _validate_linsolve(A::AbstractMPO, y::CanonicalMPS)
 end
 
 """
-	linsolve(A, y, alg=DMRG1()) -> x
+	linsolve(A, y, alg=ALSLinSolve()) -> x
 
 Solve `A·x ≈ y` variationally: find a finite-bond MPS `x` of bond dimension `alg.D`
 minimizing the residual norm `||A·x - y||` by single-site ALS sweeps (normal equation
 A†A x = A† y). The initial guess is a random state. Block-sparse (Hamiltonian) inputs
 are expanded to the dense MPO layer.
 """
-function linsolve(A::AbstractMPO, y::CanonicalMPS, alg::DMRG1=DMRG1())
+function linsolve(A::AbstractMPO, y::CanonicalMPS, alg::ALSLinSolve = ALSLinSolve())
 	_validate_linsolve(A, y)
 	T = promote_type(scalartype(A), scalartype(y))
 	x = randommps(T, ophydims(A); D=alg.D, normalize=false)
 	return linsolve!(x, A, y, alg)
 end
 
-linsolve(A::MPOHamiltonian, y::CanonicalMPS, alg::DMRG1=DMRG1()) =
+linsolve(A::MPOHamiltonian, y::CanonicalMPS, alg::ALSLinSolve = ALSLinSolve()) =
+        linsolve(MPO(tompotensors(A)), y, alg)
+
+# ---------- two-site (ALSLinSolve2) sweeps and interface ----------
+
+# ⟨x|A†A|z⟩ over the pair: z2[zL, p1, p2, zR]; W1/W2 are the MPO site tensors (used
+# as-is — the pair block is never materialized)
+# hL legs (xL, A†-bond, A-bond, zL); hR legs (xR, A†-bond, A-bond, zR)
+# contraction order: the large MPS bonds (zL, zR — far larger than the MPO bonds and
+# physical dimensions) are folded into the environments first; every intermediate stays
+# at O(x·z·D_Aᵏ·dᵏ) instead of materializing zL·zR-scaled blocks
+function _h2_apply(z2::AbstractArray{T,4}, W1, W2,
+				   hL::AbstractArray{T,4}, hR::AbstractArray{T,4}) where {T}
+	# fold z2 into the right environment over the large ket bond zR
+	t1 = @tensor t1[zL, i1, i2, xR, cR, w2] := hR[xR, cR, w2, zR] * z2[zL, i1, i2, zR]
+	# apply the MPO block site by site (small physical and A-bond legs)
+	t2 = @tensor t2[zL, i1, xR, cR, c, o2] := t1[zL, i1, i2, xR, cR, w2] *
+											  W2[c, o2, w2, i2]
+	t3 = @tensor t3[zL, xR, cR, w1, o1, o2] := t2[zL, i1, xR, cR, c, o2] *
+											   W1[w1, o1, c, i1]
+	# wrap with A†2: its input legs become the free physical legs of the target
+	t4 = @tensor t4[zL, xR, w1, c, o1, p2] := conj(W2[c, o2, cR, p2]) *
+											   t3[zL, xR, cR, w1, o1, o2]
+	t5 = @tensor t5[zL, xR, w1, cL, p1, p2] := conj(W1[cL, o1, c, p1]) *
+											   t4[zL, xR, w1, c, o1, p2]
+	# close with the left environment over the large ket bond zL and the small A-bonds
+	return @tensor y[xL, p1, p2, xR] := hL[xL, cL, w1, zL] * t5[zL, xR, w1, cL, p1, p2]
+end
+
+# ⟨x|A†|y⟩ over the pair: the two-site right-hand side. As in the single-site
+# `_b_target`, y's physicals contract the MPO PO legs and the free legs are the MPO PI
+# legs (A†y lives on A's input space). Large MPS bonds folded into the environments
+# first (same order as `_h2_apply`).
+function _b2_target(W1, W2, y2::AbstractArray{T,4}, bL::AbstractArray{T,3}, bR::AbstractArray{T,3}) where {T}
+	t1 = @tensor t1[kL, o1, o2, xR, cR] := bR[xR, cR, kR] * y2[kL, o1, o2, kR]
+	t2 = @tensor t2[kL, o1, xR, c, q2] := conj(W2[c, o2, cR, q2]) * t1[kL, o1, o2, xR, cR]
+	t3 = @tensor t3[kL, xR, cL, q1, q2] := conj(W1[cL, o1, c, q1]) * t2[kL, o1, xR, c, q2]
+	return @tensor t[xL, q1, q2, xR] := bL[xL, cL, kL] * t3[kL, xR, cL, q1, q2]
+end
+
+function _site_solve2(m::LinsolveCache, s::Integer, solver::KrylovKit.LinearSolver)
+	W1, W2 = m.mpo[s], m.mpo[s+1]
+	y2 = @tensor yy[a, p1, p2, b] := m.bra[s][a, p1, c] * m.bra[s+1][c, p2, b]
+	t = _b2_target(W1, W2, y2, m.bstorage[s], m.bstorage[s+2])
+	shape = (size(m.hstorage[s], 1), size(W1, 4), size(W2, 4), size(m.hstorage[s+2], 1))
+	z0 = size(m.ket[s]) == shape ? m.ket[s] : zero(t)
+	# the local normal equation is solved iteratively (KrylovKit) on the linear
+	# operator action — the dense H matrix is never formed
+	z, _ = KrylovKit.linsolve(y -> _h2_apply(y, W1, W2, m.hstorage[s], m.hstorage[s+2]),
+							  t, z0, solver)
+	return z, t
+end
+
+# the exact global residual² ‖A·x − y‖², evaluated from the local decomposition at the
+# pair with the updated tensor z — no global contraction is needed
+function _site_loss(m::LinsolveCache, s::Integer, z::AbstractArray{T,4}, t::AbstractArray{T,4}) where {T}
+	Hz = _h2_apply(z, m.mpo[s], m.mpo[s+1], m.hstorage[s], m.hstorage[s+2])
+	return real(dot(z, Hz)) - 2 * real(dot(z, t)) + m.ynorm2
+end
+
+function leftsweep!(m::LinsolveCache, alg::ALSLinSolve2)
+	L = length(m.ket)
+	kvals = zeros(Float64, L)
+	for s in 1:L-1
+		z2, t = _site_solve2(m, s, _solverof(alg))
+		kvals[s] = _site_loss(m, s, z2, t)
+		_als2_update!(m.ket, s, z2, alg; move_right=true)
+		_h_left!(m, s)
+		_b_left!(m, s)
+	end
+	kvals[L] = kvals[L-1]
+	return kvals
+end
+
+function rightsweep!(m::LinsolveCache, alg::ALSLinSolve2)
+	L = length(m.ket)
+	kvals = zeros(Float64, L)
+	k = 1
+	for s in L:-1:2
+		z2, t = _site_solve2(m, s - 1, _solverof(alg))
+		kvals[k] = _site_loss(m, s - 1, z2, t)
+		k += 1
+		_als2_update!(m.ket, s - 1, z2, alg; move_right=false)
+		_h_right!(m, s)
+		_b_right!(m, s)
+	end
+	kvals[L] = kvals[L-1]
+	return kvals
+end
+
+sweep!(m::LinsolveCache, alg::ALSLinSolve2) = vcat(leftsweep!(m, alg), rightsweep!(m, alg))
+
+function linsolve!(x, A, y, alg::ALSLinSolve2)
+	m = LinsolveCache(A, y, x)
+	iterative_compute!(m, alg)
+	# the solution is expressed in the right-hand side's per-site scaling convention;
+	# fold the center norm into `scaling` (see `mult!`)
+	setscaling!(m.ket, scaling(y))
+	_renormalize!(m.ket, m.ket[1], false)
+	return x
+end
+
+function linsolve(A::AbstractMPO, y::CanonicalMPS, alg::ALSLinSolve2)
+	_validate_linsolve(A, y)
+	T = promote_type(scalartype(A), scalartype(y))
+	x = randommps(T, ophydims(A); D=_guess_bond(alg.trunc), normalize=false)
+	return linsolve!(x, A, y, alg)
+end
+linsolve(A::MPOHamiltonian, y::CanonicalMPS, alg::ALSLinSolve2) =
 	linsolve(MPO(tompotensors(A)), y, alg)

@@ -4,7 +4,8 @@ using FiniteMPSAlgorithms
 
 @testset verbose = true "FiniteMPSAlgorithms" begin
 	@testset "tensorops" begin
-		include("tensorops/tensorops.jl")
+		include("tensorops/linalg.jl")
+		include("tensorops/truncation.jl")
 	end
 	@testset "states" begin
 		include("states/structures.jl")

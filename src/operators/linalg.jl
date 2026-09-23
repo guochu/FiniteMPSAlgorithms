@@ -14,39 +14,41 @@ end
 	LinearAlgebra.dot(hA, hB)
 
 Overlap of two operator chains `Σ tr(conj(hA)·hB)` (per site), including `scaling` of
-`CanonicalMPO` inputs.
+`CanonicalMPO` inputs (applied per site during the transfer contraction — no `scaling^L`
+power is materialized).
 """
 function LinearAlgebra.dot(hA::AbstractMPO, hB::AbstractMPO)
-	_d = _dot(hA, hB)
-	if hA isa CanonicalMPO || hB isa CanonicalMPO
-		sA = hA isa CanonicalMPO ? scaling(hA)^length(hA) : 1.0
-		sB = hB isa CanonicalMPO ? scaling(hB)^length(hB) : 1.0
-		_d *= sA * sB
+	(length(hA) == length(hB)) || throw(ArgumentError("dimension mismatch"))
+	sA = hA isa CanonicalMPO ? scaling(hA) : 1.0
+	sB = hB isa CanonicalMPO ? scaling(hB) : 1.0
+	hold = l_LL(hA, hB)
+	for i in 1:length(hA)
+		hold = (sA * sB) * _updateleft(hold, hA[i], hB[i])
 	end
-	return _d
+	return tr(hold)
 end
 
 """
 	LinearAlgebra.norm(h::AbstractMPO)
 
 Hilbert-Schmidt norm `sqrt(tr(h†·h))` of the operator chain, including `scaling`
-of `CanonicalMPO` inputs.
+of `CanonicalMPO` inputs (applied per site during the contraction).
 """
 LinearAlgebra.norm(h::AbstractMPO) = sqrt(real(dot(h, h)))
 
 """
 	tr(h::AbstractMPO)
 
-The trace of the operator chain, including `scaling` of `CanonicalMPO` inputs.
+The trace of the operator chain, including `scaling` of `CanonicalMPO` inputs
+(applied per site during the contraction — no `scaling^L` power is materialized).
 """
 function LinearAlgebra.tr(h::AbstractMPO)
+	s = h isa CanonicalMPO ? scaling(h) : 1.0
 	v = ones(scalartype(h), 1)
 	for i in eachindex(h)
-		v = _updatetraceleft(v, h[i])
+		v = s * _updatetraceleft(v, h[i])
 	end
-	_t = scalar(v)
-	h isa CanonicalMPO && (_t *= scaling(h)^length(h))
-	return _t
+	return scalar(v)
 end
 
 LinearAlgebra.lmul!(f::Number, h::AbstractMPO) = (isempty(h.data) || (h[1] *= f); h)
@@ -262,20 +264,21 @@ p_in)`; the `order` keyword selects the endianness of the merged row/column indi
   significant (fastest) index on both sides, the natural reading of
   `vec(reshape(M, ds, ds))` in Julia's column-major memory layout.
 
-The `scaling` of a `CanonicalMPO` is included as `scaling(h)^L`.
+The `scaling` of a `CanonicalMPO` is included as `scaling(h)^L`, applied **per site
+during the contraction** (no `scaling^L` power is materialized).
 """
 function todense(h::AbstractMPO; order::Symbol=:msb)
 	L = length(h)
+	s = h isa CanonicalMPO ? scaling(h) : 1.0
 	W = h[1]
-	T = permutedims(W, (1, 2, 4, 3))                             # (aL, PO, PI, aR)
+	T = s * permutedims(W, (1, 2, 4, 3))                         # (aL, PO, PI, aR)
 	for i in 2:L
 		W = h[i]                                                 # (b, po, c, pi)
-		@tensor T2[a, po, P, pi, Q, c] := T[a, P, Q, b] * W[b, po, c, pi]
+		@tensor T2[a, po, P, pin, Q, c] := T[a, P, Q, b] * W[b, po, c, pin]
 		# merge (po, P) -> PO and (pi, Q) -> PI: the new site becomes the fastest index
-		T = reshape(T2, size(T2, 1), size(T2, 2) * size(T2, 3), size(T2, 4) * size(T2, 5), size(T2, 6))
+		T = s * reshape(T2, size(T2, 1), size(T2, 2) * size(T2, 3), size(T2, 4) * size(T2, 5), size(T2, 6))
 	end
-	s = h isa CanonicalMPO ? scaling(h)^L : 1.0
-	M = T[1, :, :, 1] * s
+	M = T[1, :, :, 1]
 	order === :msb && return M
 	order === :lsb || throw(ArgumentError("order must be :msb or :lsb"))
 	# reverse the site order on the bra and ket sides

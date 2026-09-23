@@ -144,7 +144,7 @@ end
 
 	# linsolve: the solution is expressed in the right-hand side's scaling convention
 	I = identitympo(ComplexF64, ds)
-	x = linsolve(I, ψs, DMRG1(maxiter=20, tol=1e-10, D=16))
+	x = linsolve(I, ψs, ALSLinSolve(maxiter=20, tol=1e-10, D=16))
 	@test scaling(x) ≈ scaling(ψs) atol = 1e-12
 	@test norm(todense(x) - vs) / norm(vs) < 1e-8
 
@@ -212,9 +212,72 @@ end
 	@test scaling(χ) ≈ 2500.0 atol = 1e-12
 
 	# linsolve
-	x = linsolve(I, ψ, DMRG1(maxiter=5, tol=1e-10, D=1))
+	x = linsolve(I, ψ, ALSLinSolve(maxiter=5, tol=1e-10, D=1))
 	@test datafinite(x)
 	@test scaling(x) ≈ 50.0 atol = 1e-12
+
+	# amplitude: the scaling is applied per site during the contraction, so the
+	# amplitude stays finite even though the direct `scaling^L` power overflows
+	ψamp = copy(ψ)
+	setscaling!(ψamp, 5.0)
+	@test scaling(ψamp)^L == Inf
+	𝐱 = sample(ψamp, 1)[1]
+	a_amp = abs(amplitude(ψamp, 𝐱))
+	ψraw = copy(ψ)
+	setscaling!(ψraw, 1.0)
+	a_raw = abs(amplitude(ψraw, 𝐱))
+	@test isfinite(a_amp) && isfinite(a_raw) && a_raw > 0
+	# log-scale consistency: amplitude(ψamp) = 5^L · amplitude(ψraw)
+	@test isapprox(log(a_amp), log(a_raw) + L * log(5.0); rtol=1e-9, atol=1e-6)
+
+	# dot / norm / todense / expectation / sum: same per-site scaling discipline. The
+	# chains are shrunk so the raw overlaps are tiny — the naive `scaling^L`-at-the-end
+	# variants overflow (or, for norm, discard the tiny raw overlap) while the per-site
+	# application keeps every result finite
+	a = randommps(T, ds; D=1, normalize=false)
+	b = randommps(T, ds; D=1, normalize=false)
+	for A in a.data
+		A .*= 0.5
+	end
+	for A in b.data
+		A .*= 0.8
+	end
+	setscaling!(a, 2.5)
+	setscaling!(b, 2.5)
+	@test (scaling(a) * scaling(b))^L == Inf
+	d = dot(a, b)
+	@test isfinite(d)
+	a0 = copy(a); setscaling!(a0, 1.0)
+	b0 = copy(b); setscaling!(b0, 1.0)
+	@test isapprox(log(abs(d)), log(abs(dot(a0, b0))) + 2L * log(2.5); rtol=1e-6)
+
+	n = norm(a)
+	@test isfinite(n) && n > 0
+	@test isapprox(log(n), log(norm(a0)) + L * log(2.5); rtol=1e-6)
+
+	# todense on a small chain (the dense vector itself must fit in memory): the
+	# per-site scaling keeps representable amplitudes finite while scaling^L overflows
+	ds12 = fill(2, 12)
+	c = randommps(T, ds12; D=1, normalize=false)
+	for A in c.data
+		A .*= 0.1
+	end
+	setscaling!(c, 1e26)
+	@test scaling(c)^12 == Inf
+	vc = todense(c)
+	@test all(isfinite, vc)
+	c0 = copy(c); setscaling!(c0, 1.0)
+	@test isapprox(log(maximum(abs, vc)), log(maximum(abs, todense(c0))) + 12 * log(1e26);
+		rtol=1e-6)
+
+	e = expectation(I, a)
+	@test isfinite(real(e)) && real(e) > 0
+	@test isapprox(real(e), abs2(n); rtol=1e-6)
+	X1 = T[1 0; 0 -1]
+	e_op = expectation(term(1 => X1), a)
+	@test isfinite(real(e_op)) && isfinite(imag(e_op))
+	@test real(expectationvalue(term(1 => X1), a)) ≈ real(e_op) / n^2 rtol = 1e-6
+	@test isfinite(sum(a))
 end
 
 @testset "cache coverage" begin
@@ -267,7 +330,7 @@ end
 	@test todense(out_m) ≈ Hd * todense(ψ) atol = 1e-4
 	out_a = add!(svdguess_add([ψ, ψ], 8), [ψ, ψ], DMRG1(maxiter=5, tol=1e-10))
 	@test todense(out_a) ≈ 2 * todense(ψ) atol = 1e-5
-	xl = linsolve!(svdguess_compress(ψ, 8), identitympo(ComplexF64, ds), ψ, DMRG1(maxiter=10, tol=1e-10))
+	xl = linsolve!(svdguess_compress(ψ, 8), identitympo(ComplexF64, ds), ψ, ALSLinSolve(maxiter=10, tol=1e-10))
 	@test abs(dot(xl, ψ)) / (norm(xl) * norm(ψ)) ≈ 1 atol = 1e-6
 end
 
@@ -337,7 +400,7 @@ end
 	Random.seed!(901)
 	L = 6
 	ds = fill(2, L)
-	alg = DMRG1(maxiter=20, tol=1e-10, verbosity=0, D=16)
+	alg = ALSLinSolve(maxiter=20, tol=1e-10, verbosity=0, D=16)
 
 	# trivial system: I·x = y, exact solution is y (up to gauge)
 	I_mpo = identitympo(ComplexF64, ds)
@@ -357,7 +420,7 @@ end
 	@test abs(dot(xsol, x_exact)) / (norm(xsol) * norm(x_exact)) ≈ 1 atol = 1e-5
 
 	# default-algorithm form
-	xk = linsolve(I_mpo, y, DMRG1(D=16))
+	xk = linsolve(I_mpo, y, ALSLinSolve(D=16))
 	@test abs(dot(xk, y)) / (norm(xk) * norm(y)) ≈ 1 atol = 1e-7
 
 	# dimension mismatch: a y with wrong physical dimensions
@@ -415,7 +478,7 @@ end
 	U = timeevompo(H, 0.15, WII())
 	x_exact = randommps(ComplexF64, ds; D=4)
 	yU = mult(U, x_exact)
-	xsol = linsolve(U, yU, DMRG2(maxiter=20, tol=1e-10, trunc=truncdim(8), verbosity=0))
+	xsol = linsolve(U, yU, ALSLinSolve2(maxiter=20, tol=1e-10, trunc=truncdim(8), verbosity=0))
 	@test abs(dot(xsol, x_exact)) / (norm(xsol) * norm(x_exact)) ≈ 1 atol = 1e-5
 	@test iscanonical(xsol)
 
@@ -470,11 +533,12 @@ end
 	@test todense(hadamard(ψs, φs, nt)) ≈ refχs atol = 1e-8 rtol = 1e-8
 
 	# linsolve
+	nt2 = ALSLinSolve2(maxiter=30, tol=1e-14, trunc=NoTruncation())
 	Us = timeevompo(Hs, 0.15, WII())
 	xs_exact = randommps(ComplexF64, dss; D=4)
 	ys = mult(Us, xs_exact)
 	lc = LinsolveCache(MPO(tompotensors(Us)), ys, randommps(ComplexF64, dss; D=8, normalize=false))
-	kh = iterative_compute!(lc, nt)
+	kh = iterative_compute!(lc, nt2)
 	@test monotone(kh)
 	@test abs(dot(todense(lc.ket), todense(xs_exact))) /
 		  (norm(todense(lc.ket)) * norm(todense(xs_exact))) ≈ 1 atol = 1e-8

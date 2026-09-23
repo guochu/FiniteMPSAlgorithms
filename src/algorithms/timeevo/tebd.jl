@@ -253,15 +253,15 @@ function swap!(ρ::CanonicalMPO, i::Integer; trunc::TruncationScheme=DefaultTrun
 	V = ρ[i+1]
 	# two-site block with the physical leg pairs crossed: the legs at site i carry the
 	# (p_out, p_in) content of V, the legs at site i+1 that of W
-	@tensor block[a, qo, qi, po, pi, b] := W[a, po, m, pi] * V[m, qo, b, qi]
+	@tensor block[a, qo, qi, po, pin, b] := W[a, po, m, pin] * V[m, qo, b, qi]
 	# Hastings: fold the Schmidt spectrum on the left bond into the block, then SVD
 	sv = Diagonal(ρ.s[i])
-	@tensor weighted[a, qo, qi, po, pi, b] := sv[a, 1] * block[1, qo, qi, po, pi, b]
+	@tensor weighted[a, qo, qi, po, pin, b] := sv[a, 1] * block[1, qo, qi, po, pin, b]
 	u, s, v, err = tsvd!(weighted, (1, 2, 3), (4, 5, 6); trunc)
-	ρ[i+1] = permutedims(v, (1, 2, 4, 3))          # (aL, po, aR, pi)
+	ρ[i+1] = permutedims(v, (1, 2, 4, 3))          # (aL, po, aR, pin)
 	ρ.s[i+1] = s
 	# back-project the crossed block; the left site keeps the (crossed) legs of V
-	@tensor Wnew[a, qo, m, qi] := block[a, qo, qi, po, pi, b] * conj(v[m, po, pi, b])
+	@tensor Wnew[a, qo, m, qi] := block[a, qo, qi, po, pin, b] * conj(v[m, po, pin, b])
 	ρ[i] = Wnew
 	return ρ
 end

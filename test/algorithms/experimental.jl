@@ -86,12 +86,12 @@ end
         # msb flat index of a coordinate
         idx(x) = 1 + sum((x[j] - 1) * 2^(L - j) for j in 1:L)
         amp(x) = vref[idx(x)]
-        coords = [Tuple(1 + ((i >> (L - j)) & 1) for j in 1:L) for i in 0:2^L-1]
+        coords = [[1 + ((i >> (L - j)) & 1) for j in 1:L] for i in 0:2^L-1]
 
         # oversampled exact fit: the target is representable with D=6 > 3, so the ridge-
         # conditioned least-squares fit reproduces the tensor (tiny α for conditioning)
         S = [(x, amp(x)) for x in coords]
-        ψ1, traj1 = reconstruct(S, Tuple(ds), ALSRecon(D=6, α=1e-10, maxiter=100, tol=1e-14))
+        ψ1, traj1 = reconstruct(S, ds, ALSRecon(D=6, α=1e-10, maxiter=100, tol=1e-14))
         @test todense(ψ1) ≈ vref atol = 1e-6 rtol = 1e-6
         @test scaling(ψ1) == 1
         @test bonddim(ψ1) <= 6
@@ -100,14 +100,14 @@ end
         @test all(all(diff(kv) .<= 1e-8) for kv in traj1)
 
         # adaptive reconstruction from a black-box oracle: residual-driven enrichment
-        ψ2, info = reconstruct(amp, Tuple(ds),
+        ψ2, info = reconstruct(amp, ds,
                 ALSRecon(D=6, α=1e-6, nbuffer=64, nadd=8, maxiter=25, tol=1e-8))
         @test norm(todense(ψ2) - vref) / norm(vref) < 1e-5
         @test info.nsamples > 64
 
         # noise robustness (the LS selling point vs TCI's exact interpolation)
         Sn = [(x, amp(x) + 1e-6 * (randn() + 1.0im * randn())) for x in coords]
-        ψ3, traj3 = reconstruct(Sn, Tuple(ds), ALSRecon(D=6, α=1e-8, maxiter=100, tol=1e-12))
+        ψ3, traj3 = reconstruct(Sn, ds, ALSRecon(D=6, α=1e-8, maxiter=100, tol=1e-12))
         @test norm(todense(ψ3) - vref) / norm(vref) < 1e-4
 
         # in-place route: bond re-fitted to alg.D; the input scaling is folded into the

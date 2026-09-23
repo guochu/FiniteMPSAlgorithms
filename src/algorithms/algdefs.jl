@@ -4,6 +4,22 @@ abstract type MPSAlgorithm end
 abstract type IterativeMPSAlgorithm <: MPSAlgorithm end
 
 """
+	SingleSiteUpdate
+
+Abstract base of the single-site (ALS) sweep engines: `DMRG1`, `ALSLinSolve`,
+`ALSRecon` and `Seq2Seq`.
+"""
+abstract type SingleSiteUpdate <: IterativeMPSAlgorithm end
+
+"""
+	TwoSiteUpdate
+
+Abstract base of the two-site sweep engines: `DMRG2` (the concrete `ALSLinSolve2`),
+`CADMRG` and `PDMRG`.
+"""
+abstract type TwoSiteUpdate <: IterativeMPSAlgorithm end
+
+"""
 	SVDCompression(; trunc=truncdimcutoff(D=Defaults.D, ϵ=Defaults.tol, add_back=0), verbosity=0)
 
 Parameters of the SVD-sweep (one-pass) compression route: the exact product is formed first
@@ -25,7 +41,7 @@ guess with bond cap `alg.D` (`svdguess_add`, `svdguess_mult`, `svdguess_hadamard
 caller-provided guess to `alg.D` bonds with `changebond!`. `DMRG1` itself does not
 truncate.
 """
-@kwdef struct DMRG1 <: IterativeMPSAlgorithm
+@kwdef struct DMRG1 <: SingleSiteUpdate
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
 	D::Int = Defaults.D
@@ -39,11 +55,12 @@ Parameters of the two-site variational sweep engine: the neighboring site pair i
 optimized jointly and re-split by an SVD under `trunc::TruncationScheme`, so the bond
 dimension adapts during the sweeps (growth where the environment demands it, truncation
 where the scheme caps it). All engines accepting a `DMRG1` (`mult`, `add`, `compress`,
-`hadamard`, `linsolve`, `ground_state`) accept a `DMRG2` as well; `alg.trunc` is also
+`hadamard`, `linsolve`, `ground_state`) accept a `DMRG2` as well; the dedicated
+two-site `linsolve` configuration is [`ALSLinSolve2`](@ref). `alg.trunc` is also
 consulted for the bond cap of automatically drawn initial guesses
 (`_truncation_bond`).
 """
-@kwdef struct DMRG2{TR<:TruncationScheme} <: IterativeMPSAlgorithm
+@kwdef struct DMRG2{TR<:TruncationScheme} <: TwoSiteUpdate
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
 	trunc::TR = truncdim(D=Defaults.D)
@@ -51,23 +68,36 @@ consulted for the bond cap of automatically drawn initial guesses
 end
 
 """
-	Seq2Seq(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D, α=0.01,
-	        nadd=8, nbuffer=1024, verbosity=0)
+	ALSLinSolve(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D,
+	            solver=DefaultLinearSolver, verbosity=0)
 
-Algorithm configuration of the `seq2seq` MPO fit: single-site ALS sweeps with the
-bond profile `alg.D` and the Hilbert-Schmidt ridge `α·‖W‖²_HS` added to the local
-normal equations for conditioning (the seq2seq regularization; not part of the
-reported loss). `nadd`/`nbuffer` drive the adaptive data-enrichment loop of the
-oracle-based entry point `seq2seq(pairfun, dxs, dys, alg)` (unused by the
-fixed-dataset entry points).
+Algorithm configuration of the iterative `linsolve`: single-site ALS sweeps over the
+normal-equation stacks with the bond profile `alg.D`; the local normal equations are
+solved by the KrylovKit iterative solver `alg.solver` (matrix-free, the current site
+tensor as warm start).
 """
-@kwdef struct Seq2Seq <: IterativeMPSAlgorithm
+@kwdef struct ALSLinSolve <: SingleSiteUpdate
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
 	D::Int = Defaults.D
-	α::Float64 = 0.01        # HS ridge on the local solves
-	nadd::Int = 8            # pairs added per adaptive enrichment round
-	nbuffer::Int = 1024      # random candidate pool of the residual evaluation
+	solver::KrylovKit.LinearSolver = DefaultLinearSolver
+	verbosity::Int = 0
+end
+
+"""
+	ALSLinSolve2(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=truncdim(D=Defaults.D),
+	             solver=DefaultLinearSolver, verbosity=0)
+
+Algorithm configuration of the two-site iterative `linsolve`: two-site ALS sweeps over
+the normal-equation stacks with the bond profile `alg.trunc`; the local normal equations
+are solved by the KrylovKit iterative solver `alg.solver` (matrix-free, the current
+site-pair tensor as warm start).
+"""
+@kwdef struct ALSLinSolve2{TR<:TruncationScheme} <: TwoSiteUpdate
+	maxiter::Int = Defaults.maxiter
+	tol::Float64 = Defaults.tol
+	trunc::TR = truncdim(D=Defaults.D)
+	solver::KrylovKit.LinearSolver = DefaultLinearSolver
 	verbosity::Int = 0
 end
 

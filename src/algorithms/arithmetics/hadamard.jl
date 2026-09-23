@@ -214,6 +214,65 @@ function hadamard(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::SVDCompression=Defa
 end
 
 function hadamard(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::DMRG1)
+        _validate_hadamard(ψA, ψB)
+        return hadamard!(svdguess_hadamard(ψA, ψB, alg.D), ψA, ψB, alg)
+end
+
+# ---------- two-site (DMRG2) sweeps and interface ----------
+
+# the two-site optimal pointwise-product block: the fused pairs of both sites
+function _reduce_hadamard_site2(m::HadamardCache, s::Integer)
+	A2 = @tensor a[aL, p1, p2, aR] := m.ketx[s][aL, p1, b] * m.ketx[s+1][b, p2, aR]
+	B2 = @tensor b[bL, q1, q2, bR] := m.kety[s][bL, q1, c] * m.kety[s+1][c, q2, bR]
+	# the pointwise product shares ONE physical value per site: broadcast, not contract
+	KB2 = reshape(A2, size(A2, 1), 1, size(A2, 2), size(A2, 3), size(A2, 4), 1) .*
+		  reshape(B2, 1, size(B2, 1), size(B2, 2), size(B2, 3), 1, size(B2, 4))
+	# KB2: (aL, bL, p1, p2, aR, bR)
+	return @tensor t[-1, -2, -3, -4] := m.hstorage[s][-1, 1, 2] * KB2[1, 2, -2, -3, 3, 4] *
+									   m.hstorage[s+2][-4, 3, 4]
+end
+
+function leftsweep!(m::HadamardCache, alg::DMRG2)
+	L = length(m.bra)
+	kvals = zeros(Float64, L)
+	for s in 1:L-1
+		t2 = _reduce_hadamard_site2(m, s)
+		kvals[s] = norm(t2)
+		_als2_update!(m.bra, s, t2, alg; move_right=true)
+		_env_updateleft!(m, s)
+	end
+	kvals[L] = kvals[L-1]
+	return kvals
+end
+
+function rightsweep!(m::HadamardCache, alg::DMRG2)
+	L = length(m.bra)
+	kvals = zeros(Float64, L)
+	k = 1
+	for s in L:-1:2
+		t2 = _reduce_hadamard_site2(m, s - 1)
+		kvals[k] = norm(t2)
+		k += 1
+		_als2_update!(m.bra, s - 1, t2, alg; move_right=false)
+		_env_updateright!(m, s)
+	end
+	kvals[L] = kvals[L-1]
+	return kvals
+end
+
+sweep!(m::HadamardCache, alg::DMRG2) = vcat(leftsweep!(m, alg), rightsweep!(m, alg))
+
+function hadamard!(χ, ψA, ψB, alg::DMRG2)
+	cache = HadamardCache(ψA, ψB, χ)
+	iterative_compute!(cache, alg)
+	# attach the ⊙ convention scale scaling(ψA)·scaling(ψB) and fold the center norm
+	# into `scaling` (see `mult!`)
+	setscaling!(χ, scaling(ψA) * scaling(ψB))
+	_renormalize!(χ, χ[1], false)
+	return χ
+end
+
+function hadamard(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::DMRG2)
 	_validate_hadamard(ψA, ψB)
-	return hadamard!(svdguess_hadamard(ψA, ψB, alg.D), ψA, ψB, alg)
+	return hadamard!(svdguess_hadamard(ψA, ψB, _guess_bond(alg.trunc)), ψA, ψB, alg)
 end
