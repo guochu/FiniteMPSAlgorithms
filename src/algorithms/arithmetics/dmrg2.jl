@@ -257,24 +257,31 @@ end
 
 # ⟨x|A†A|z⟩ over the pair: z2[zL, p1, p2, zR]
 # hL legs (xL, A†-bond, A-bond, zL); hR legs (xR, A†-bond, A-bond, zR)
+# contraction order: the large MPS bonds (zL, zR — far larger than the MPO bonds and
+# physical dimensions) are folded into the environments first; every intermediate stays
+# at O(x·z·D_Aᵏ·dᵏ) instead of materializing zL·zR-scaled blocks
 function _h2_apply(z2::AbstractArray{T,4}, W2, hL::AbstractArray{T,4}, hR::AbstractArray{T,4}) where {T}
-	# (A2 z2) at the ket layer: sum z2's physicals against the MPO block inputs
-	Az = @tensor az[w1, o1, o2, w2, zL, zR] := z2[zL, i1, i2, zR] *
+	# fold z2 into the right environment over the large ket bond zR
+	t1 = @tensor t1[zL, i1, i2, xR, cR, w2] := hR[xR, cR, w2, zR] * z2[zL, i1, i2, zR]
+	# apply the MPO block on the pair (small physical and A-bond legs)
+	t2 = @tensor t2[zL, xR, cR, w1, o1, o2] := t1[zL, i1, i2, xR, cR, w2] *
 											   W2[w1, o1, o2, w2, i1, i2]
-	# wrap with A†2 and the environments
-	@tensor y[-1, -2, -3, -4] := hL[-1, cL, aL, zL] *
-								 conj(W2[cL, o1, o2, cR, -2, -3]) *
-								 Az[aL, o1, o2, w2, zL, zR] * hR[-4, cR, w2, zR]
-	return y
+	# wrap with A†2: its input legs become the free physical legs of the target
+	t3 = @tensor t3[zL, xR, w1, cL, p1, p2] := conj(W2[cL, o1, o2, cR, p1, p2]) *
+											   t2[zL, xR, cR, w1, o1, o2]
+	# close with the left environment over the large ket bond zL and the small A-bonds
+	return @tensor y[xL, p1, p2, xR] := hL[xL, cL, w1, zL] * t3[zL, xR, w1, cL, p1, p2]
 end
 
 # ⟨x|A†|y⟩ over the pair: the two-site right-hand side. As in the single-site
 # `_b_target`, y's physicals contract W2's PO legs and the free legs are W2's PI legs
-# (A†y lives on A's input space).
+# (A†y lives on A's input space). Large MPS bonds folded into the environments first
+# (same order as `_h2_apply`).
 function _b2_target(W2, y2::AbstractArray{T,4}, bL::AbstractArray{T,3}, bR::AbstractArray{T,3}) where {T}
-	@tensor t[-1, -2, -3, -4] := bL[-1, cL, kL] * conj(W2[cL, p1, p2, cR, -2, -3]) *
-								 y2[kL, p1, p2, kR] * bR[-4, cR, kR]
-	return t
+	t1 = @tensor t1[kL, o1, o2, xR, cR] := bR[xR, cR, kR] * y2[kL, o1, o2, kR]
+	t2 = @tensor t2[kL, xR, cL, q1, q2] := conj(W2[cL, o1, o2, cR, q1, q2]) *
+										   t1[kL, o1, o2, xR, cR]
+	return @tensor t[xL, q1, q2, xR] := bL[xL, cL, kL] * t2[kL, xR, cL, q1, q2]
 end
 
 function _site_solve2(m::LinsolveCache, s::Integer)
