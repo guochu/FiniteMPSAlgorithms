@@ -43,7 +43,7 @@ export mult, add, compress, compress!,
 	FirstOrderStepper, SecondOrderStepper,
 	iterative_compute!, AddCache, MultCache, HadamardCache, LinsolveCache, Seq2SeqCache,
 	WI, WII, ComplexStepper, complex_stepper, timeevompo, timeevolve!,
-	linsolve, seq2seq, seq2seq!,
+	linsolve, seq2seq, seq2seq!, sample,
 	DMRGCache, ExcitedStateCache, OverlapCache, recalculate!,
 	TraceCache,
 	# experimental

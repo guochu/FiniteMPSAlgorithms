@@ -10,9 +10,10 @@
 #                     vector of sample k at site s is fₖ = ℓₖ ⊗ e(xₖ) ⊗ rₖ)
 #   gstorage[s]:      ⟨ψ|ψ⟩_HS ridge transfer (the seq2seq regularization; added to
 #                     the local normal equations only, not part of the reported loss)
-# The local normal equation (M_s + α·R_s)·z = b_s is solved densely; the gauge is
-# moved by QR/LQ. Every per-site loss is the exact global data objective at that
-# point of the sweep (monotone for exact solves). No KKT scale restoration: the
+# The local normal equation (M_s + α·R_s)·z = b_s is solved iteratively with
+# KrylovKit's `linsolve` (matrix-free, the current site tensor as warm start); the
+# gauge is moved by QR/LQ. Every per-site loss is the exact global data objective at
+# that point of the sweep (monotone for exact solves). No KKT scale restoration: the
 # normal equations are inhomogeneous, the data fixes the scale.
 
 """
@@ -20,11 +21,18 @@
 	        α=0.01, nadd=8, nbuffer=1024, verbosity=0)
 
 Sample-amplitude MPS reconstruction by quadratic (least-squares) optimization —
-the variational alternative to tensor cross interpolation. Single-site ALS sweeps
-with a fixed bond profile `alg.D` (the DMRG1 discipline: the out-of-place entry
-points draw a random guess of bond `alg.D`, the in-place route re-fits the
-caller's guess with `changebond!`). `α ≥ 0` is the Hilbert-Schmidt ridge added
-to the local normal equations for conditioning (the seq2seq regularization; not
+the variational alternative to tensor cross interpolation. Given the sample set
+`{(𝐱⁽ᵏ⁾, aₖ)}`, the fitted objective is the data loss
+
+	ℒ(ψ) = Σₖ |⟨𝐱⁽ᵏ⁾|ψ⟩ − aₖ|²
+
+where `⟨𝐱⁽ᵏ⁾|ψ⟩` is the wave-function amplitude of `ψ` on the basis product
+`|𝐱⁽ᵏ⁾⟩ = ⊗ⱼ|xⱼ⁽ᵏ⁾⟩` and `aₖ ∈ ℂ` the measured amplitude (possibly noisy).
+
+Single-site ALS sweeps with a fixed bond profile `alg.D` (the DMRG1 discipline: the
+out-of-place entry points draw a random guess of bond `alg.D`, the in-place route
+re-fits the caller's guess with `changebond!`). `α ≥ 0` is the Hilbert-Schmidt ridge
+added to the local normal equations for conditioning (the seq2seq regularization; not
 part of the reported loss); `nadd`/`nbuffer` drive the adaptive
 sample-enrichment loop of [`reconstruct`](@ref).
 """
@@ -107,7 +115,6 @@ struct ALSReconCache{CP,T}
 	Lmat::Vector{Matrix{T}}
 	Rmat::Vector{Matrix{T}}
 	gstorage::Vector{Matrix{T}}
-	anorm::Float64
 end
 
 function ALSReconCache(ψ::CanonicalMPS, X::Matrix{Int}, a::Vector)
@@ -133,7 +140,7 @@ function ALSReconCache(ψ::CanonicalMPS, X::Matrix{Int}, a::Vector)
 	Lmat[1] = ones(T, N, 1)
 	Rmat[L] = ones(T, N, 1)
 	gstorage[L+1] = ones(T, 1, 1)
-	c = ALSReconCache(ψ, X, ac, Lmat, Rmat, gstorage, real(sum(abs2, ac)))
+	c = ALSReconCache(ψ, X, ac, Lmat, Rmat, gstorage)
 	_init_contexts_right!(c)
 	return c
 end
@@ -174,58 +181,79 @@ function _g_transfer_right(g::Matrix{T}, A::AbstractArray{T,3}) where {T}
 	return gnew
 end
 
-# ---------- local normal equation at one site ----------
+# ---------- local normal equation at one site (matrix-free, KrylovKit) ----------
 
-# data Hessian M6[(a,p,b),(a',p',b')] = Σₖ conj(ℓₖ[a]rₖ[b])·ℓₖ[a']rₖ[b']·δ_{p,p'}·δ_{p,xₖ}
-# (diagonal in the physical legs: one bucket per physical value) and the linear target
-# b6[a, p, b] = Σₖ:xₖ=p āₖ·ℓₖ[a]rₖ[b]  — the ∂ℒ/∂z̄ normal equation of the plain
-# model amplitude ⟨𝐱ₖ|ψ⟩ = fₖᵀ·vec(ψ_s) (the conjugations land exactly as written;
-# a swapped conjugation solves for the conjugated state)
-function _ls_reduce_site(c::ALSReconCache, s)
-	A = c.ψ[s]
-	Dl, d, Dr = size(A)
-	T = eltype(A)
-	M6 = zeros(T, Dl, d, Dr, Dl, d, Dr)
-	b6 = zeros(T, Dl, d, Dr)
+# model amplitude of sample k with the site tensor w: gₖ = ℓₖ·w·(e(xₖ)⊗rₖ)
+# (the plain contraction — the conjugations of the normal equation live in the
+# Hessian/right-hand side below, never here)
+@inline function _model_amplitude(Lm::AbstractMatrix{T}, Rm::AbstractMatrix{T},
+								  w::AbstractArray{T,3}, k::Integer, p::Integer) where {T}
+	Dl, d, Dr = size(w)
+	return sum(reshape(@view(Lm[k, :]), Dl, 1) .* (@view w[:, p, :]) .*
+			   reshape(@view(Rm[k, :]), 1, Dr))
+end
+
+# the local data Hessian action: (M·z)[a,p,b] = Σₖ conj(ℓₖ[a]rₖ[b])·gₖ(z)·δ_{p,xₖ}
+# with gₖ = fₖᵀ·z; plus the ridge α·(g_s ⊗ I_d ⊗ g_{s+1})·z (seq2seq's HS regularizer
+# in the current gauge — Hermitian PSD, so CG applies)
+function _ls_apply(c::ALSReconCache, s::Integer, z::AbstractArray{T,3}, α::Real) where {T}
+	Dl, d, Dr = size(z)
+	out = zeros(T, Dl, d, Dr)
 	Lm, Rm = c.Lmat[s], c.Rmat[s]
 	for k in eachindex(c.a)
 		p = c.X[s, k]
-		f = vec(reshape(@view(Lm[k, :]), Dl, 1) * reshape(@view(Rm[k, :]), 1, Dr))
-		@views M6[:, p, :, :, p, :] .+= reshape(conj(f) * transpose(f), Dl, Dr, Dl, Dr)
-		@views b6[:, p, :] .+= c.a[k] .* conj(reshape(f, Dl, Dr))
+		gk = _model_amplitude(Lm, Rm, z, k, p)
+		@views out[:, p, :] .+= gk .* conj(reshape(Lm[k, :], Dl, 1) .*
+										   reshape(Rm[k, :], 1, Dr))
 	end
-	return M6, b6
+	if α != 0
+		gL, gR = c.gstorage[s], c.gstorage[s+1]
+		for p in 1:d
+			@views out[:, p, :] .+= α .* (gL * z[:, p, :] * transpose(gR))
+		end
+	end
+	return out
 end
 
-# ridge on the diagonal physical blocks: α·(g_s ⊗ I_d ⊗ g_{s+1}) (seq2seq's _add_ridge!)
-function _add_ridge!(M6::AbstractArray{T,6}, c::ALSReconCache, s, α::Real) where {T}
-	(α == 0) && return M6
+# the local normal-equation right-hand side: b[a, p, b'] = Σₖ:xₖ=p aₖ·conj(ℓₖ[a]rₖ[b'])
+# (the ∂ℒ/∂z̄ equation of the plain model amplitude ⟨𝐱ₖ|ψ⟩ = fₖᵀ·vec(ψ_s); the LS
+# conjugations land exactly as written — a swapped one solves the conjugated state)
+function _ls_rhs(c::ALSReconCache, s::Integer)
 	Dl, d, Dr = size(c.ψ[s])
-	Rk = reshape(kron(c.gstorage[s], c.gstorage[s+1]), Dl, Dr, Dl, Dr)
-	for p in 1:d
-		@views M6[:, p, :, :, p, :] .+= α .* Rk
+	b = zeros(eltype(c.a), Dl, d, Dr)
+	Lm, Rm = c.Lmat[s], c.Rmat[s]
+	for k in eachindex(c.a)
+		@views b[:, c.X[s, k], :] .+= c.a[k] .* conj(reshape(Lm[k, :], Dl, 1) .*
+													 reshape(Rm[k, :], 1, Dr))
 	end
-	return M6
+	return b
 end
 
-# ridge-conditioned local solve: w = (M + α·R)⁻¹b, returned with the data-only Hessian
-# and linear target (for the exact loss)
+"""
+	_ls_solve(c, s, alg) -> w
+
+Solve the local normal equation (M + α·R)·w = b iteratively with KrylovKit's
+`linsolve` (the linear operator is applied matrix-free through the per-sample
+features; the current site tensor is the warm start). Returns the updated site
+tensor `w` of shape (Dl, d, Dr).
+"""
 function _ls_solve(c::ALSReconCache, s::Integer, alg::ALSRecon)
-	Dl, d, Dr = size(c.ψ[s])
-	M6, b6 = _ls_reduce_site(c, s)
-	M = reshape(M6, Dl*d*Dr, Dl*d*Dr)
-	b = vec(b6)
-	H = reshape(_add_ridge!(copy(M6), c, s, alg.α), Dl*d*Dr, Dl*d*Dr)
-	w = reshape(H \ b, Dl, d, Dr)
-	return w, M, b
+	b = _ls_rhs(c, s)
+	w, _ = KrylovKit.linsolve(z -> _ls_apply(c, s, z, alg.α), b, c.ψ[s];
+							  ishermitian=true, tol=Defaults.tol, krylovdim=25, maxiter=100)
+	return w
 end
 
-# exact global data objective after the site update (ridge excluded): the local
-# decomposition satisfies ψ[𝐱ₖ] = fₖ†w exactly, so
-# ℒ = w†Mw − 2·Re(w†b) + Σₖ|aₖ|²  (seq2seq's _site_loss)
-function _site_loss(c::ALSReconCache, w::AbstractArray, M::AbstractMatrix, b::AbstractVector)
-	wv = vec(w)
-	return real(dot(wv, M * wv)) - 2 * real(dot(b, wv)) + c.anorm
+# exact global data objective after the site update (ridge excluded), from the
+# per-sample model amplitudes of the updated tensor: ℒ = Σₖ |gₖ − aₖ|²
+function _site_loss(c::ALSReconCache, s::Integer, w::AbstractArray)
+	Lm, Rm = c.Lmat[s], c.Rmat[s]
+	loss = 0.0
+	for k in eachindex(c.a)
+		gk = _model_amplitude(Lm, Rm, w, k, c.X[s, k])
+		loss += abs2(gk - c.a[k])
+	end
+	return loss
 end
 
 # ---------- ALS sweeps ----------
@@ -233,24 +261,24 @@ end
 """
 	leftsweep!(c::ALSReconCache, alg::ALSRecon) -> kvals
 
-Left-to-right single-site ALS sweep: dense local normal equations, QR gauge moves,
-left-context and ridge transfers. `kvals[s]` is the exact global data objective after
-updating site `s` (non-increasing; the ridge is excluded).
+Left-to-right single-site ALS sweep: matrix-free KrylovKit local normal-equation
+solves, QR gauge moves, left-context and ridge transfers. `kvals[s]` is the exact
+global data objective after updating site `s` (non-increasing; the ridge is excluded).
 """
 function leftsweep!(c::ALSReconCache, alg::ALSRecon)
 	L = length(c.ψ)
 	kvals = zeros(Float64, L)
 	for s in 1:L-1
-		w, M, b = _ls_solve(c, s, alg)
-		kvals[s] = _site_loss(c, w, M, b)
+		w = _ls_solve(c, s, alg)
+		kvals[s] = _site_loss(c, s, w)
 		q, r = _gauge_left(w)
 		c.ψ[s] = q
 		c.ψ[s+1] = _contract_first(c.ψ[s+1], r)
 		_left_transfer!(c, s)
 		_g_transfer_left!(c, s)
 	end
-	w, M, b = _ls_solve(c, L, alg)
-	kvals[L] = _site_loss(c, w, M, b)
+	w = _ls_solve(c, L, alg)
+	kvals[L] = _site_loss(c, L, w)
 	c.ψ[L] = w
 	return kvals
 end
@@ -266,8 +294,8 @@ function rightsweep!(c::ALSReconCache, alg::ALSRecon)
 	kvals = zeros(Float64, L)
 	k = 1
 	for s in L:-1:2
-		w, M, b = _ls_solve(c, s, alg)
-		kvals[k] = _site_loss(c, w, M, b)
+		w = _ls_solve(c, s, alg)
+		kvals[k] = _site_loss(c, s, w)
 		k += 1
 		l, q = _gauge_right(w)
 		c.ψ[s] = q
@@ -275,8 +303,8 @@ function rightsweep!(c::ALSReconCache, alg::ALSRecon)
 		_right_transfer!(c, s)
 		_g_transfer_right!(c, s)
 	end
-	w, M, b = _ls_solve(c, 1, alg)
-	kvals[L] = _site_loss(c, w, M, b)
+	w = _ls_solve(c, 1, alg)
+	kvals[L] = _site_loss(c, 1, w)
 	c.ψ[1] = w
 	return kvals
 end
