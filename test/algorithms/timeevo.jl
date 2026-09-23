@@ -2,7 +2,7 @@ using FiniteMPSAlgorithms
 using Test, LinearAlgebra, Random
 using FiniteMPSAlgorithms: SVD, QR, QRpos, LQ, LQpos, SDD, Polar
 
-include(joinpath(@__DIR__, "..", "helpers.jl"))
+
 
 @testset "timeevo (TDVP1)" begin
 	Random.seed!(99)

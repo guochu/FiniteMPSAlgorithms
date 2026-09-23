@@ -2,7 +2,7 @@ using FiniteMPSAlgorithms
 using Test, LinearAlgebra, Random
 using FiniteMPSAlgorithms: SVD, QR, QRpos, LQ, LQpos, SDD, Polar, l_LL, r_RR
 
-include(joinpath(@__DIR__, "..", "helpers.jl"))
+
 
 @testset "structures" begin
 	Random.seed!(1234)

@@ -2,7 +2,7 @@ using FiniteMPSAlgorithms
 using Test, LinearAlgebra, Random
 using FiniteMPSAlgorithms: SVD, QR, QRpos, LQ, LQpos, SDD, Polar, DefaultTruncation
 
-include(joinpath(@__DIR__, "..", "helpers.jl"))
+
 
 @testset "arithmetics" begin
 	Random.seed!(7)
@@ -420,12 +420,29 @@ end
 	@test abs(dot(xsol, x_exact)) / (norm(xsol) * norm(x_exact)) ≈ 1 atol = 1e-5
 
 	# default-algorithm form
-	xk = linsolve(I_mpo, y, ALSLinSolve(D=16))
-	@test abs(dot(xk, y)) / (norm(xk) * norm(y)) ≈ 1 atol = 1e-7
+        xk = linsolve(I_mpo, y, ALSLinSolve(D=16))
+        @test abs(dot(xk, y)) / (norm(xk) * norm(y)) ≈ 1 atol = 1e-7
 
-	# dimension mismatch: a y with wrong physical dimensions
-	y5 = randommps(ComplexF64, fill(2, L-1); D=4)
-	@test_throws DimensionMismatch linsolve(I_mpo, y5, alg)
+        # scaled canonical MPO input: the represented equation U·x = y holds with the
+        # operands' external scales (the solution carries scaling(y)/scaling(A))
+        Uc = CanonicalMPO(MPO(tompotensors(U)).data)
+        setscaling!(Uc, 2.5)
+        yUc = copy(yU)
+        setscaling!(yUc, 2.5)              # represented y = 2.5^L·U·x_exact
+        xsc = linsolve(Uc, yUc, alg)
+        @test abs(dot(xsc, x_exact)) / (norm(xsc) * norm(x_exact)) ≈ 1 atol = 1e-5
+        @test norm(todense(Uc) * todense(xsc) - todense(yUc)) / norm(todense(yUc)) < 1e-4
+
+        # scaled rhs with a raw (Hamiltonian) MPO input: s_A = 1, s_x = scaling(y)
+        ys = copy(yU)
+        setscaling!(ys, 1.7)
+        xs2 = linsolve(U, ys, alg)
+        @test abs(dot(xs2, x_exact)) / (norm(xs2) * norm(x_exact)) ≈ 1 atol = 1e-5
+        @test norm(todense(U) * todense(xs2) - todense(ys)) / norm(todense(ys)) < 1e-4
+
+        # dimension mismatch: a y with wrong physical dimensions
+        y5 = randommps(ComplexF64, fill(2, L-1); D=4)
+        @test_throws DimensionMismatch linsolve(I_mpo, y5, alg)
 end
 
 @testset "arithmetics (DMRG2)" begin
@@ -542,4 +559,13 @@ end
 	@test monotone(kh)
 	@test abs(dot(todense(lc.ket), todense(xs_exact))) /
 		  (norm(todense(lc.ket)) * norm(todense(xs_exact))) ≈ 1 atol = 1e-8
+
+	# two-site linsolve with a scaled canonical MPO and an independently scaled rhs:
+	# the represented equation (s_A^L·A)·x = s_y^L·(A·x_exact) must be solved
+	Uc2 = CanonicalMPO(MPO(tompotensors(Us)).data)
+	setscaling!(Uc2, 3.0)
+	ysc = copy(ys)
+	setscaling!(ysc, 1.4)
+	xsc2 = linsolve(Uc2, ysc, nt2)
+	@test norm(todense(Uc2) * todense(xsc2) - todense(ysc)) / norm(todense(ysc)) < 1e-6
 end

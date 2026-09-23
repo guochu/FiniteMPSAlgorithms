@@ -1,5 +1,6 @@
 using FiniteMPSAlgorithms
 using Test, LinearAlgebra, Random
+# disambiguate from LinearAlgebra's SVD/QR/LQ factorization objects
 using FiniteMPSAlgorithms: SVD, QR, QRpos, LQ, LQpos, SDD, Polar
 
 # Dense/tensor linear algebra: orthogonal factorizations, tsvd, permute, isometry, distances

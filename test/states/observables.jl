@@ -1,7 +1,7 @@
 using FiniteMPSAlgorithms
 using Test, LinearAlgebra, Random
 
-include(joinpath(@__DIR__, "..", "helpers.jl"))
+
 
 @testset "CanonicalMPO entanglement" begin
 	Random.seed!(73)

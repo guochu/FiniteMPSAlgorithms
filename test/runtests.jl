@@ -2,6 +2,8 @@ using Test
 using LinearAlgebra
 using FiniteMPSAlgorithms
 
+include("helpers.jl")
+
 @testset verbose = true "FiniteMPSAlgorithms" begin
 	@testset "tensorops" begin
 		include("tensorops/linalg.jl")

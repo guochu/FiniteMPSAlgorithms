@@ -2,7 +2,7 @@ using FiniteMPSAlgorithms
 using Test, LinearAlgebra, Random
 using FiniteMPSAlgorithms: SVD, QR, QRpos, LQ, LQpos, SDD, Polar
 
-include(joinpath(@__DIR__, "..", "helpers.jl"))
+
 
 # matrix in the Kronecker convention (i1 i2)',(i1 i2), i1 slowest -> documented gate
 # tensor (i1', i2', i1, i2)

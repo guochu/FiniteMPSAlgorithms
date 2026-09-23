@@ -1,7 +1,7 @@
 using FiniteMPSAlgorithms
 using Test, LinearAlgebra, Random
 
-include(joinpath(@__DIR__, "..", "helpers.jl"))
+
 
 # dense reference of the exponentially decaying operator
 #   O = Σ_k α_k Σ_{i<j} λ_k^(j-i) · a_i m_(i+1) ⋯ m_(j-1) b_j

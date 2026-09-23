@@ -4,7 +4,7 @@ using Test
 using LinearAlgebra
 using FiniteMPSAlgorithms
 
-include(joinpath(@__DIR__, "..", "helpers.jl"))
+
 
 @testset "sparse MPO" begin
 	Random.seed!(1234)

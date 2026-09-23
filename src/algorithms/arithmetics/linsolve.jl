@@ -212,16 +212,17 @@ end
 
 Single-site variational (ALS) solve of `A·x ≈ y` refined in place on the initial guess
 `x`; iterated by the generic `iterative_compute!` on the exact global residual². The
-solution is expressed in the right-hand side's per-site scaling convention (a scaling^L
-power is never materialized).
+sweeps solve the raw-data problem, and the solution carries the per-site scale
+`scaling(y)/scaling(A)` — the represented equation `A·x = y` holds with the operands'
+external scales (a scaling^L power is never materialized).
 """
 function linsolve!(x, A, y, alg::ALSLinSolve = ALSLinSolve())
 	bonddim(x) != alg.D && changebond!(x; D=alg.D)
 	m = LinsolveCache(A, y, x)
 	iterative_compute!(m, alg)
-	# the ALS reads raw data only: the solution is expressed in the right-hand side's
-	# per-site scaling convention (attached through the `scaling` field)
-	setscaling!(m.ket, scaling(y))
+	# the sweeps solve the raw-data problem A_data·x = y_data; the represented equation
+	# (s_A^L·A_data)·(s_x^L·x) = s_y^L·y_data holds iff s_x = scaling(y)/scaling(A)
+	setscaling!(m.ket, scaling(y) / _opscaling(A))
 	return x
 end
 
@@ -344,9 +345,10 @@ sweep!(m::LinsolveCache, alg::ALSLinSolve2) = vcat(leftsweep!(m, alg), rightswee
 function linsolve!(x, A, y, alg::ALSLinSolve2)
 	m = LinsolveCache(A, y, x)
 	iterative_compute!(m, alg)
-	# the solution is expressed in the right-hand side's per-site scaling convention;
-	# fold the center norm into `scaling` (see `mult!`)
-	setscaling!(m.ket, scaling(y))
+	# the sweeps solve the raw-data problem A_data·x = y_data; the represented equation
+	# (s_A^L·A_data)·(s_x^L·x) = s_y^L·y_data holds iff s_x = scaling(y)/scaling(A):
+	# attach that per-site scale and fold the center norm into it (see `mult!`)
+	setscaling!(m.ket, scaling(y) / _opscaling(A))
 	_renormalize!(m.ket, m.ket[1], false)
 	return x
 end
