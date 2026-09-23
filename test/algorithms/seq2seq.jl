@@ -12,7 +12,7 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	# D = 2 matches the bond profile of the ground-truth MPO exactly (tight
 	# parametrization -> fast ALS convergence); α tiny so the ridge only
 	# conditions the local solves without biasing the fit
-	alg = DMRG1(maxiter=25, tol=1e-12, verbosity=0, D=2)
+	alg = Seq2Seq(maxiter=25, tol=1e-12, verbosity=0, D=2, α=1e-8)
 
 	# ground truth: random bond-2 MPO mapping dx → dy; targets y = Wtrue·x
 	prof = [1, 2, 2, 2, 2, 2, 1]
@@ -20,7 +20,7 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	xs = [randommps(ComplexF64, dxs; D=4) for _ in 1:N]
 	ys = [Wtrue * x for x in xs]
 
-	W, traj = seq2seq(xs, ys, alg; α=1e-8)
+	W, traj = seq2seq(xs, ys, alg)
 	@test ophydims(W) == dys
 	@test iphydims(W) == dxs
 	# phydim is only defined for square MPOTensors; the seq2seq MPO itself is rectangular
@@ -43,7 +43,7 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
 	@test minimum(traj[end]) < 1e-8
 
 	# default-algorithm form
-	Wk, _ = seq2seq(xs, ys, DMRG1(maxiter=25, tol=1e-12, verbosity=0, D=2); α=1e-8)
+	Wk, _ = seq2seq(xs, ys, Seq2Seq(maxiter=25, tol=1e-12, verbosity=0, D=2, α=1e-8))
 	@test distance(Wk * xs[1], ys[1]) / norm(ys[1]) < 1e-6
 
 	# dimension mismatch: a y with wrong physical dimensions
@@ -57,7 +57,7 @@ end
 	N = 16                                 # over-determined system: robust ALS fit
 	dxs = fill(2, L)
 	dys = fill(3, L)                       # rectangular map dx → dy
-	alg = DMRG1(maxiter=40, tol=1e-12, verbosity=0, D=2)
+	alg = Seq2Seq(maxiter=40, tol=1e-12, verbosity=0, D=2, α=1e-8)
 	prof = vcat(1, fill(2, L-1), 1)
 
 	# ground truth: random bond-2 MPO; targets y = Wtrue·x
@@ -69,7 +69,7 @@ end
 	# (small random entries keep the ALS sweeps out of local minima)
 	Wfit = MPO([0.1 .* randn(ComplexF64, prof[i], dys[i], prof[i+1], dxs[i]) for i in 1:L])
 	Wbefore = [copy(A) for A in Wfit.data]
-	traj = seq2seq!(Wfit, xs, ys, alg; α=1e-8)
+	traj = seq2seq!(Wfit, xs, ys, alg)
 	@test traj isa Vector{Vector{Float64}}
 	@test all(==(2L), length.(traj))
 	# the site tensors were updated in place
@@ -83,6 +83,6 @@ end
 	xs_s = [x * 2.0 for x in xs]
 	ys_s = [Wtrue * x for x in xs_s]
 	Wfit2 = MPO([0.1 .* randn(ComplexF64, prof[i], dys[i], prof[i+1], dxs[i]) for i in 1:L])
-	seq2seq!(Wfit2, xs_s, ys_s, alg; α=1e-8)
+	seq2seq!(Wfit2, xs_s, ys_s, alg)
 	@test distance(Wfit2 * xs[1], ys[1]) / norm(ys[1]) < 1e-4
 end

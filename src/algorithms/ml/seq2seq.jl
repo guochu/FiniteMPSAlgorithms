@@ -281,19 +281,19 @@ function _fold_scaling_sites(ψ::CanonicalMPS)
 end
 
 """
-	init_seq2seqcache(xs, ys, alg::DMRG1; α=0.01, D=Defaults.D)
+	init_seq2seqcache(xs, ys, alg::Seq2Seq = Seq2Seq())
 
 Build the `Seq2SeqCache` of the seq2seq fit: validate the dataset, fold the per-site
 scalings of the inputs/targets into their site tensors and draw a random initial MPO
-of bond dimension `D`.
+of bond dimension `alg.D` (the ridge strength is `alg.α`).
 """
-function init_seq2seqcache(xs, ys, alg::DMRG1; α::Real=0.01, D::Int=Defaults.D)
+function init_seq2seqcache(xs, ys, alg::Seq2Seq = Seq2Seq())
 	dxs, dys = _validate_seq2seq(xs, ys)
 	T = promote_type(scalartype(xs[1]), scalartype(ys[1]))
-	ompo = _random_seq2seq_mpo(T, dxs, dys, D)
+	ompo = _random_seq2seq_mpo(T, dxs, dys, alg.D)
 	xsf = [_fold_scaling_sites(x) for x in xs]
 	ysf = [_fold_scaling_sites(y) for y in ys]
-	return Seq2SeqCache(ompo, xsf, ysf; α)
+	return Seq2SeqCache(ompo, xsf, ysf; α=alg.α)
 end
 
 """
@@ -318,11 +318,11 @@ function Seq2SeqCache(H::AbstractMPO, kets, bras; α::Real=0.01)
 end
 
 """
-	seq2seq(xs, ys, alg::DMRG1=DMRG1(); α=0.01) -> (W, traj)
+	seq2seq(xs, ys, alg::Seq2Seq = Seq2Seq()) -> (W, traj)
 
 Fit an MPO `W` to a dataset of MPS pairs `(xs[n], ys[n])` by DMRG (single-site ALS)
 sweeps, following guochu/MPSLearning.jl: minimize `Σ_n ||W·x_n − y_n||²`, with a
-Hilbert-Schmidt ridge `α·||W||²` added to the local solves for conditioning
+Hilbert-Schmidt ridge `α·||W||²` (`alg.α`) added to the local solves for conditioning
 (the default `α = 0.01` follows MPSLearning; the ridge is not part of the
 reported loss). The input (output) physical dimensions of `W` match the dimensions
 of `xs` (`ys`), so rectangular maps `dx → dy` are supported. The initial guess is a
@@ -334,15 +334,15 @@ follows the unified `iterative_compute!` criterion (relative difference of the l
 loss of two successive sweeps below `alg.tol`).
 """
 function seq2seq(xs::Vector{<:CanonicalMPS}, ys::Vector{<:CanonicalMPS},
-				 alg::DMRG1=DMRG1(); α::Real=0.01)
+				 alg::Seq2Seq = Seq2Seq())
 	dxs, dys = _validate_seq2seq(xs, ys)
 	ompo = _random_seq2seq_mpo(promote_type(scalartype(xs[1]), scalartype(ys[1])), dxs, dys, alg.D)
-	traj = seq2seq!(ompo, xs, ys, alg; α)
+	traj = seq2seq!(ompo, xs, ys, alg)
 	return ompo, traj
 end
 
 """
-	seq2seq!(W::AbstractMPO, xs, ys, alg::DMRG1=DMRG1(); α=0.01) -> traj
+	seq2seq!(W::AbstractMPO, xs, ys, alg::Seq2Seq = Seq2Seq()) -> traj
 
 In-place variant of [`seq2seq`](@ref): fit the provided MPO `W` to the dataset
 `(xs[n], ys[n])` (its site tensors are updated in place, so `W` doubles as the initial
@@ -350,11 +350,11 @@ guess). The data scalings are folded into the site tensors at entry. Returns `tr
 the per-sweep loss history of `iterative_compute!`.
 """
 function seq2seq!(W::AbstractMPO, xs::Vector{<:CanonicalMPS}, ys::Vector{<:CanonicalMPS},
-				  alg::DMRG1=DMRG1(); α::Real=0.01)
+				  alg::Seq2Seq = Seq2Seq())
 	_validate_seq2seq(xs, ys)
 	bonddim(W) != alg.D && changebond!(W; D=alg.D)
 	xsf = [_fold_scaling_sites(x) for x in xs]
 	ysf = [_fold_scaling_sites(y) for y in ys]
-	m = Seq2SeqCache(W, xsf, ysf; α)
+	m = Seq2SeqCache(W, xsf, ysf; α=alg.α)
 	return iterative_compute!(m, alg)
 end

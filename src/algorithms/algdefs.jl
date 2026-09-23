@@ -50,6 +50,22 @@ consulted for the bond cap of automatically drawn initial guesses
 	verbosity::Int = 0
 end
 
+"""
+	Seq2Seq(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D, α=0.01, verbosity=0)
+
+Algorithm configuration of the `seq2seq` MPO fit: single-site ALS sweeps with the
+bond profile `alg.D` and the Hilbert-Schmidt ridge `α·‖W‖²_HS` added to the local
+normal equations for conditioning (the seq2seq regularization; not part of the
+reported loss).
+"""
+@kwdef struct Seq2Seq <: IterativeMPSAlgorithm
+	maxiter::Int = Defaults.maxiter
+	tol::Float64 = Defaults.tol
+	D::Int = Defaults.D
+	α::Float64 = 0.01        # HS ridge on the local solves
+	verbosity::Int = 0
+end
+
 # the bond cap carried by a truncation scheme (`nothing` for schemes without one)
 _truncation_bond(t::TruncateDim) = t.D
 _truncation_bond(t::TruncateDimCutoff) = t.D

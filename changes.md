@@ -132,3 +132,13 @@ Implementation notes (src/algorithms/arithmetics/dmrg2.jl):
   re-splits, sample/environment bookkeeping) independently of truncation effects;
 - `mult(hA::MPOHamiltonian, …, ::DMRG2)` entry points expand to the dense MPO layer
   (the out-of-place route), as with the other engines.
+
+## `seq2seq` gains a dedicated algorithm type `Seq2Seq`
+
+`seq2seq` / `seq2seq!` / `init_seq2seqcache` now take their configuration through the
+dedicated algorithm type `Seq2Seq(; maxiter, tol, D, α, verbosity)` (positional
+argument, mirroring `ALSRecon`/`DMRG1` usage). The Hilbert-Schmidt ridge strength `α`
+moved from the `α` keyword argument into the algorithm definition; the ridge itself
+(the seq2seq regularization of the local normal equations, excluded from the reported
+loss) is unchanged. The default-arg forms `seq2seq(xs, ys)` and `seq2seq(xs, ys, Seq2Seq(D=4))`
+replace the previous `seq2seq(xs, ys; α)` / DMRG1-based signatures.
