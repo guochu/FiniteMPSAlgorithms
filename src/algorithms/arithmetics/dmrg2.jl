@@ -289,30 +289,27 @@ function _site_solve2(m::LinsolveCache, s::Integer)
 	y2 = @tensor yy[a, p1, p2, b] := m.bra[s][a, p1, c] * m.bra[s+1][c, p2, b]
 	t = _b2_target(W1, W2, y2, m.bstorage[s], m.bstorage[s+2])
 	shape = (size(m.hstorage[s], 1), size(W1, 4), size(W2, 4), size(m.hstorage[s+2], 1))
-	n = prod(shape)
-	Hmat = zeros(promote_type(scalartype(m.bra), scalartype(W1)), n, n)
-	E = zeros(scalartype(Hmat), shape)
-	for i in 1:n
-		fill!(E, 0)
-		E[i] = 1
-		Hmat[:, i] .= vec(_h2_apply(E, W1, W2, m.hstorage[s], m.hstorage[s+2]))
-	end
-	return reshape(Hmat \ vec(t), shape), t, Hmat
+	z0 = size(m.ket[s]) == shape ? m.ket[s] : zero(t)
+	# the local normal equation is solved iteratively (KrylovKit) on the linear
+	# operator action — the dense H matrix is never formed
+	z, _ = KrylovKit.linsolve(y -> _h2_apply(y, W1, W2, m.hstorage[s], m.hstorage[s+2]),
+							  t, z0; ishermitian=true, tol=Defaults.tol, krylovdim=25, maxiter=100)
+	return z, t
 end
 
 # the exact global residual² ‖A·x − y‖², evaluated from the local decomposition at the
-# pair with the updated tensor z (mirrors `_site_loss` of the seq2seq engine)
-function _site_loss(m::LinsolveCache, z::AbstractArray, t::AbstractArray, Hmat::AbstractMatrix)
-	vz = vec(z)
-	return real(dot(vz, Hmat * vz)) - 2 * real(dot(vz, vec(t))) + m.ynorm2
+# pair with the updated tensor z — no global contraction is needed
+function _site_loss(m::LinsolveCache, s::Integer, z::AbstractArray{T,4}, t::AbstractArray{T,4}) where {T}
+	Hz = _h2_apply(z, m.mpo[s], m.mpo[s+1], m.hstorage[s], m.hstorage[s+2])
+	return real(dot(z, Hz)) - 2 * real(dot(z, t)) + m.ynorm2
 end
 
 function leftsweep!(m::LinsolveCache, alg::DMRG2)
 	L = length(m.ket)
 	kvals = zeros(Float64, L)
 	for s in 1:L-1
-		z2, t, Hmat = _site_solve2(m, s)
-		kvals[s] = _site_loss(m, z2, t, Hmat)
+		z2, t = _site_solve2(m, s)
+		kvals[s] = _site_loss(m, s, z2, t)
 		_als2_update!(m.ket, s, z2, alg; move_right=true)
 		_h_left!(m, s)
 		_b_left!(m, s)
@@ -326,8 +323,8 @@ function rightsweep!(m::LinsolveCache, alg::DMRG2)
 	kvals = zeros(Float64, L)
 	k = 1
 	for s in L:-1:2
-		z2, t, Hmat = _site_solve2(m, s - 1)
-		kvals[k] = _site_loss(m, z2, t, Hmat)
+		z2, t = _site_solve2(m, s - 1)
+		kvals[k] = _site_loss(m, s - 1, z2, t)
 		k += 1
 		_als2_update!(m.ket, s - 1, z2, alg; move_right=false)
 		_h_right!(m, s)

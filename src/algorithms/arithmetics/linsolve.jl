@@ -111,26 +111,19 @@ function _site_solve(m::LinsolveCache, s::Integer)
 	W = m.mpo[s]
 	t = _b_target(W, m.bra[s], m.bstorage[s], m.bstorage[s+1])
 	shape = (size(m.hstorage[s], 1), size(W, 2), size(m.hstorage[s+1], 1))
-	n = prod(shape)
-	z0 = m.ket[s]
-	if size(z0) != shape
-		z0 = zeros(scalartype(m.bra), shape)
-	end
-	Hmat = zeros(promote_type(scalartype(z0), scalartype(W)), n, n)
-	E = zeros(scalartype(Hmat), shape)
-	for i in 1:n
-		fill!(E, 0)
-		E[i] = 1
-		Hmat[:, i] .= vec(_h_apply(E, W, m.hstorage[s], m.hstorage[s+1]))
-	end
-	return reshape(Hmat \ vec(t), shape), t, Hmat
+	z0 = size(m.ket[s]) == shape ? m.ket[s] : zero(t)
+	# the local normal equation is solved iteratively (KrylovKit) on the linear
+	# operator action — the dense H matrix is never formed
+	z, _ = KrylovKit.linsolve(y -> _h_apply(y, W, m.hstorage[s], m.hstorage[s+1]), t, z0;
+							  ishermitian=true, tol=Defaults.tol, krylovdim=25, maxiter=100)
+	return z, t
 end
 
 # the exact global residual² ‖A·x − y‖², evaluated from the local decomposition at the
 # site with the updated tensor z — no global contraction is needed
-function _site_loss(m::LinsolveCache, z::AbstractArray, t::AbstractArray, Hmat::AbstractMatrix)
-	vz = vec(z)
-	return real(dot(vz, Hmat * vz)) - 2 * real(dot(vz, vec(t))) + m.ynorm2
+function _site_loss(m::LinsolveCache, s::Integer, z::AbstractArray{T,3}, t::AbstractArray{T,3}) where {T}
+	Hz = _h_apply(z, m.mpo[s], m.hstorage[s], m.hstorage[s+1])
+	return real(dot(z, Hz)) - 2 * real(dot(z, t)) + m.ynorm2
 end
 
 """
@@ -144,16 +137,16 @@ function leftsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 	L = length(m.ket)
 	kvals = zeros(Float64, L)
 	for s in 1:L-1
-		z, t, Hmat = _site_solve(m, s)
-		kvals[s] = _site_loss(m, z, t, Hmat)
+		z, t = _site_solve(m, s)
+		kvals[s] = _site_loss(m, s, z, t)
 		q, r = _gauge_left(z)
 		m.ket[s] = q
 		m.ket[s+1] = _contract_first(m.ket[s+1], r)
 		_h_left!(m, s)
 		_b_left!(m, s)
 	end
-	z, t, Hmat = _site_solve(m, L)
-	kvals[L] = _site_loss(m, z, t, Hmat)
+	z, t = _site_solve(m, L)
+	kvals[L] = _site_loss(m, L, z, t)
 	m.ket[L] = z
 	return kvals
 end
@@ -170,8 +163,8 @@ function rightsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 	kvals = zeros(Float64, L)
 	k = 1
 	for s in L:-1:2
-		z, t, Hmat = _site_solve(m, s)
-		kvals[k] = _site_loss(m, z, t, Hmat)
+		z, t = _site_solve(m, s)
+		kvals[k] = _site_loss(m, s, z, t)
 		k += 1
 		l, q = _gauge_right(z)
 		m.ket[s] = q
@@ -179,8 +172,8 @@ function rightsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 		_h_right!(m, s)
 		_b_right!(m, s)
 	end
-	z, t, Hmat = _site_solve(m, 1)
-	kvals[L] = _site_loss(m, z, t, Hmat)
+	z, t = _site_solve(m, 1)
+	kvals[L] = _site_loss(m, 1, z, t)
 	m.ket[1] = z
 	return kvals
 end
