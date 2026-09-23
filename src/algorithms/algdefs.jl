@@ -32,6 +32,29 @@ truncate.
 	verbosity::Int = 0
 end
 
+"""
+	DMRG2(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=truncdim(D=Defaults.D), verbosity=0)
+
+Parameters of the two-site variational sweep engine: the neighboring site pair is
+optimized jointly and re-split by an SVD under `trunc::TruncationScheme`, so the bond
+dimension adapts during the sweeps (growth where the environment demands it, truncation
+where the scheme caps it). All engines accepting a `DMRG1` (`mult`, `add`, `compress`,
+`hadamard`, `linsolve`, `ground_state`) accept a `DMRG2` as well; `alg.trunc` is also
+consulted for the bond cap of automatically drawn initial guesses
+(`_truncation_bond`).
+"""
+@kwdef struct DMRG2{TR<:TruncationScheme} <: IterativeMPSAlgorithm
+	maxiter::Int = Defaults.maxiter
+	tol::Float64 = Defaults.tol
+	trunc::TR = truncdim(D=Defaults.D)
+	verbosity::Int = 0
+end
+
+# the bond cap carried by a truncation scheme (`nothing` for schemes without one)
+_truncation_bond(t::TruncateDim) = t.D
+_truncation_bond(t::TruncateDimCutoff) = t.D
+_truncation_bond(t::TruncationScheme) = nothing
+
 const DefaultMultAlg = SVDCompression(trunc=DefaultTruncation)
 
 """

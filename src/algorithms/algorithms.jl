@@ -7,6 +7,7 @@ include("arithmetics/add.jl")
 include("arithmetics/compress.jl")
 include("arithmetics/hadamard.jl")
 include("arithmetics/linsolve.jl")
+include("arithmetics/dmrg2.jl")
 # groundstates: ground and excited state search
 include("groundstates/dmrg.jl")
 include("groundstates/dmrg2.jl")

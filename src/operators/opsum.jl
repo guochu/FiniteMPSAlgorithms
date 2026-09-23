@@ -63,14 +63,6 @@ struct OpSum{L}
 end
 OpSum(ds::NTuple{L, Int}) where {L} = OpSum(OpTerm[], ds)
 OpSum(ds::AbstractVector{Int}) = OpSum(Tuple(ds))
-function OpSum(ds::AbstractVector{Int}, terms::AbstractVector{<:OpTerm})
-	s = OpSum(ds)
-	for t in terms
-		push!(s, t)
-	end
-	return s
-end
-OpSum(ds::AbstractVector{Int}, terms::AbstractVector{<:OpTerm}) = OpSum(Tuple(ds), terms)
 function OpSum(ds::NTuple{L, Int}, terms::AbstractVector{<:OpTerm}) where {L}
 	s = OpSum(ds)
 	for t in terms
@@ -78,6 +70,7 @@ function OpSum(ds::NTuple{L, Int}, terms::AbstractVector{<:OpTerm}) where {L}
 	end
 	return s
 end
+OpSum(ds::AbstractVector{Int}, terms::AbstractVector{<:OpTerm}) = OpSum(Tuple(ds), terms)
 OpSum(ds::AbstractVector{Int}, terms::OpTerm...) = OpSum(ds, collect(terms))
 OpSum(ds::NTuple{L, Int}, terms::OpTerm...) where {L} = OpSum(ds, collect(terms))
 

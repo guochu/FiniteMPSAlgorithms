@@ -80,7 +80,19 @@ operations are correct for `CanonicalMPO` operands:
 Scalar multiplication (`*`, `/`, unary `-`) was already scaling-aware via the
 gauge-preserving `lmul!`. Scale-aware by construction and unchanged: `dot`, `norm`,
 `tr`, `distance`, `fidelity`/`infidelity`, `todense`, `expectation`, `expectationvalue`,
-`vectorize`/`devectorize`. `superoperator` remains a data-level utility (documented).
+`vectorize`/`devectorize`.
+
+## `superoperator` carries the `CanonicalMPO` scaling
+
+`superoperator` dispatches on the operand type: `MPO` / `MPOHamiltonian` inputs return a
+plain `MPO` (they carry no external scale), while a `CanonicalMPO` input returns a
+`CanonicalMPO` whose `scaling` field carries the input's external scale — the
+represented superoperator is linear in the represented `h`, so the routes
+`devectorize(superoperator(h₁; :left) * vectorize(h₂))` and
+`devectorize(superoperator(h₂; :right) * vectorize(h₁))` reproduce the represented
+product `h₁·h₂` without any manual scale bookkeeping. The scale-free data-level builder
+is the internal `_superoperator_data` (underscore-prefixed, per the convention that
+data-only internals are explicitly marked).
 
 ## Follow-up interface refinements
 
@@ -94,3 +106,28 @@ gauge-preserving `lmul!`. Scale-aware by construction and unchanged: `dot`, `nor
 - `OpSum`: the lattice `ds` is now part of the type (`OpSum{L}` with
   `ds::NTuple{L,Int}`), so `OpSum`s on different lattices are distinct types. All
   existing vector-based constructors keep working.
+
+## New: `DMRG2` — the two-site variational engine for all iterative arithmetics
+
+`DMRG2(; maxiter, tol, trunc, verbosity)` joins `DMRG1` in `algdefs.jl` as an accepted
+algorithm of every iterative entry point: `mult` (MPO·MPS and MPO·MPO),
+`mult!`, `add`, `compress`, `hadamard`, `linsolve` (and hence every route built on
+them). Instead of single-site ALS updates with a fixed bond profile, the two-site
+engine optimizes neighboring site pairs jointly and re-splits them by a truncating SVD
+under `alg.trunc`, so the bond dimension adapts during the sweeps — growth where the
+environment demands it, truncation where the scheme caps it. The initial guesses are
+drawn with the bond cap carried by `alg.trunc` (`_truncation_bond`, falling back to
+`Defaults.D`).
+
+Implementation notes (src/algorithms/arithmetics/dmrg2.jl):
+
+- the normalized two-site sweeps converge the DIRECTION of the solution; the physical
+  scale is restored once per driver from the problem's KKT eigenvalue
+  β = (linear form) / ⟨dir|dir⟩, folded back through `lmul!` — with the external
+  operand scales attached by `setscaling!` BEFORE `lmul!` (which folds its factor into
+  the per-site `scaling` field and must not be overwritten);
+- the per-pair loss `norm(target)` is monotone in processing time for exact local
+  solves; a `NoTruncation` small-system testset pins the local machinery (targets,
+  re-splits, sample/environment bookkeeping) independently of truncation effects;
+- `mult(hA::MPOHamiltonian, …, ::DMRG2)` entry points expand to the dense MPO layer
+  (the out-of-place route), as with the other engines.

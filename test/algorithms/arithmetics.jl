@@ -364,3 +364,113 @@ end
 	y5 = randommps(ComplexF64, fill(2, L-1); D=4)
 	@test_throws DimensionMismatch linsolve(I_mpo, y5, alg)
 end
+
+@testset "arithmetics (DMRG2)" begin
+	Random.seed!(4242)
+	L = 6
+	ds = fill(2, L)
+	p = model_params(L)
+	H = mpo_model(p)
+	Hd = dense_model(p)
+	ψ = randommps(ComplexF64, ds; D=10)
+	vψ = todense(ψ)
+	vHψ = Hd * vψ
+
+	# mult: two-site sweeps grow the bond dimension from a small initial guess
+	out = mult(H, ψ, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(8), verbosity=0))
+	@test todense(out) ≈ vHψ atol = 1e-6
+	@test bonddim(out) <= 8
+
+	# mult MPO·MPO
+	prod2 = mult(H, H, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(16), verbosity=0))
+	@test norm(todense(prod2) - Hd * Hd) < 1e-5
+
+	# mult with the DMRG2 in-place driver (the dense MPO layer; sparse Hamiltonians are
+	# expanded by the out-of-place entry points)
+	Hd_mpo = MPO(tompotensors(H))
+	outm = mult!(svdguess_mult(Hd_mpo, ψ, 4), Hd_mpo, ψ, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(8)))
+	@test todense(outm) ≈ vHψ atol = 1e-5
+
+	# add: the pair updates can express the exact bond-16 sum within the cap
+	s2 = add([ψ, ψ], DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(8), verbosity=0))
+	@test todense(s2) ≈ 2 * vψ atol = 1e-5
+
+	# compress: bond cap respected and the represented chain recovered
+	ψbig = mult(H, ψ, SVDCompression(trunc=truncdim(64)))
+	c2 = compress(ψbig, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(8), verbosity=0))
+	@test bonddim(c2) <= 8
+	@test norm(todense(c2) - vHψ) / norm(vHψ) < 1e-6
+
+	# hadamard: two-site updates handle the bond-16 exact product within the cap
+	φ = randommps(ComplexF64, ds; D=4)
+	χ = hadamard(ψ, φ, DMRG2(maxiter=15, tol=1e-10, trunc=truncdim(16), verbosity=0))
+	refχ = vψ .* todense(φ)
+	@test norm(todense(χ) - refχ) / norm(refχ) < 1e-5
+
+	# linsolve: unitary system U·x = y recovered with a small guess (bonds grow)
+	U = timeevompo(H, 0.15, WII())
+	x_exact = randommps(ComplexF64, ds; D=4)
+	yU = mult(U, x_exact)
+	xsol = linsolve(U, yU, DMRG2(maxiter=20, tol=1e-10, trunc=truncdim(8), verbosity=0))
+	@test abs(dot(xsol, x_exact)) / (norm(xsol) * norm(x_exact)) ≈ 1 atol = 1e-5
+
+	# the DMRG2 sweeps keep the working chain right-canonical (final sweep direction)
+	@test isrightcanonical(out[end-1]) || isrightcanonical(out[end])
+
+	# NoTruncation on a small system: the two-site update is the exact local optimum,
+	# so the per-pair loss is monotone in processing time (within and across sweeps) and
+	# every problem converges to machine precision — this pins the local machinery
+	# (targets, re-splits, environments) independently of truncation effects
+	Random.seed!(777)
+	Ls = 4
+	dss = fill(2, Ls)
+	ps = model_params(Ls)
+	Hs = mpo_model(ps)
+	Hsd = dense_model(ps)
+	ψs = randommps(ComplexF64, dss; D=6)
+	vψs = todense(ψs)
+	nt = DMRG2(maxiter=30, tol=1e-14, trunc=NoTruncation())
+	monotone(khist) = all(all(kh2 .>= kh1 .- 1e-8) for (kh1, kh2) in zip(khist, khist[2:end]))
+
+	# mult MPS
+	mc = MultCache(MPO(tompotensors(Hs)), ψs, svdguess_mult(Hs, ψs, 64))
+	kh = iterative_compute!(mc, nt)
+	@test monotone(kh)
+	@test todense(mult(MPO(tompotensors(Hs)), ψs, nt)) ≈ Hsd * vψs atol = 1e-8 rtol = 1e-8
+
+	# mult MPO·MPO
+	mc = MultCache(MPO(tompotensors(Hs)), MPO(tompotensors(Hs)), svdguess_mult(Hs, Hs, 64))
+	kh = iterative_compute!(mc, nt)
+	@test monotone(kh)
+	@test todense(mult(MPO(tompotensors(Hs)), MPO(tompotensors(Hs)), nt)) ≈ Hsd * Hsd atol = 1e-8 rtol = 1e-8
+
+	# add
+	oc = AddCache(svdguess_add([ψs, ψs], 64), [ψs, ψs])
+	kh = iterative_compute!(oc, nt)
+	@test monotone(kh)
+	@test todense(add([ψs, ψs], nt)) ≈ 2 * vψs atol = 1e-8 rtol = 1e-8
+
+	# compress
+	xbig = mult(Hs, ψs, SVDCompression(trunc=truncdim(64)))
+	cc = OverlapCache(svdguess_compress(xbig, 64), xbig)
+	kh = iterative_compute!(cc, nt)
+	@test monotone(kh)
+
+	# hadamard
+	φs = randommps(ComplexF64, dss; D=4)
+	refχs = vψs .* todense(φs)
+	hc = HadamardCache(ψs, φs, svdguess_hadamard(ψs, φs, 64))
+	kh = iterative_compute!(hc, nt)
+	@test monotone(kh)
+	@test todense(hadamard(ψs, φs, nt)) ≈ refχs atol = 1e-8 rtol = 1e-8
+
+	# linsolve
+	Us = timeevompo(Hs, 0.15, WII())
+	xs_exact = randommps(ComplexF64, dss; D=4)
+	ys = mult(Us, xs_exact)
+	lc = LinsolveCache(MPO(tompotensors(Us)), ys, randommps(ComplexF64, dss; D=8, normalize=false))
+	kh = iterative_compute!(lc, nt)
+	@test monotone(kh)
+	@test abs(dot(todense(lc.ket), todense(xs_exact))) /
+		  (norm(todense(lc.ket)) * norm(todense(xs_exact))) ≈ 1 atol = 1e-8
+end

@@ -57,25 +57,8 @@ function ac2_prime(x::AbstractArray{T,4},
 end
 
 # ---------- algorithm type ----------
-
-"""
-	DMRG2(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=truncdim(D=Defaults.D), verbosity=0)
-
-Parameters of the two-site DMRG ground-state search. At each update the two center
-tensors are optimized jointly and truncated with the `trunc::TruncationScheme`; it is
-only consulted when the algorithm generates the initial ansatz itself.
-"""
-@kwdef struct DMRG2{TR<:TruncationScheme} <: IterativeMPSAlgorithm
-	maxiter::Int = Defaults.maxiter
-	tol::Float64 = Defaults.tol
-	trunc::TR = truncdim(D=Defaults.D)
-	verbosity::Int = 0
-end
-
-# the bond cap carried by a truncation scheme (`nothing` for schemes without one)
-_truncation_bond(t::TruncateDim) = t.D
-_truncation_bond(t::TruncateDimCutoff) = t.D
-_truncation_bond(t::TruncationScheme) = nothing
+# the `DMRG2{TR}` configuration struct and `_truncation_bond` live in algdefs.jl
+# (shared with the arithmetics engines)
 
 # ---------- sweeps ----------
 

@@ -63,21 +63,24 @@ end
 	@test norm(todense(outa) - todense(exact)) / nrm < 1e-8
 	@test norm(todense(outb) - todense(exact)) / nrm < 1e-8
 
-	# canonical operands: the superoperator acts on the data-level operator, so the
-	# external `scaling` of the multiplied operand must be folded into the data first
-	# (materialized here — legitimate on small systems only), while the scaled factor
-	# entering via `vectorize` carries its scale through automatically
+	# canonical operands: the superoperator is linear in the represented `h`, so the
+	# input's `scaling` carries into the result and the scaled routes reproduce the
+	# represented product directly (no data materialization needed)
 	ρ1 = randommpo(ComplexF64, ds; D=3, normalize=false)
 	setscaling!(ρ1, 0.8)
 	ρ2 = randommpo(ComplexF64, ds; D=4, normalize=false)
 	setscaling!(ρ2, 1.5)
-	ρ1rep = MPO(copy(ρ1.data)); lmul!(scaling(ρ1)^L, ρ1rep)
-	ρ2rep = MPO(copy(ρ2.data)); lmul!(scaling(ρ2)^L, ρ2rep)
 	ref = todense(ρ1) * todense(ρ2)
-	@test todense(devectorize(superoperator(ρ1rep; side=:left) * vectorize(ρ2))) ≈
+	𝒮c = superoperator(ρ1; side=:left)
+	@test 𝒮c isa CanonicalMPO && scaling(𝒮c) ≈ 0.8
+	@test bonddims(𝒮c) == bonddims(ρ1)
+	@test todense(devectorize(𝒮c * vectorize(ρ2))) ≈ ref atol = 1e-8 * norm(ref)
+	@test todense(devectorize(superoperator(ρ2; side=:right) * vectorize(ρ1))) ≈
 		ref atol = 1e-8 * norm(ref)
-	@test todense(devectorize(superoperator(ρ2rep; side=:right) * vectorize(ρ1))) ≈
-		ref atol = 1e-8 * norm(ref)
+	# plain MPO and MPOHamiltonian inputs stay scale-free
+	@test superoperator(h1; side=:left) isa MPO
+	hH = MPOHamiltonian(OpSum(fill(2, L), [term(1.0, 1 => _SX, 2 => _SX)]))
+	@test superoperator(hH; side=:left) isa MPO
 end
 
 @testset "thermal state via TDVP purification vs ED" begin

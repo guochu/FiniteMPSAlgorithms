@@ -61,22 +61,35 @@ function devectorize(ψ::AbstractMPS)
 end
 
 """
-	superoperator(h::AbstractMPO; side=:left) -> MPO
+	superoperator(h::MPO; side=:left) -> MPO
+	superoperator(h::MPOHamiltonian; side=:left) -> MPO
+	superoperator(h::CanonicalMPO; side=:left) -> CanonicalMPO
 
-The superoperator induced by left/right multiplication with the data-level operator of
-`h`: the map `X ↦ h·X` (`side = :left`) or `X ↦ X·h` (`side = :right`) on the vectorized
-space — an `MPO` on the doubled physical space (per-site dimension `d_out·d_in`) with the
-same bond dimensions as `h`. Site tensor layouts (δ the identity on the physical legs):
+The superoperator induced by left/right multiplication with `h`: the map `X ↦ h·X`
+(`side = :left`) or `X ↦ X·h` (`side = :right`) on the vectorized space — a chain on
+the doubled physical space (per-site dimension `d_out·d_in`) with the same bond
+dimensions as `h`. Site tensor layouts (δ the identity on the physical legs):
 
 - `side = :left`:  `𝒲[aL, (po,pi), aR, (q,qi)] = W[aL, po, aR, q] · δ(pi, qi)`
 - `side = :right`: `𝒲[aL, (po,pi), aR, (q,qi)] = δ(po, q) · W[aL, qi, aR, pi]`
 
 Applying it to [`vectorize(X)`](@ref) and devectorizing the result gives the operator
-product (up to the compression of the chosen evaluation route). The external `scaling`
-of a `CanonicalMPO` input is not represented: like a plain `MPO`, the superoperator
-carries the data-level scale only.
+product (up to the compression of the chosen evaluation route). The represented
+superoperator is linear in the represented `h`: a `CanonicalMPO` input carries its
+`scaling` into the result's `scaling` field, while plain `MPO` / `MPOHamiltonian`
+inputs have no external scale.
 """
-function superoperator(h::AbstractMPO; side::Symbol=:left)
+function superoperator(h::MPO; side::Symbol=:left)
+	return _superoperator_data(h; side)
+end
+superoperator(h::CanonicalMPO; side::Symbol=:left) =
+	CanonicalMPO(_superoperator_data(h; side).data; scaling=scaling(h))
+superoperator(h::MPOHamiltonian; side::Symbol=:left) =
+	_superoperator_data(MPO(tompotensors(h)); side)
+
+# scaling-free (raw data) superoperator: the `scaling` of a CanonicalMPO operand is NOT
+# included; the exported `superoperator` wrappers attach it
+function _superoperator_data(h::AbstractMPO; side::Symbol=:left)
 	(side === :left || side === :right) ||
 		throw(ArgumentError("side must be :left or :right, got $side"))
 	L = length(h)
@@ -99,6 +112,3 @@ function superoperator(h::AbstractMPO; side::Symbol=:left)
 	end
 	return MPO(data)
 end
-
-# block-sparse operands are expanded into the dense MPO layer
-superoperator(h::MPOHamiltonian; side::Symbol=:left) = superoperator(MPO(tompotensors(h)); side)

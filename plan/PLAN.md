@@ -123,7 +123,9 @@ src/
     ├── gate.jl                    # AbstractGate / UnitaryGate(检查幺正) / GenerateGate + apply! + swap!
     ├── mult.jl                    # mult 唯一接口(SVDCompression|DMRG1): MPO·MPS / MPO·MPO / MPO·CanonicalMPO
     ├── add.jl                     # add 唯一接口
-    └── compress.jl                # compress 唯一接口
+    ├── compress.jl                # compress 唯一接口
+    ├── hadamard.jl                # hadamard_inv/hadamard_inv!/hadamard_div/hadamard_div! 唯一接口(NewtonSchulz, 逐元素除法; 详见 05)
+    └── elementwise.jl             # elementwise 唯一接口(Chebyshev, 函数对 MPS 的逐点作用; 详见 06)
 ```
 
 ## 实施里程碑
@@ -136,6 +138,8 @@ src/
 | M3 | DMRG1（sweep 接口 + KrylovKit）、激发态 | 03 | Ising/Heisenberg 基态对角化验证 |
 | M4 | 1-site TDVP1（sweep! = 一个时间步） | 03 | 与 exp(H·t) 精确演化对比 |
 | M5 | AbstractGate/UnitaryGate/GenerateGate + apply!/swap! | 04 | 幺正检查、门作用/位点交换与精确 U 对比 |
+| M6 | 逐元素除法 hadamard_inv/hadamard_div（NewtonSchulz，经典 PDE 扩展） | 05 | 正场收敛、均值远离 1 预缩放、热启动等价、零场保护 |
+| M7 | 函数对 MPS 的逐点作用 elementwise（Chebyshev 级数，经典 PDE 扩展） | 06 | exp/ψ² 等与稠密参考对比、nterms 指数收敛、值域自动估计、键维上界 |
 
 ## 测试策略
 
@@ -162,3 +166,6 @@ src/
 - [02_structures.md](file:///home/guochu/Documents/Meteor/FiniteMPSAlgorithms/plan/02_structures.md) — states/（CanonicalMPS、CanonicalMPO）与 operators/（MPO、MPOHamiltonian）数据结构、规范形、精确算法
 - [03_algorithms.md](file:///home/guochu/Documents/Meteor/FiniteMPSAlgorithms/plan/03_algorithms.md) — algorithms/：mult/add/compress、环境缓存、DMRG1、激发态、TDVP
 - [04_gate.md](file:///home/guochu/Documents/Meteor/FiniteMPSAlgorithms/plan/04_gate.md) — AbstractGate/UnitaryGate/GenerateGate + apply!（基本 TEBD 构件）
+- [05_hadamard_arith.md](file:///home/guochu/Documents/Meteor/FiniteMPSAlgorithms/plan/05_hadamard_arith.md) — algorithms/hadamard.jl：逐元素除法 hadamard_inv/hadamard_div（Newton–Schulz，经典 PDE 求解扩展）
+- [06_elementwise_func.md](file:///home/guochu/Documents/Meteor/FiniteMPSAlgorithms/plan/06_elementwise_func.md) — algorithms/elementwise.jl：函数对 MPS 的逐点作用 elementwise（Chebyshev 级数，经典 PDE 求解扩展）
+- [07_ls_reconstruction.md](file:///home/guochu/Documents/Meteor/FiniteMPSAlgorithms/plan/07_ls_reconstruction.md) — algorithms/reconstruct.jl：已知振幅的 MPS 重构 reconstruct（二次优化/最小二乘，TCI 的变分替代）
