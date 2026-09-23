@@ -18,14 +18,15 @@ LS 路线把全部样本**联合**逼近：
 ## 7.1 问题的二次优化形式（loss 构造）
 
 设目标张量 `A(𝐱)`, `𝐱 = (x₁,…,x_L) ∈ ⊙ⱼ{1..dⱼ}`。已知 **样本集**
-`S = {(𝐱⁽ᵏ⁾, aₖ)}ₖ₌₁..N`，`aₖ = A(𝐱⁽ᵏ⁾)`（允许 `aₖ` 带噪声/带权重 `wₖ ≥ 0`）。
-求键维 `D` 的 MPS `ψ`（张量 `ψ[𝐱] = ⟨𝐱|ψ⟩`）最小化
+`S = {(𝐱⁽ᵏ⁾, aₖ)}ₖ₌₁..N`，其中 `aₖ ∈ ℂ` 是基矢 `|𝐱⁽ᵏ⁾⟩ = ⊗ⱼ|xⱼ⁽ᵏ⁾⟩` 下的
+**实际振幅**（允许含噪声）。求键维 `D` 的 MPS `ψ`（波函数）最小化
 
 ```
-ℒ(ψ) = Σₖ wₖ |ψ[𝐱⁽ᵏ⁾] − aₖ|²
+ℒ(ψ) = Σₖ |⟨𝐱⁽ᵏ⁾|ψ⟩ − aₖ|²
 ```
 
-即 `‖√W·(P_S ψ − a)‖²`，其中 `P_S = Σₖ |𝐱⁽ᵏ⁾⟩⟨𝐱⁽ᵏ⁾|` 是样本投影算符、
+其中 `⟨𝐱⁽ᵏ⁾|ψ⟩` 是波函数 `ψ` 在基矢 `|𝐱⁽ᵏ⁾⟩` 上的投影（振幅）。即
+`‖P_S ψ − a‖²`，`P_S = Σₖ |𝐱⁽ᵏ⁾⟩⟨𝐱⁽ᵏ⁾|` 是样本投影算符、
 `a = Σₖ aₖ|𝐱⁽ᵏ⁾⟩`。关键结构观察：
 
 - `P_S = Σₖ ⊗ⱼ |xⱼ⁽ᵏ⁾⟩⟨xⱼ⁽ᵏ⁾|` 是 **N 个直积投影算符之和**；
@@ -43,46 +44,59 @@ LS 路线把全部样本**联合**逼近：
 rₖ = r_s(𝐱⁽ᵏ⁾) = ψ_{s+1}[x_{s+1}]⋯ψ_L[x_L] ∈ ℂ^{D_s}
 ```
 
-则 `ψ[𝐱⁽ᵏ⁾] = ℓₖ · ψ_s · (e(x_s⁽ᵏ⁾) ⊗ rₖ)`，特征向量 `fₖ = ℓₖ ⊗ eₖ ⊗ rₖ`
+则 `⟨𝐱⁽ᵏ⁾|ψ⟩ = ℓₖ · ψ_s · (e(x_s⁽ᵏ⁾) ⊗ rₖ)`，特征向量 `fₖ = ℓₖ ⊗ eₖ ⊗ rₖ`
 （`eₖ = e(x_s⁽ᵏ⁾)` 为物理基）。正规方程（`z = vec(ψ_s)`）：
 
 ```
-M_s z = b_s,   M_s = Σₖ wₖ fₖ fₖ†   （d·D_{s−1}·D_s 维，半正定 Hermitian）
-b_s = Σₖ wₖ āₖ fₖ
+(M_s + α·R_s) z = b_s,   M_s = Σₖ fₖ fₖ†      （d·D_{s−1}·D_s 维，半正定 Hermitian）
+b_s = Σₖ āₖ fₖ
 ```
 
 `M_s` 按**物理桶**结构存储：`M_s = Σ_p B_s(p)·E_p`（`E_p` 物理单热阵），
-`B_s(p) = Σₖ: x_s⁽ᵏ⁾=p wₖ (ℓₖ⊗rₖ)(ℓₖ⊗rₖ)†`（4 腿 `D_{s−1}×D_{s−1}×D_s×D_s`，
+`B_s(p) = Σₖ: x_s⁽ᵏ⁾=p (ℓₖ⊗rₖ)(ℓₖ⊗rₖ)†`（4 腿 `D_{s−1}×D_{s−1}×D_s×D_s`，
 每物理值一个桶）。求和**不可**在 k 上分解（ℓ 与 r 的样本关联必须保留），
 桶内必须逐样本外积累加。
 
-**两点版（键维适应）**：对 `(s, s+1)` 联合构造 `fₖ = ℓₖ ⊗ eₖ ⊗ eₖ₊₁ ⊗ rₖ`
-（维 `d·D_{s−1}` × `d·D_s`），正规方程解 `z₂`（维 `d²·D_{s−1}·D_s`）后
-`tsvd` 按 `alg.trunc` 重分割（复用 `dmrg2.jl` 的 `_als2_update!` 分割逻辑与
-`_gauge_left/_gauge_right` 移规范）。
+**正则化（与 seq2seq 相同的 ridge）**：欠采样（N 小于有效自由度）时 `M_s`
+奇异/病态，ALS 解漂移。与 `ml/seq2seq.jl` 一致，在**局域正规方程**上加
+Hilbert-Schmidt ridge `α·‖ψ‖²_HS`（默认 `α = 0.01`，沿用 seq2seq/MPSLearning）：
+局域 Hessian 加 `α·R_s`，其中
 
-**正则化**：欠采样（N 小于有效自由度）时 `M_s` 奇异/病态；
-加 Tikhonov 项 `λ‖ψ‖²`（λ 默认 0）等价于 `M_s += λI`，
-或用 `pinv`-型截断 SVD 求解。λ>0 的解偏向小范数（低秩偏置，对 MPS 有利）。
+```
+R_s = g_s ⊗ I_d ⊗ g_{s+1},   g_s = ⟨ψ_{<s}|ψ_{<s}⟩_HS   (D_{s-1}×D_{s-1} 转移矩阵)
+```
+
+即 `gstorage` 第三环境栈（seq2seq 的 `gstorage` 对 MPS 的秩 3 版本：
+`g ← Σ_{p} conj(A[aL,p,aR])·g·A[aL',p,aR']` 转移）。要点：
+- ridge **只加在局域求解上，不计入报告的 loss**（seq2seq 的纪律）；
+- ridge 是**规范依赖**的（真正的目标 ℒ 规范不变）——它只在当前规范下
+  条件化局域解，这正是稳定 ALS 所需；
+- α>0 的解偏向小范数（低秩偏置，对 MPS 有利）；α = 0 退化到纯插值。
+
+**两点版（键维适应）**：对 `(s, s+1)` 联合构造 `fₖ = ℓₖ ⊗ eₖ ⊗ eₖ₊₁ ⊗ rₖ`
+（维 `d·D_{s−1}` × `d·D_s`），正规方程 `(M₂ + α·R₂) z₂ = b₂`
+（`R₂ = g_s ⊗ I_{d²} ⊗ g_{s+2}`）后 `tsvd` 按 `alg.trunc` 重分割
+（复用 `dmrg2.jl` 的 `_als2_update!` 分割逻辑与 `_gauge_left/_gauge_right` 移规范）。
 
 ## 7.2 算法配置（追加到 `src/algorithms/algdefs.jl`）
 
 ```julia
 """
 	LSRecon(; maxiter=Defaults.maxiter, tol=Defaults.tol,
-	        trunc=truncdim(Defaults.D), λ=0.0, nadd=8, nbuffer=1024, verbosity=0)
+	        trunc=truncdim(Defaults.D), α=0.01, nadd=8, nbuffer=1024, verbosity=0)
 
 Sample-amplitude MPS reconstruction by quadratic (least-squares) optimization —
 the variational alternative to tensor cross interpolation. `trunc` controls the
 two-site bond re-split (`NoTruncation` = single-site-scale solves only);
-`λ ≥ 0` is the Tikhonov regularization of the local normal equations;
+`α ≥ 0` is the Hilbert-Schmidt ridge added to the local normal equations for
+conditioning (the seq2seq regularization; not part of the reported loss);
 `nadd`/`nbuffer` drive the adaptive sample-enrichment loop (7.5).
 """
 @kwdef struct LSRecon{TR<:TruncationScheme} <: IterativeMPSAlgorithm
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
 	trunc::TR = truncdim(D=Defaults.D)
-	λ::Float64 = 0.0
+	α::Float64 = 0.01        # HS ridge on the local solves (seq2seq regularizer)
 	nadd::Int = 8            # 每 轮自适应新增样本数
 	nbuffer::Int = 1024      # 候选缓冲池大小（随机粗采样, 残差在其中挑 nadd）
 	verbosity::Int = 0
@@ -112,7 +126,7 @@ reconstruct!(ψ::CanonicalMPS, samples, alg::LSRecon) -> (ψ, loss)
 ## 7.4 求解器：样本环境 ALS 扫掠（伪代码）
 
 ```
-输入: 样本集 S = {(𝐱⁽ᵏ⁾, aₖ, wₖ)}、初值 ψ⁰（randommps, D = trunc 的键帽）
+输入: 样本集 S = {(𝐱⁽ᵏ⁾, aₖ)}、初值 ψ⁰（randommps, D = trunc 的键帽）
 约束: ψ 的位点张量 A[aL, p, aR]（与包约定一致）；扫掠规范移动复用 mult.jl 的
       _gauge_left/_gauge_right
 
@@ -121,22 +135,27 @@ reconstruct!(ψ::CanonicalMPS, samples, alg::LSRecon) -> (ψ, loss)
   R[L]   = ones(N, 1)                    # r_L(𝐱ₖ) = 1
   for s = L-1 … 1:
       R[s][k, :] = ψ_{s+1}[x_{s+1}⁽ᵏ⁾] · R[s+1][k, :]     # 每样本一行, O(N·d·D)
+  # ridge 栈（seq2seq 的 gstorage, ⟨ψ|ψ⟩_HS 转移, 秩 3 版）
+  g[L+1] = ones(1, 1)
+  for s = L … 2:
+      g[s] ← Σ_{p} conj(ψ_s[aL, p, aR])·g[s+1]·ψ_s[aL', p, aR']
 
   # ---- 左→右扫 ----
   Lmat[1] = ones(N, 1)                   # ℓ_1(𝐱ₖ) = 1
   for s = 1 … L-1:
       # 两点正规方程: fₖ = ℓₖ ⊗ e(x_s⁽ᵏ⁾) ⊗ e(x_{s+1}⁽ᵏ⁾) ⊗ rₖ
       M ← Σ_p B(p)·E_p   （桶: 按 (x_s, x_{s+1}) 取值对分组, 桶内逐样本外积累加）
-      b ← Σₖ wₖ āₖ (ℓₖ ⊗ eₖ ⊗ eₖ₊₁ ⊗ rₖ)
-      z₂ ← (M + λ·I)⁻¹ b                    # 稠密解, 维 (d·D_{s-1})·(d·D_s)
+      b ← Σₖ āₖ (ℓₖ ⊗ eₖ ⊗ eₖ₊₁ ⊗ rₖ)
+      z₂ ← (M + α·(g[s] ⊗ I_{d²} ⊗ g[s+2]))⁻¹ b   # ridge 条件化的稠密解
       _als2_update!(ψ, s, z₂, trunc)        # tsvd 重分割（sv 归一化, 与 dmrg2.jl 同）
       Lmat[s+1][k, :] = Lmat[s][k, :] · ψ_s[x_s⁽ᵏ⁾]        # 左语境传递
+      g[s+1] ← ⟨ψ_≤s|ψ_≤s⟩_HS 转移                          # ridge 栈同步传递
   末位直接解 1-site 正规方程（维 d·D²）
 
   # ---- 右→左扫（对称, 用已缓存的 Lmat, 现算右语境传递） ----
   … …
 
-  loss ℒ = Σₖ wₖ|ψ[𝐱⁽ᵏ⁾] − aₖ|²            # 精确局域解 ⇒ 单调
+  loss ℒ = Σₖ |⟨𝐱⁽ᵏ⁾|ψ⟩ − aₖ|²             # 精确局域解 ⇒ 单调（ridge 不计入）
   |ℒ_n − ℒ_{n−1}|/ℒ_{n−1} < tol → 收敛
 ```
 
@@ -151,7 +170,7 @@ reconstruct!(ψ::CanonicalMPS, samples, alg::LSRecon) -> (ψ, loss)
 
 **复杂度**：每 pair `O(N·d²·D⁴)` 桶构造 + `O(d³·D⁶)` 稠密解 + `O(N·d·D²)` 语境传递；
 样本存储 `O(L·N·D)`。大 `N`/大 `D` 时局域解可换 CG（`M` 只需 mat-vec：
-`z ↦ Σₖ wₖ fₖ(fₖ†z)`，`O(N·d·D²)` 每次迭代）——首版用稠密解，预留分派。
+`z ↦ Σₖ fₖ(fₖ†z)`，`O(N·d·D²)` 每次迭代）——首版用稠密解，预留分派。
 
 ## 7.5 自适应采样（替代 cross 的 pivot 选取）
 
@@ -159,7 +178,7 @@ reconstruct!(ψ::CanonicalMPS, samples, alg::LSRecon) -> (ψ, loss)
 S ← 初始样本: nbuffer 个随机点 + 若干 argmax|A| 点
 repeat（至多 maxiter 外环）:
     (ψ, ℒ) ← 内环 ALS(S)                        # 7.4, 收敛即止
-    在 nbuffer 个新随机候选 𝐱′ 上算残差 ρ(𝐱′) = |ψ[𝐱′] − A[𝐱′]|
+    在 nbuffer 个新随机候选 𝐱′ 上算残差 ρ(𝐱′) = |⟨𝐱′|ψ⟩ − A(𝐱′)|
     maxρ < tol → 完成
     S ← S ∪ {残差最大的 nadd 个 𝐱′}             # 残差驱动的样本增补
     （可选增强: 对 ψ 做 maxvol 取行, 用"当前 ψ 的极值点"补充结构信息）
@@ -180,14 +199,16 @@ end
 | `reconstruct(A::Array, ds; alg)` | reconstruct.jl | 稠密 oracle 包装 |
 | `reconstruct(samples, ds; alg)` | reconstruct.jl | 固定样本 |
 | `reconstruct!(ψ, samples, alg)` | reconstruct.jl | in-place |
-| `struct LSCache` | reconstruct.jl | ψ、样本矩阵 X（L×N）、值 a、权重 w、语境栈 Lmat/Rmat |
-| `_init_contexts_right!(c)` | reconstruct.jl | 右→左预计算 Rmat（对照 `_init_hstorage_right!`） |
+| `struct LSCache` | reconstruct.jl | ψ、样本矩阵 X（L×N）、值 a、语境栈 Lmat/Rmat、ridge 栈 gstorage |
+| `_init_contexts_right!(c)` | reconstruct.jl | 右→左预计算 Rmat + gstorage（对照 `_init_hstorage_right!` / seq2seq） |
 | `_left_transfer!(c, s)` / `_right_transfer!(c, s)` | reconstruct.jl | 语境传递（扫掠中） |
+| `_g_transfer!(c, s)` | reconstruct.jl | ridge 栈 ⟨ψ\|ψ⟩_HS 转移（秩 3 版 seq2seq `_g_updateleft`） |
 | `_ls_reduce_two_site(c, s)` | reconstruct.jl | 两点正规方程 (M, b)（桶实现，7.1） |
 | `_ls_reduce_site(c, s)` | reconstruct.jl | 单点版（末位/1-site 模式） |
-| `_ls_solve!(c, s, alg)` | reconstruct.jl | `(M + λI) \ b` + `_als2_update!` 重分割 |
+| `_add_ridge!(M, c, s, α)` | reconstruct.jl | 局域 Hessian 加 `α·(g_s ⊗ I ⊗ g_{s+2})`（对照 seq2seq `_add_ridge!`） |
+| `_ls_solve!(c, s, alg)` | reconstruct.jl | `(M + α·R) \ b` + `_als2_update!` 重分割 |
 | `leftsweep!/rightsweep!/sweep!(c, alg::LSRecon)` | reconstruct.jl | 统一扫掠接口（包约定） |
-| `_ls_loss(c)` | reconstruct.jl | 当前 ℒ（收敛判据 + 单调性测试） |
+| `_ls_loss(c)` | reconstruct.jl | 当前 ℒ（收敛判据 + 单调性测试；ridge 不计入） |
 | `_residual_candidates(Afun, ψ, nbuffer)` | reconstruct.jl | 候选池残差评估（自适应外环） |
 | `_enrich_samples!(c, Afun, nadd)` | reconstruct.jl | 样本增补 + 语境栈扩容 |
 
@@ -196,13 +217,17 @@ end
 - **原型基线（验证用）**：`P_S` 作为显式 MPO（Σₖ 直积投影，键维 = N）+
   `a` 的 MPS 构造（N 个 prodmps 之和）→ 现有 `linsolve(P_S, a, DMRG2(…))`。
   只在小 N 下做交叉验证，不作实现路线。
+- **正则化**：与 `ml/seq2seq.jl` 的 ridge 完全同构——三环境栈结构
+  （逐样本二次/线性栈 + HS ridge 栈）、`_add_ridge!` 加在局域 Hessian、
+  ridge 不计入报告 loss、默认 `α = 0.01`（MPSLearning）；仅 ridge 转移是
+  MPS 秩 3 版（对照 seq2seq 的秩 4 `_g_updateleft`）。
 - **局域求解器**：`_ls_solve!` 的稠密解与 `linsolve.jl` 的 `_site_solve` 同型
   （正规方程显式组装）；两点重分割复用 `dmrg2.jl` 的 `_als2_update!`。
 - **扫掠纪律**：与 `dmrg2.jl` 相同——leftsweep 每 pair 恰好一次左语境更新；
   NoTruncation 下 loss 必须单调（测试钉死）。
 - **无 KKT 尺度恢复**：正规方程非齐次，解的标度由数据决定；
   驱动器不需要 `lmul!`/`setscaling!` 补偿（对照 dmrg2.jl 的教训）。
-- **采样算符视角**：P_S/√W 永不显式构造；一切环境按样本维显式求和。
+- **采样算符视角**：P_S 永不显式构造；一切环境按样本维显式求和。
 
 ## 7.8 测试要点
 
@@ -210,17 +235,18 @@ end
   → `todense(ψ)` 与 A 机器精度一致。
 - **欠采样泛化**：N ≪ d^L 但 A 键维 ≤ D → 自适应循环收敛到全张量误差 ~1e-10。
 - **loss 单调**：NoTruncation + 小系统，`monotone(khist)`（与 DMRG2 测试同款）。
-- **噪声稳健（卖点）**：aₖ = A(𝐱ₖ) + σ·噪声；LS 重构误差 ~σ 级，
+- **噪声稳健（卖点）**：aₖ = ⟨𝐱ₖ|A⟩ + σ·复噪声；LS 重构误差 ~σ 级，
   而 TCI 式精确插值误差不随 σ 缩小（对比基线）。
-- **正则化**：重复/相关样本下 λ=0 病态 vs λ>0 稳定；λ→0 与 λ=0 一致。
-- **权重**：wₖ 加权与非加权的一致性（w≡1）。
+- **正则化**：重复/相关样本下 α=0 病态 vs α>0 稳定；α→0 与 α=0 解一致；
+  α 量级参照 seq2seq 默认 0.01。
 - **规范/标度**：返回链 `scaling == 1`；数据决定整体标度（非 0 解）。
 - **键维**：two-site `trunc` 下 bonddim ≤ 键帽；NoTruncation 自由增长。
 
 ## 7.9 已知陷阱
 
 1. **欠采样与秩塌缩**：N 太小或样本聚集 ⇒ `M_s` 奇异，ALS 解漂移；
-   必须支持 λ>0 或截断 SVD 求解，并文档化 N 的下界（≳ D²·d·L 的经验界）。
+   必须保持 ridge α>0（seq2seq 默认 0.01）或截断 SVD 求解，
+   并文档化 N 的下界（≳ D²·d·L 的经验界）。
 2. **ALS 局部极小**：MPS 流形非凸；两点更新 + 自适应增补 + 随机重启缓解；
    与 TCI 相比这是主要理论短板（cross 一步到位，LS 靠迭代）。
 3. **语境栈覆盖**（dmrg2.jl 的教训重演风险）：左扫期间右语境只读；
