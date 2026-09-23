@@ -39,8 +39,20 @@ using Test, Random, LinearAlgebra
 	@test tvs[3] < tvs[2]
 	@test tvs[end] < 0.1
 
-	# uninitialized Schmidt values are rejected (right-canonical input contract)
+	# uninitialized Schmidt values: canonicalized in place before sampling
 	ψu = randommps(ComplexF64, ds; D=4)
 	unset_svectors!(ψu)
-	@test_throws ArgumentError sample(ψu, 10)
+	s = sample(ψu, 2_000)
+	p_exact = abs2.(todense(ψu))
+	p_exact ./= sum(p_exact)
+	p_emp = zeros(length(p_exact))
+	for 𝐱 in s
+		ix = 1
+		for i in 1:L
+			ix += (𝐱[i] - 1) * prod(ds[i+1:end])
+		end
+		p_emp[ix] += 1.0 / 2_000
+	end
+	@test tv(p_emp, p_exact) < 0.1
+	@test iscanonical(ψu)
 end

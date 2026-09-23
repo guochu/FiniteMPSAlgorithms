@@ -10,14 +10,14 @@ over the local index is obtained from the stored bond spectrum
 amplitude vector), and one index is drawn per site.
 
 !!! warning "assumptions"
-	The function ASSUMES that `ψ` is right-canonical with initialized Schmidt values
-	(checked via `svectors_uninitialized`), and that it represents a PURE quantum
+	The function ASSUMES that `ψ` is right-canonical and represents a PURE quantum
 	state: samples follow the Born distribution `P(𝐱) = |ψ(𝐱)|²`. It must not be used
-	on chains meant as classical (high-dimensional) probability distributions.
+	on chains meant as classical (high-dimensional) probability distributions. If the
+	Schmidt values are uninitialized, `ψ` is canonicalized in place first (without
+	truncation).
 """
 function sample(ψ::CanonicalMPS, N::Integer)
-	svectors_uninitialized(ψ) &&
-		throw(ArgumentError("sample requires initialized Schmidt values: ψ must be in canonical form"))
+	svectors_uninitialized(ψ) && canonicalize!(ψ; alg=Orthogonalize(SVD(), NoTruncation(), false))
 	L = length(ψ)
 	T = scalartype(ψ)
 	samples = Vector{NTuple{L,Int}}(undef, N)
