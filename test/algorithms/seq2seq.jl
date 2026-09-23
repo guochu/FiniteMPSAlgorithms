@@ -86,3 +86,25 @@ end
 	seq2seq!(Wfit2, xs_s, ys_s, alg)
 	@test distance(Wfit2 * xs[1], ys[1]) / norm(ys[1]) < 1e-4
 end
+
+@testset "seq2seq adaptive (oracle)" begin
+        Random.seed!(904)
+        L = 4
+        dxs = fill(2, L)
+        dys = fill(3, L)
+        prof = vcat(1, fill(2, L - 1), 1)
+        Wtrue = MPO([randn(ComplexF64, prof[i], dys[i], prof[i+1], dxs[i]) for i in 1:L])
+        pairfun = x -> Wtrue * x
+
+        # adaptive data enrichment: the oracle is queried for the worst-predicted inputs
+        W, info = seq2seq(pairfun, dxs, dys,
+                Seq2Seq(D=2, α=1e-8, nbuffer=16, nadd=4, maxiter=15, tol=1e-10, verbosity=0))
+        @test info.npairs > 16
+        @test info.rounds >= 1
+        @test info.maxerr < 1e-5
+        # generalization on fresh random inputs
+        for _ in 1:5
+                x = randommps(ComplexF64, dxs; D=4, normalize=true)
+                @test distance(W * x, Wtrue * x) / norm(Wtrue * x) < 1e-5
+        end
+end

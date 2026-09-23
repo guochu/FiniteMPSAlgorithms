@@ -142,3 +142,11 @@ moved from the `α` keyword argument into the algorithm definition; the ridge it
 (the seq2seq regularization of the local normal equations, excluded from the reported
 loss) is unchanged. The default-arg forms `seq2seq(xs, ys)` and `seq2seq(xs, ys, Seq2Seq(D=4))`
 replace the previous `seq2seq(xs, ys; α)` / DMRG1-based signatures.
+
+The new `nadd`/`nbuffer` fields drive the adaptive data-enrichment loop of the
+oracle-based entry point `seq2seq(pairfun, dxs, dys, alg)` (the seq2seq analog of
+ALSRecon's sample enrichment): alternate the inner ALS fit on the current training
+set with prediction-error-driven pair additions — each round evaluates the relative
+prediction error on `nbuffer` fresh random inputs and queries the oracle for the
+targets of the `nadd` worst inputs. Stops on `maxerr < alg.tol` or `alg.maxiter`
+rounds; returns `(W, info)` with `(loss, maxerr, npairs, rounds)`.

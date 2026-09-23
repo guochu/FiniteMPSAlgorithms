@@ -51,18 +51,23 @@ consulted for the bond cap of automatically drawn initial guesses
 end
 
 """
-	Seq2Seq(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D, α=0.01, verbosity=0)
+	Seq2Seq(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D, α=0.01,
+	        nadd=8, nbuffer=1024, verbosity=0)
 
 Algorithm configuration of the `seq2seq` MPO fit: single-site ALS sweeps with the
 bond profile `alg.D` and the Hilbert-Schmidt ridge `α·‖W‖²_HS` added to the local
 normal equations for conditioning (the seq2seq regularization; not part of the
-reported loss).
+reported loss). `nadd`/`nbuffer` drive the adaptive data-enrichment loop of the
+oracle-based entry point `seq2seq(pairfun, dxs, dys, alg)` (unused by the
+fixed-dataset entry points).
 """
 @kwdef struct Seq2Seq <: IterativeMPSAlgorithm
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
 	D::Int = Defaults.D
 	α::Float64 = 0.01        # HS ridge on the local solves
+	nadd::Int = 8            # pairs added per adaptive enrichment round
+	nbuffer::Int = 1024      # random candidate pool of the residual evaluation
 	verbosity::Int = 0
 end
 

@@ -358,3 +358,58 @@ function seq2seq!(W::AbstractMPO, xs::Vector{<:CanonicalMPS}, ys::Vector{<:Canon
 	m = Seq2SeqCache(W, xsf, ysf; α=alg.α)
 	return iterative_compute!(m, alg)
 end
+
+# ---------- adaptive oracle-based fit (the seq2seq analog of ALSRecon's enrichment) ----------
+
+# random candidate inputs of the enrichment loop (the analog of ALSRecon's random
+# coordinates): normalized random MPS of bond 2 over the input dimensions
+_random_seq2seq_inputs(dxs::Vector{Int}, n::Integer) =
+	[randommps(ComplexF64, dxs; D=2, normalize=true) for _ in 1:n]
+
+function _seq2seq_pair(pairfun::Function, x::CanonicalMPS, dys::Vector{Int})
+	y = pairfun(x)
+	phydims(y) == dys ||
+		throw(DimensionMismatch("oracle output dimensions $(phydims(y)) ≠ $dys"))
+	return (x, y)
+end
+
+"""
+	seq2seq(pairfun::Function, dxs, dys, alg::Seq2Seq = Seq2Seq())
+		-> (W, info::NamedTuple{(:loss, :maxerr, :npairs, :rounds)})
+
+Adaptive seq2seq fit from a black-box pair oracle `pairfun(x) -> y`: alternate the
+inner ALS fit on the current training set with residual-driven data enrichment —
+the seq2seq analog of ALSRecon's sample enrichment. Each round evaluates the
+relative prediction error `‖W·x′ − y′‖/‖y′‖` of the current `W` on a fresh pool of
+`alg.nbuffer` random input states `x′`, queries the oracle for the targets of the
+`alg.nadd` worst inputs and adds those pairs to the training set. Stops when the
+maximal pool error drops below `alg.tol` or after `alg.maxiter` rounds. Candidate
+inputs are random normalized MPS of bond 2 over `dxs`. Returns `(W, info)` with the
+final training loss, the maximal pool error, the number of training pairs and the
+number of enrichment rounds.
+"""
+function seq2seq(pairfun::Function, dxs::Vector{Int}, dys::Vector{Int},
+				 alg::Seq2Seq = Seq2Seq())
+	length(dxs) == length(dys) ||
+		throw(DimensionMismatch("dxs and dys must have equal length"))
+	W = _random_seq2seq_mpo(ComplexF64, dxs, dys, alg.D)
+	S = [_seq2seq_pair(pairfun, x, dys) for x in _random_seq2seq_inputs(dxs, alg.nbuffer)]
+	traj = Vector{Vector{Float64}}()
+	maxerr = Inf
+	rounds = 0
+	while rounds < alg.maxiter
+		traj = seq2seq!(W, [p[1] for p in S], [p[2] for p in S], alg)
+		rounds += 1
+		cand = _random_seq2seq_inputs(dxs, alg.nbuffer)
+		ys = [pairfun(x) for x in cand]
+		errs = [distance(W * x, y) / max(norm(y), 1e-12) for (x, y) in zip(cand, ys)]
+		maxerr = maximum(errs)
+		(alg.verbosity > 0) &&
+			println("Seq2Seq round $rounds: maxerr = $(round(maxerr; sigdigits=4))")
+		(maxerr < alg.tol || rounds >= alg.maxiter) && break
+		worst = partialsortperm(errs, 1:min(alg.nadd, length(errs)); rev=true)
+		append!(S, [_seq2seq_pair(pairfun, cand[i], dys) for i in worst])
+	end
+	loss = isempty(traj) ? NaN : traj[end][end]
+	return W, (loss = loss, maxerr = maxerr, npairs = length(S), rounds = rounds)
+end
