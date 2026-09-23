@@ -154,13 +154,11 @@ end
 	@test todense(ρc) ≈ todense(ρp) atol = 1e-12
 end
 
-@testset "OpSum lattice type" begin
-	# the lattice length is part of the type: `ds` is stored as an NTuple{L,Int}
+@testset "OpSum lattice" begin
+	# `ds` is stored as a plain Vector{Int}
 	s = OpSum([2, 2, 2])
-	@test s isa OpSum{3}
-	@test s.ds == (2, 2, 2)
-	s2 = OpSum((2, 2), term(1 => _SX))
-	@test s2 isa OpSum{2}
+	@test s.ds == [2, 2, 2]
+	s2 = OpSum([2, 2], term(1 => _SX))
 	@test length(s2) == 1
 	push!(s2, term(0.5, 2 => _SZ))
 	@test length(s2) == 2

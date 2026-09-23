@@ -34,7 +34,7 @@ using FiniteMPSAlgorithms
 	Ed = eigen(Hermitian(Hdense))
 	E_gs, ψ_gs = Ed.values[1], Ed.vectors[:, 1]
 
-	camp = ground_state(H, CADMRG(D=16, maxiter=40, tol=1e-11))
+	camp = ground_state(H, CADMRG(trunc=truncdim(16), maxiter=40, tol=1e-11))
 
 	# the circuits are recorded, and the gates act on valid site pairs
 	@test !isempty(camp.gates)

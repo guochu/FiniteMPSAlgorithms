@@ -103,9 +103,8 @@ data-only internals are explicitly marked).
 - `DefaultTruncation` now keeps at least one singular value (`add_back = 1`), avoiding
   degenerate zero-dimension bonds when an entire spectrum falls below the cutoff. The
   definition is pinned by a test.
-- `OpSum`: the lattice `ds` is now part of the type (`OpSum{L}` with
-  `ds::NTuple{L,Int}`), so `OpSum`s on different lattices are distinct types. All
-  existing vector-based constructors keep working.
+- `OpSum`: the lattice `ds` is stored as a plain `Vector{Int}` (no lattice-length type
+  parameter); the terms stay validated against `ds` on construction / `push!`.
 
 ## New: `DMRG2` — the two-site variational engine for all iterative arithmetics
 
@@ -116,16 +115,18 @@ them). Instead of single-site ALS updates with a fixed bond profile, the two-sit
 engine optimizes neighboring site pairs jointly and re-splits them by a truncating SVD
 under `alg.trunc`, so the bond dimension adapts during the sweeps — growth where the
 environment demands it, truncation where the scheme caps it. The initial guesses are
-drawn with the bond cap carried by `alg.trunc` (`_truncation_bond`, falling back to
+drawn with the bond cap carried by `alg.trunc` (`_guess_bond`, falling back to
 `Defaults.D`).
 
 Implementation notes (src/algorithms/arithmetics/dmrg2.jl):
 
-- the normalized two-site sweeps converge the DIRECTION of the solution; the physical
-  scale is restored once per driver from the problem's KKT eigenvalue
-  β = (linear form) / ⟨dir|dir⟩, folded back through `lmul!` — with the external
-  operand scales attached by `setscaling!` BEFORE `lmul!` (which folds its factor into
-  the per-site `scaling` field and must not be overwritten);
+- the singular values of the two-site re-split are absorbed into the sweep direction
+  WITHOUT normalization (as in the single-site ALS gauge moves): the data keeps the
+  scale of the local targets through the sweeps, and the drivers only attach the
+  operand external scales through the `scaling` field (like DMRG1). The one exception
+  is `add`, which restores the physical scale of the (cancellation-prone) sum from the
+  problem's KKT eigenvalue β = Σ_n ⟨bra|ket_n⟩ / ⟨bra|bra⟩ (`setscaling!` first, the
+  folding `lmul!` second);
 - the per-pair loss `norm(target)` is monotone in processing time for exact local
   solves; a `NoTruncation` small-system testset pins the local machinery (targets,
   re-splits, sample/environment bookkeeping) independently of truncation effects;

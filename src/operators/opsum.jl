@@ -50,29 +50,24 @@ term(pairs::Pair{Int,<:AbstractMatrix}...) = OpTerm(one(Float64), pairs...)
 	OpSum(ds)
 	OpSum(ds, terms)
 
-A collection of [`OpTerm`](@ref)s on a lattice with physical dimensions `ds`. The
-lattice length is part of the type (`ds` is stored as an `NTuple{L,Int}`), so `OpSum`s
-on different lattices are distinct types. The terms are validated against `ds` on
-construction / `push!` (positions in range, every operator matching the local
-dimension), so an `OpSum` is self-consistent by construction; it is the input of
-`MPOHamiltonian(::OpSum)`.
+A collection of [`OpTerm`](@ref)s on a lattice with physical dimensions `ds::Vector{Int}`.
+The terms are validated against `ds` on construction / `push!` (positions in range,
+every operator matching the local dimension), so an `OpSum` is self-consistent by
+construction; it is the input of `MPOHamiltonian(::OpSum)`.
 """
-struct OpSum{L}
+struct OpSum
 	data::Vector{OpTerm}
-	ds::NTuple{L, Int}
+	ds::Vector{Int}
 end
-OpSum(ds::NTuple{L, Int}) where {L} = OpSum(OpTerm[], ds)
-OpSum(ds::AbstractVector{Int}) = OpSum(Tuple(ds))
-function OpSum(ds::NTuple{L, Int}, terms::AbstractVector{<:OpTerm}) where {L}
+OpSum(ds::AbstractVector{Int}) = OpSum(OpTerm[], ds)
+function OpSum(ds::AbstractVector{Int}, terms::AbstractVector{<:OpTerm})
 	s = OpSum(ds)
 	for t in terms
 		push!(s, t)
 	end
 	return s
 end
-OpSum(ds::AbstractVector{Int}, terms::AbstractVector{<:OpTerm}) = OpSum(Tuple(ds), terms)
 OpSum(ds::AbstractVector{Int}, terms::OpTerm...) = OpSum(ds, collect(terms))
-OpSum(ds::NTuple{L, Int}, terms::OpTerm...) where {L} = OpSum(ds, collect(terms))
 
 Base.length(s::OpSum) = length(s.data)
 Base.iterate(s::OpSum, state...) = iterate(s.data, state...)

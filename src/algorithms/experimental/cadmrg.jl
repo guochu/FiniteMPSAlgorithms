@@ -13,15 +13,16 @@
 # ---------- algorithm type ----------
 
 """
-	CADMRG(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D, verbosity=0)
+	CADMRG(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=truncdim(D=Defaults.D), verbosity=0)
 
-Parameters of the Clifford-augmented two-site DMRG ground-state search. `D` caps the
-bond dimension used in the SVD truncation after each two-site update.
+Parameters of the Clifford-augmented two-site DMRG ground-state search. `trunc` is the
+truncation scheme applied to the SVD after each two-site update (its bond cap bounds
+the bond dimension).
 """
-@kwdef struct CADMRG <: IterativeMPSAlgorithm
+@kwdef struct CADMRG{TR<:TruncationScheme} <: IterativeMPSAlgorithm
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
-	D::Int = Defaults.D
+	trunc::TR = truncdim(D=Defaults.D)
 	verbosity::Int = 0
 end
 
@@ -276,7 +277,7 @@ function _cadmrg_local_update!(env::CADMRGCache, s::Integer, alg::CADMRG; move_r
 		@tensor Ψcmat[x, po, y] := C[po, p] * Ψmat[x, p, y]
 		Ψcp = reshape(Ψcmat, aL, 2, 2, aR)  # [aL, p2o, p1o, aR]
 		Ψc = permutedims(Ψcp, (1, 3, 2, 4)) # back to [aL, p1o, p2o, aR]
-		_, _, _, err = tsvd(Ψc, (1, 2), (3, 4); trunc=truncdim(D=alg.D))
+		_, _, _, err = tsvd(Ψc, (1, 2), (3, 4); trunc=alg.trunc)
 		if err < best_err
 			best_err = err
 			best_Ψ = Ψc
@@ -287,7 +288,7 @@ function _cadmrg_local_update!(env::CADMRGCache, s::Integer, alg::CADMRG; move_r
 	# SVD truncate the best Clifford-transformed tensor.
 	# `move_right=true`  (left sweep):  absorb singular values into the right site (s+1).
 	# `move_right=false` (right sweep): absorb singular values into the left  site (s).
-	u, sv, v, _ = tsvd!(best_Ψ, (1, 2), (3, 4); trunc=truncdim(D=alg.D))
+	u, sv, v, _ = tsvd!(best_Ψ, (1, 2), (3, 4); trunc=alg.trunc)
 	if move_right
 		env.ket[s] = u
 		sm = Diagonal(sv)
@@ -388,7 +389,8 @@ sweep!(env::CADMRGCache, alg::CADMRG) = vcat(leftsweep!(env, alg), rightsweep!(e
 	ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::CADMRG) -> khist
 
 Clifford-augmented ground-state search starting from the user-provided ansatz `ψ`
-(modified in place; `alg.D` is ignored when an explicit ansatz is given). The MPO `h`
+(modified in place; `alg.trunc` only affects the sweep truncations when an explicit
+ansatz is given). The MPO `h`
 is converted to dense form and rewritten in place (transformed by the optimal Clifford
 circuits). Returns `khist`, the per-sweep local-energy history. To obtain the applied
 Clifford circuits together with the state, use `ground_state(h, alg)` which returns a
@@ -406,7 +408,8 @@ end
 """
 	ground_state(h::MPOHamiltonian, alg::CADMRG) -> CAMPS
 
-Ground state of `h` found by CA-DMRG, starting from a random MPS of bond `alg.D`,
+Ground state of `h` found by CA-DMRG, starting from a random MPS with the bond cap
+carried by `alg.trunc`,
 returned as a [`CAMPS`](@ref): the canonical MPS in the Clifford-rotated picture
 together with every applied two-qubit Clifford circuit (in application order).
 Observables on the original Hamiltonian picture are evaluated with
@@ -415,7 +418,7 @@ Hamiltonian's Pauli-term expectations.
 """
 function ground_state(h::MPOHamiltonian, alg::CADMRG)
 	TC = complex(scalartype(h))
-	ψ = randommps(TC, ophydims(h); D=alg.D)
+	ψ = randommps(TC, ophydims(h); D=_guess_bond(alg.trunc))
 	hd = _dense_mpo(h)   # CA-DMRG rewrites MPO tensors in place; use dense form
 	env = CADMRGCache(hd, ψ)
 	khist = iterative_compute!(env, alg)

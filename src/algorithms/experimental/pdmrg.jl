@@ -17,16 +17,17 @@
 # ---------- algorithm type ----------
 
 """
-	PDMRG(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D, R=20, verbosity=0)
+	PDMRG(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=truncdim(D=Defaults.D), R=20, verbosity=0)
 
-Parameters of the positive DMRG thermal-state search. `D` caps the MPS bond dimension
-of the isometric part of the PMPA and `R` the rank of the orthogonal center (the
-maximal Schmidt number of the represented mixed state).
+Parameters of the positive DMRG thermal-state search. `trunc` is the truncation scheme
+applied to the center-movement SVDs (its bond cap bounds the MPS bond dimension of the
+isometric part of the PMPA) and `R` the rank of the orthogonal center (the maximal
+Schmidt number of the represented mixed state).
 """
-@kwdef struct PDMRG <: IterativeMPSAlgorithm
+@kwdef struct PDMRG{TR<:TruncationScheme} <: IterativeMPSAlgorithm
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
-	D::Int = Defaults.D
+	trunc::TR = truncdim(D=Defaults.D)
 	R::Int = 20
 	verbosity::Int = 0
 end
@@ -270,7 +271,7 @@ function _left_move!(env::ThermalDMRGCache, s::Int, β::Real, alg::PDMRG)
 	# M[aL, ps, ac, τ] · B[ac, ps1, aR]  ->  Ψ[aL, ps, ps1, aR, τ]
 	@tensor Ψ[aL, ps, ps1, aR, τ] := env.rho.mcenter[][aL, ps, ac, τ] * B[ac, ps1, aR]
 	# SVD: left group (aL, ps) gives A[aL, ps, new]; right group (ps1, aR, τ) goes to center
-	u, sv, v, err = tsvd!(Ψ, (1, 2), (3, 4, 5); trunc=truncdim(D=alg.D))
+	u, sv, v, err = tsvd!(Ψ, (1, 2), (3, 4, 5); trunc=alg.trunc)
 	env.rho.data[s] = u                         # A[aL, ps, new] (left-canonical)
 	# v[new, ps1, aR, τ] -> Mnew[new, ps1, aR, τ] after absorbing singular values
 	sm = Diagonal(sv)
@@ -308,7 +309,7 @@ function _right_move!(env::ThermalDMRGCache, s::Int, β::Real, alg::PDMRG)
 	# A[aL, ps1, ac] · M[ac, ps, aR, τ]  ->  Ψ[aL, ps1, ps, aR, τ]
 	@tensor Ψ[aL, ps1, ps, aR, τ] := A[aL, ps1, ac] * env.rho.mcenter[][ac, ps, aR, τ]
 	# SVD: left group (aL, ps1, τ) goes to center; right group (ps, aR) gives B[ps, aR, new]
-	u, sv, v, err = tsvd!(Ψ, (1, 2, 5), (3, 4); trunc=truncdim(D=alg.D))
+	u, sv, v, err = tsvd!(Ψ, (1, 2, 5), (3, 4); trunc=alg.trunc)
 	env.rho.data[s] = v                         # B[ps, aR, new] (right-canonical)
 	# u[aL, ps1, τ, new] -> Mnew[aL, ps1, new, τ] after absorbing singular values
 	sm = Diagonal(sv)
@@ -342,10 +343,10 @@ end
 	thermalstate(h::AbstractMPO, β::Real, alg::PDMRG=PDMRG()) -> (F, rho)
 
 Free energy `F = -log(Z)/β` and the PMPA equilibrium state of `h` at inverse temperature
-`β`, starting from a random PMPA of bond `alg.D` and rank `alg.R`.
+`β`, starting from a random PMPA with the bond cap carried by `alg.trunc` and rank `alg.R`.
 """
 function thermalstate(h::AbstractMPO, β::Real, alg::PDMRG=PDMRG())
-	rho = randompmpa(scalartype(h), ophydims(h); D=alg.D, R=alg.R)
+	rho = randompmpa(scalartype(h), ophydims(h); D=_guess_bond(alg.trunc), R=alg.R)
 	rho = thermalstate!(rho, h, β, alg)
 	F = freeenergy(h, rho, β)
 	return F, rho

@@ -55,6 +55,10 @@ _truncation_bond(t::TruncateDim) = t.D
 _truncation_bond(t::TruncateDimCutoff) = t.D
 _truncation_bond(t::TruncationScheme) = nothing
 
+# the bond cap for drawing automatic initial guesses from a truncation scheme
+# (`Defaults.D` for schemes without a bond cap)
+_guess_bond(t::TruncationScheme) = something(_truncation_bond(t), Defaults.D)
+
 const DefaultMultAlg = SVDCompression(trunc=DefaultTruncation)
 
 """

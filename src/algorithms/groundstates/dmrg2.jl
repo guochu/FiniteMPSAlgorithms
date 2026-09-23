@@ -1,6 +1,6 @@
 # Two-site DMRG (DMRG2): the two-site update optimizes the two center tensors of
 # sites (s, s+1) jointly against the two-site effective Hamiltonian and truncates the
-# result by SVD to `alg.D`. The SVD itself moves the orthogonality center (singular
+# result by SVD under `alg.trunc`. The SVD itself moves the orthogonality center (singular
 # values absorbed into the sweep direction), so no QR gauge moves are performed and the
 # not-yet-swept tensors keep their canonical form.
 
@@ -170,10 +170,7 @@ Ground-state energy and state of `h` found by two-site DMRG, starting from a ran
 of bond `Defaults.D`.
 """
 function ground_state(h::MPOHamiltonian, alg::DMRG2)
-	# when the truncation scheme carries a bond cap, use it for the random initial
-	# ansatz; otherwise fall back to the default bond dimension
-	D = _truncation_bond(alg.trunc)
-	ψ = randommps(scalartype(h), ophydims(h); D = D === nothing ? Defaults.D : D)
+	ψ = randommps(scalartype(h), ophydims(h); D=_guess_bond(alg.trunc))
 	khist = ground_state!(ψ, h, alg)
 	(alg.verbosity > 0) && println("DMRG2 converged (delta = $(_iterative_delta(khist)))")
 	return expectation(h, ψ), ψ

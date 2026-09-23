@@ -3,21 +3,22 @@
 # environment contraction the single-site ALS uses — is formed for both sites jointly
 # and re-split by a truncating SVD (`alg.trunc`), so the bond dimension adapts during
 # the sweeps (growth where the environment demands it, truncation where the scheme
-# caps it). The convergence measure is the norm of the two-site optimal target,
-# monotone in processing time, exactly as in the single-site sweeps.
+# caps it). The singular values are absorbed into the sweep direction WITHOUT
+# normalization (as in the single-site ALS gauge moves): the data carries the scale of
+# the local targets through the sweeps, so the drivers only attach the operand external
+# scales through the `scaling` field. The convergence measure is the norm of the
+# two-site optimal target, monotone in processing time, exactly as in the single-site
+# sweeps.
 
 # ---------- generic two-site re-split ----------
 
 # re-split the optimal two-site block of a rank-3 bra (MPS case): block legs
-# (bL, p1, p2, bR); the singular values are absorbed into the sweep direction and
-# normalized — the two-site ALS determines the direction only (the scale direction of
-# the un-normalized iteration is divergent under truncation); the physical scale is
-# restored once by the driver from the problem's KKT eigenvalue
+# (bL, p1, p2, bR); the singular values are absorbed into the sweep direction without
+# normalization — the data keeps the scale of the local target (as in the single-site
+# ALS gauge moves)
 function _als2_update!(bra, s::Integer, t2::AbstractArray{T,4}, alg::DMRG2;
 					   move_right::Bool) where {T}
 	u, sv, v, _ = tsvd!(t2, (1, 2), (3, 4); trunc=alg.trunc)
-	n = norm(sv)
-	n == 0 || (sv ./= n)
 	if move_right
 		bra[s] = u
 		sm = Diagonal(sv)
@@ -38,8 +39,6 @@ function _als2_update!(bra, s::Integer, t2::AbstractArray{T,6}, alg::DMRG2;
 					   move_right::Bool) where {T}
 	u, sv, v, _ = tsvd!(t2, (1, 2, 4), (3, 5, 6); trunc=alg.trunc)
 	# u: (bL, po1, pi1, md); v: (md, po2, pi2, bR)
-	n = norm(sv)
-	n == 0 || (sv ./= n)
 	sm = Diagonal(sv)
 	if move_right
 		bra[s] = permutedims(u, (1, 2, 4, 3))            # (bL, po1, aR, pi1)
@@ -318,81 +317,43 @@ end
 
 sweep!(m::LinsolveCache, alg::DMRG2) = vcat(leftsweep!(m, alg), rightsweep!(m, alg))
 
-# the normal-equation eigenvalue of the converged direction: ⟨x|A†y⟩ / ⟨x|A†A|x⟩
-function _linsolve_kkt(m::LinsolveCache)
-	T = scalartype(m.bra)
-	h = ones(T, 1, 1, 1, 1)
-	b = ones(T, 1, 1, 1)
-	for s in 1:length(m.ket)
-		h = _h_updateleft(h, m.ket[s], m.mpo[s], m.ket[s])
-		b = _b_updateleft(b, m.ket[s], m.mpo[s], m.bra[s])
-	end
-	return b[1, 1] / h[1, 1, 1, 1]
-end
-
 # ---------- exported interface (DMRG2) ----------
 # the initial guesses are drawn with the bond cap carried by `alg.trunc`
-# (`_truncation_bond`, falling back to `Defaults.D`); the two-site sweeps adapt the
-# bond dimension during the iterations, so the guess may be smaller than the final bond
+# (`_guess_bond`); the two-site sweeps adapt the bond dimension during the iterations,
+# so the guess may be smaller than the final bond
 #
-# the normalized two-site sweeps converge the DIRECTION of the solution; the physical
-# scale is restored once per driver from the problem's KKT eigenvalue
-#   β = (linear form of the target along the converged direction) / ⟨dir|dir⟩,
-# folded back into the data (`lmul!`), and the operand external scales are attached
-# through the `scaling` field afterwards
-
-# ⟨bra|H|ket⟩ of a MultCache at the data level
-function _overlap3(m::MultCache)
-	T = scalartype(m.bra)
-	v = ones(T, 1, 1, 1)
-	for s in eachindex(m.bra)
-		v = _env_updateleft(v, m.bra[s], m.H[s], m.ket[s])
-	end
-	return v[1, 1, 1]
-end
-
-# ⟨χ|ψA ⊙ ψB⟩ of a HadamardCache at the data level
-function _hadamard_overlap(m::HadamardCache)
-	T = scalartype(m.bra)
-	v = ones(T, 1, 1, 1)
-	for s in eachindex(m.bra)
-		v = _updateleft(v, m.bra[s], m.ketx[s], m.kety[s])
-	end
-	return v[1, 1, 1]
-end
-
-# the KKT eigenvalue of a normalized ALS direction: (linear form) / ⟨dir|dir⟩
-_kkt_ratio(form::Number, dirnorm2::Number) = form / dirnorm2
-
-_dmrg2_guessD(alg::DMRG2) = something(_truncation_bond(alg.trunc), Defaults.D)
+# the sweeps keep the natural data scale (as in DMRG1): the drivers only attach the
+# operand external scales through the `scaling` field — no scale restoration pass
 
 function mult!(out, h, x, alg::DMRG2)
 	cache = MultCache(h, x, out)
 	iterative_compute!(cache, alg)
-	# attach the external operand scales first, then restore the physical scale from the
-	# problem's KKT eigenvalue (H ket = λ bra at convergence): `lmul!` folds the factor
-	# into the per-site scaling, so it must come after `setscaling!`
+	# the sweeps keep the natural data scale: only the external operand scales are
+	# attached through the `scaling` field (as in the DMRG1 driver)
 	s = _opscaling(h) * _opscaling(x)
 	s == 1 || setscaling!(out, s)
-	lmul!(_kkt_ratio(_overlap3(cache), _dot(out, out)), out)
 	return out
 end
 
 function mult(h::AbstractMPO, x, alg::DMRG2)
 	(length(h) == length(x)) || throw(ArgumentError("dimension mismatch"))
-	return mult!(svdguess_mult(h, x, _dmrg2_guessD(alg)), h, x, alg)
+	return mult!(svdguess_mult(h, x, _guess_bond(alg.trunc)), h, x, alg)
 end
 mult(hA::MPOHamiltonian, x, alg::DMRG2) = mult(MPO(tompotensors(hA)), x, alg)
 mult(h::AbstractMPO, hB::MPOHamiltonian, alg::DMRG2) = mult(h, MPO(tompotensors(hB)), alg)
 mult(hA::MPOHamiltonian, hB::MPOHamiltonian, alg::DMRG2) =
 	mult(MPO(tompotensors(hA)), MPO(tompotensors(hB)), alg)
 
+# the KKT eigenvalue of the converged ALS direction: (linear form) / ⟨dir|dir⟩
+_kkt_ratio(form::Number, dirnorm2::Number) = form / dirnorm2
+
 function add!(out, chains, alg::DMRG2)
 	cache = AddCache(out, chains)
 	iterative_compute!(cache, alg)
-	# Σ kets = β·bra at convergence: β = Σ_n ⟨bra|ket_n⟩ / ⟨bra|bra⟩.
-	# `setscaling!` first, `lmul!` second (see `mult!` — `lmul!` folds the factor into
-	# the per-site scaling and must not be overwritten)
+	# Σ kets = β·bra at convergence: β = Σ_n ⟨bra|ket_n⟩ / ⟨bra|bra⟩. Unlike the other
+	# DMRG2 drivers, `add` restores the physical scale of the (cancellation-prone) sum
+	# from the problem's KKT eigenvalue; `setscaling!` first, `lmul!` second (the
+	# folding `lmul!` must not be overwritten by a later `setscaling!`)
 	setscaling!(out, scaling(chains[1]))
 	form = sum(_dot(out, c) for c in chains)
 	lmul!(_kkt_ratio(form, _dot(out, out)), out)
@@ -401,11 +362,11 @@ end
 
 function add(ψs::Vector{<:CanonicalMPS}, alg::DMRG2)
 	isempty(ψs) && throw(ArgumentError("empty input"))
-	return add!(svdguess_add(ψs, _dmrg2_guessD(alg)), ψs, alg)
+	return add!(svdguess_add(ψs, _guess_bond(alg.trunc)), ψs, alg)
 end
 function add(ρs::Vector{<:CanonicalMPO}, alg::DMRG2)
 	isempty(ρs) && throw(ArgumentError("empty input"))
-	return add!(svdguess_add(ρs, _dmrg2_guessD(alg)), ρs, alg)
+	return add!(svdguess_add(ρs, _guess_bond(alg.trunc)), ρs, alg)
 end
 add(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::DMRG2) = add([ψA, ψB], alg)
 add(ρA::CanonicalMPO, ρB::CanonicalMPO, alg::DMRG2) = add([ρA, ρB], alg)
@@ -413,14 +374,13 @@ add(ρA::CanonicalMPO, ρB::CanonicalMPO, alg::DMRG2) = add([ρA, ρB], alg)
 function compress!(out, x, alg::DMRG2)
 	cache = OverlapCache(out, x)
 	iterative_compute!(cache, alg)
-	# x = β·out at convergence: β = ⟨out|x⟩ / ⟨out|out⟩ (same ordering as in `mult!`)
+	# the sweeps keep the natural data scale: only the external operand scale is attached
 	x isa Union{CanonicalMPS, CanonicalMPO} && setscaling!(out, scaling(x))
-	lmul!(_kkt_ratio(_dot(out, x), _dot(out, out)), out)
 	return out
 end
 
 function compress(x, alg::DMRG2)
-	out = svdguess_compress(x, _dmrg2_guessD(alg))
+	out = svdguess_compress(x, _guess_bond(alg.trunc))
 	compress!(out, x, alg)
 	return out
 end
@@ -429,15 +389,15 @@ compress(h::MPOHamiltonian, alg::DMRG2) = compress(MPO(tompotensors(h)), alg)
 function hadamard!(χ, ψA, ψB, alg::DMRG2)
 	cache = HadamardCache(ψA, ψB, χ)
 	iterative_compute!(cache, alg)
-	# ψA ⊙ ψB = β·χ at convergence: β = ⟨χ|ψA ⊙ ψB⟩ / ⟨χ|χ⟩ (same ordering as in `mult!`)
+	# the sweeps keep the natural data scale: only the ⊙ convention scale
+	# scaling(ψA)·scaling(ψB) is attached
 	setscaling!(χ, scaling(ψA) * scaling(ψB))
-	lmul!(_kkt_ratio(_hadamard_overlap(cache), _dot(χ, χ)), χ)
 	return χ
 end
 
 function hadamard(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::DMRG2)
 	_validate_hadamard(ψA, ψB)
-	return hadamard!(svdguess_hadamard(ψA, ψB, _dmrg2_guessD(alg)), ψA, ψB, alg)
+	return hadamard!(svdguess_hadamard(ψA, ψB, _guess_bond(alg.trunc)), ψA, ψB, alg)
 end
 
 function linsolve!(x, A, y, alg::DMRG2)
@@ -449,19 +409,17 @@ function linsolve!(x, A, y, alg::DMRG2)
 		abs(r - prev) < alg.tol && break
 		prev = r
 	end
-	# the sweeps read raw data only: the solution is expressed in the right-hand side's
-	# per-site scaling convention. A·x* = β·y' with the normal-equation eigenvalue
-	# β = ⟨x|A†y⟩ / ⟨x|A†A|x⟩ restores the physical scale of the normalized direction
-	# (same ordering as in `mult!`: `setscaling!` first, then the folding `lmul!`)
+	# the sweeps keep the natural data scale: the solution is expressed in the
+	# right-hand side's per-site scaling convention (attached through the `scaling`
+	# field — a scaling^L power is never materialized)
 	setscaling!(m.ket, scaling(y))
-	lmul!(_linsolve_kkt(m), m.ket)
 	return x
 end
 
 function linsolve(A::AbstractMPO, y::CanonicalMPS, alg::DMRG2)
 	_validate_linsolve(A, y)
 	T = promote_type(scalartype(A), scalartype(y))
-	x = randommps(T, ophydims(A); D=_dmrg2_guessD(alg), normalize=false)
+	x = randommps(T, ophydims(A); D=_guess_bond(alg.trunc), normalize=false)
 	return linsolve!(x, A, y, alg)
 end
 linsolve(A::MPOHamiltonian, y::CanonicalMPS, alg::DMRG2) =
