@@ -171,16 +171,14 @@ end
 # ---------- SVD route & naive exact-product guesses ----------
 
 function _svd_mult(h::AbstractMPO, x, alg::SVDCompression)
+	# `h * x` is scaling-aware: the external per-site scales of canonical operands are
+	# already attached to the product's `scaling` field (a scaling^L power is never
+	# materialized), and the canonicalization keeps the represented value by rescaling
+	# the data into that field. Only a scale-free plain-MPO product is wrapped.
 	out = h * x
 	chain, err = _canonicalize!(out; alg=Orthogonalize(SVD(), alg.trunc, false))
-	# the exact data product omits the external per-site scales of canonical operands:
-	# a CanonicalMPS result already carries a consistent `scaling` field, while a
-	# plain-MPO result gets the factors attached here (per site — scaling^L is never
-	# materialized)
-	chain isa CanonicalMPS && return chain, err
-	s = _opscaling(h) * _opscaling(x)
-	chain = s == 1 ? CanonicalMPO(chain.data) : CanonicalMPO(chain.data; scaling=s)
-	return chain, err
+	chain isa Union{CanonicalMPS, CanonicalMPO} && return chain, err
+	return CanonicalMPO(chain.data), err
 end
 
 # naive on-the-fly SVD of the exact product: the site tensors of `h·x` are formed one at

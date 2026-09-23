@@ -230,3 +230,38 @@ function swap!(ψ::CanonicalMPS, i::Integer; trunc::TruncationScheme=DefaultTrun
 	(1 <= i <= length(ψ) - 1) || throw(BoundsError())
 	return _swap_content!(ψ, i; trunc)
 end
+
+"""
+	swap!(ρ::CanonicalMPO, i::Integer; trunc=DefaultTruncation) -> ρ
+
+Exchange the physical content `(p_out, p_in)` of the neighboring sites `i` and `i+1`
+of the operator chain `ρ` — the operator-space analog of the MPS [`swap!`](@ref)
+(Hastings update, aligned with TEMPO/GTEMPO): the two-site block is formed with the
+physical leg pairs crossed, the Schmidt spectrum `rho.s[i]` on the left bond is
+contracted into it, and the crossed block is re-decomposed with truncation. The right
+factor is written directly to `rho[i+1]`, the renewed spectrum to `rho.s[i+1]`, and
+the left site is recovered by back-projecting the crossed block. If the input is
+right-canonical and the truncation error is small, the right-canonical form is
+preserved without any `canonicalize!`. Sequences of `swap!` (`permutation2swaps`)
+generate arbitrary permutations of the site contents. Initializes the canonical form
+if needed.
+"""
+function swap!(ρ::CanonicalMPO, i::Integer; trunc::TruncationScheme=DefaultTruncation)
+	(1 <= i <= length(ρ) - 1) || throw(BoundsError())
+	svectors_uninitialized(ρ) && canonicalize!(ρ)
+	W = ρ[i]
+	V = ρ[i+1]
+	# two-site block with the physical leg pairs crossed: the legs at site i carry the
+	# (p_out, p_in) content of V, the legs at site i+1 that of W
+	@tensor block[a, qo, qi, po, pi, b] := W[a, po, m, pi] * V[m, qo, b, qi]
+	# Hastings: fold the Schmidt spectrum on the left bond into the block, then SVD
+	sv = Diagonal(ρ.s[i])
+	@tensor weighted[a, qo, qi, po, pi, b] := sv[a, 1] * block[1, qo, qi, po, pi, b]
+	u, s, v, err = tsvd!(weighted, (1, 2, 3), (4, 5, 6); trunc)
+	ρ[i+1] = permutedims(v, (1, 2, 4, 3))          # (aL, po, aR, pi)
+	ρ.s[i+1] = s
+	# back-project the crossed block; the left site keeps the (crossed) legs of V
+	@tensor Wnew[a, qo, m, qi] := block[a, qo, qi, po, pi, b] * conj(v[m, po, pi, b])
+	ρ[i] = Wnew
+	return ρ
+end

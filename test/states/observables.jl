@@ -85,3 +85,63 @@ end
 	@test real(expectationvalue(t, ρ, TraceCache(ρ))) ≈ v1 rtol = 1e-12
 	@test v1 ≈ real(expectationvalue(t, infinite_temperature_state(ComplexF64, fill(2, 8)))) rtol = 1e-12
 end
+
+@testset "todense/tomps roundtrip" begin
+	Random.seed!(83)
+	L = 4
+	ds = fill(2, L)
+	v = normalize(randn(ComplexF64, 2^L))
+	for order in (:msb, :lsb)
+		ψ = tomps(v, ds; order)
+		# exact inverse of todense in both site orders, left-canonical with spectra
+		@test todense(ψ; order) ≈ v atol = 1e-12
+		@test iscanonical(ψ)
+		# the recorded Schmidt spectrum matches the dense reshaping at bond 2
+		vt = order === :big ?
+			permutedims(reshape(v, reverse(ds)...), reverse(ntuple(i -> i, L))) :
+			reshape(v, Tuple(ds))
+		@test schmidt_values(ψ; bond=2) ≈ svdvals(reshape(vt, prod(ds[1:2]), :)) atol = 1e-10
+		# the strict canonical gauge carries over: expectation values on the chain match
+		# the dense contraction (chain site 1 is the first kron factor for :msb and the
+		# last one for :lsb)
+		SZ = Float64[1 0; 0 -1]
+		I2 = Matrix{Float64}(I, 2, 2)
+		Szsite1 = order === :msb ? kron(SZ, I2, I2, I2) : kron(I2, I2, I2, SZ)
+		@test real(expectationvalue(term(1 => SZ), ψ)) ≈
+			real(dot(v, Szsite1 * v)) / real(dot(v, v)) atol = 1e-10
+	end
+	# a bond-cap scheme truncates: bonds stay within the cap, oversized caps stay exact
+	@test todense(tomps(v, ds; trunc=truncdim(D=8))) ≈ v atol = 1e-12
+	ψt = tomps(v, ds; trunc=truncdim(D=2))
+	@test all(bonddims(ψt) .<= 2)
+	@test norm(todense(ψt)) <= norm(v) * (1 + 1e-12)
+end
+
+@testset "sum / copyphydims / permute" begin
+	Random.seed!(85)
+	L = 4
+	ds = fill(2, L)
+	ψA = randommps(ComplexF64, ds; D=4)
+	# Base.sum: all amplitudes of the represented state
+	@test sum(ψA) ≈ sum(todense(ψA)) rtol = 1e-10
+	@test sum(ψA * 2.3) ≈ 2.3 * sum(ψA) rtol = 1e-10
+
+	# copyphydims: the MPO·MPS mult reproduces the Hadamard product
+	ψB = randommps(ComplexF64, ds; D=4)
+	ρ = copyphydims(ψA)
+	@test bonddims(ρ) == bonddims(ψA)
+	@test ophydims(ρ) == iphydims(ρ) == phydims(ψA)
+	@test scaling(ρ) == scaling(ψA)
+	@test svectors_uninitialized(ρ)
+	@test todense(ρ * ψB) ≈ todense(⊙(ψA, ψB)) atol = 1e-10
+
+	# permute! / permute: site contents reordered, canonical form preserved
+	perm = [3, 1, 4, 2]
+	ψp = permute(ψA, perm)
+	vt = reshape(todense(ψA), Tuple(ds))
+	@test reshape(todense(ψp), Tuple(ds)) ≈ permutedims(vt, perm) atol = 1e-10
+	@test iscanonical(ψp)
+	ψc = copy(ψA)
+	permute!(ψc, perm)
+	@test todense(ψc) ≈ todense(ψp) atol = 1e-12
+end

@@ -91,3 +91,79 @@ end
 	@test distance(hAs, hB) > distance(hA, hB)
 	@test distance(hAph, hB) > 1e-3
 end
+
+@testset "todense/tompo roundtrip" begin
+	Random.seed!(47)
+	L = 4
+	ds = fill(2, L)
+	M = normalize(randn(ComplexF64, 2^L, 2^L))
+	for order in (:msb, :lsb)
+		ρ = tompo(M, ds; order)
+		# exact inverse of todense in both site orders, right-canonical with spectra
+		@test todense(ρ; order) ≈ M atol = 1e-12
+		@test iscanonical(ρ)
+	end
+	# the bond spectrum matches the operator-Schmidt decomposition of the dense matrix
+	ρ = tompo(M, ds)                                               # order = :big
+	Mt = permutedims(reshape(M, (reverse(ds)..., reverse(ds)...)),
+		(ntuple(i -> L + 1 - i, L)..., ntuple(i -> 2L + 1 - i, L)...))
+	T = permutedims(Mt, ntuple(i -> isodd(i) ? (i + 1) ÷ 2 : L + i ÷ 2, 2L))
+	@test schmidt_values(ρ; bond=2) ≈ svdvals(reshape(T, prod(ds[1:2])^2, :)) atol = 1e-10
+	# a bond-cap scheme truncates: bonds stay within the cap, oversized caps stay exact
+	@test todense(tompo(M, ds; trunc=truncdim(D=16))) ≈ M atol = 1e-10
+	ρt = tompo(M, ds; trunc=truncdim(D=4))
+	@test all(bonddims(ρt) .<= 4)
+	@test norm(todense(ρt)) <= norm(M) * (1 + 1e-12)
+end
+
+@testset "CanonicalMPO arithmetic with scaling" begin
+	Random.seed!(48)
+	ρ = tompo(randn(ComplexF64, 16, 16), fill(2, 4); trunc=truncdim(D=4))
+	σ = tompo(randn(ComplexF64, 16, 16), fill(2, 4); trunc=truncdim(D=4))
+	setscaling!(ρ, 1.7)
+	setscaling!(σ, 0.6)
+	Mρ, Mσ = todense(ρ), todense(σ)
+	# represented arithmetic: bilinear product, linear sum/difference and scalars
+	@test todense(ρ * σ) ≈ Mρ * Mσ atol = 1e-8
+	@test ρ * σ isa CanonicalMPO
+	@test todense(ρ + σ) ≈ Mρ + Mσ atol = 1e-8
+	@test todense(ρ - σ) ≈ Mρ - Mσ atol = 1e-8
+	@test todense(2.5 * ρ) ≈ 2.5 * Mρ atol = 1e-8
+	@test todense(ρ / 0.5) ≈ Mρ / 0.5 atol = 1e-8
+	# mixing with a plain MPO folds the CanonicalMPO scale into the data
+	h = MPO(copy(ρ.data))
+	@test todense(ρ + h) ≈ Mρ + todense(h) atol = 1e-8
+	@test todense(h * ρ) ≈ todense(h) * Mρ atol = 1e-8
+	# operator application carries the scaling of both factors
+	ψ = randommps(ComplexF64, fill(2, 4); D=4)
+	@test todense(ρ * ψ) ≈ Mρ * todense(ψ) atol = 1e-8
+end
+
+@testset "MPO permute!" begin
+	Random.seed!(49)
+	ρ = tompo(randn(ComplexF64, 16, 16), fill(2, 4); trunc=truncdim(D=4))
+	perm = [3, 1, 4, 2]
+	ρp = permute(ρ, perm)
+	dsT = (2, 2, 2, 2)
+	Mt = reshape(todense(ρ), (dsT..., dsT...))
+	ref = reshape(permutedims(Mt, (perm..., (perm .+ 4)...)), 16, 16)
+	@test todense(ρp) ≈ ref atol = 1e-10
+	@test iscanonical(ρp)
+	ρc = copy(ρ)
+	permute!(ρc, perm)
+	@test todense(ρc) ≈ todense(ρp) atol = 1e-12
+end
+
+@testset "OpSum lattice type" begin
+	# the lattice length is part of the type: `ds` is stored as an NTuple{L,Int}
+	s = OpSum([2, 2, 2])
+	@test s isa OpSum{3}
+	@test s.ds == (2, 2, 2)
+	s2 = OpSum((2, 2), term(1 => _SX))
+	@test s2 isa OpSum{2}
+	@test length(s2) == 1
+	push!(s2, term(0.5, 2 => _SZ))
+	@test length(s2) == 2
+	@test_throws ArgumentError push!(s2, term(0.5, 3 => _SX))
+	@test_throws DimensionMismatch push!(s2, term(0.5, 1 => randn(3, 3)))
+end

@@ -64,12 +64,14 @@ Base.:*(f::Number, h::AbstractMPO) = h * f
 Base.:/(h::AbstractMPO, f::Number) = h * (1 / f)
 Base.:-(h::AbstractMPO) = (-1) * h
 
-"""
-	Base.:*(hA::AbstractMPO, hB::AbstractMPO) -> MPO
+# ---------- scaling-free (raw data) arithmetic primitives: the `scaling` of
+# CanonicalMPO operands is NOT included; the dispatch wrappers below attach it ----------
 
-Exact (strict) operator product: bond dimensions grow, no truncation.
 """
-function Base.:*(hA::AbstractMPO, hB::AbstractMPO)
+Raw (strict) operator product of the chain data: bond dimensions grow, no truncation,
+no `scaling` folded in.
+"""
+function _mul_data(hA::AbstractMPO, hB::AbstractMPO)
 	(length(hA) == length(hB)) || throw(ArgumentError("dimension mismatch"))
 	T = promote_type(scalartype(hA), scalartype(hB))
 	data = Vector{Array{T,4}}(undef, length(hA))
@@ -85,11 +87,9 @@ function Base.:*(hA::AbstractMPO, hB::AbstractMPO)
 end
 
 """
-	Base.:+(hA::AbstractMPO, hB::AbstractMPO) -> MPO
-
-Exact (strict) sum as a block-diagonal direct product (no truncation).
+Raw (strict) block-diagonal sum of the chain data: no `scaling` folded in.
 """
-function Base.:+(hA::AbstractMPO, hB::AbstractMPO)
+function _plus_data(hA::AbstractMPO, hB::AbstractMPO)
 	(length(hA) == length(hB)) || throw(DimensionMismatch())
 	L = length(hA)
 	T = promote_type(scalartype(hA), scalartype(hB))
@@ -101,6 +101,72 @@ function Base.:+(hA::AbstractMPO, hB::AbstractMPO)
 	end
 	return MPO(r)
 end
+
+# fold the represented per-site scale `scaling^L` of a CanonicalMPO into its raw data
+# (site 1), returning a plain MPO; the canonical gauge is not preserved
+function _fold_scaling(h::CanonicalMPO)
+	d = copy(h.data)
+	isempty(d) || (d[1] = scaling(h)^length(h) * d[1])
+	return MPO(d)
+end
+
+"""
+	Base.:*(hA::CanonicalMPO, hB::CanonicalMPO) -> CanonicalMPO
+
+Exact (strict) operator product: bond dimensions grow, no truncation. The represented
+product is bilinear in the represented chains, so the result carries
+`scaling(hA)·scaling(hB)`.
+"""
+function Base.:*(hA::CanonicalMPO, hB::CanonicalMPO)
+	r = _mul_data(hA, hB)
+	return CanonicalMPO(r.data; scaling=scaling(hA) * scaling(hB))
+end
+"""
+	Base.:*(hA::CanonicalMPO, hB::AbstractMPO) -> CanonicalMPO
+	Base.:*(hA::AbstractMPO, hB::CanonicalMPO) -> CanonicalMPO
+
+Exact (strict) operator product; the `scaling` of the `CanonicalMPO` factor carries
+into the result.
+"""
+Base.:*(hA::CanonicalMPO, hB::AbstractMPO) =
+	CanonicalMPO(_mul_data(hA, hB).data; scaling=scaling(hA))
+Base.:*(hA::AbstractMPO, hB::CanonicalMPO) =
+	CanonicalMPO(_mul_data(hA, hB).data; scaling=scaling(hB))
+
+"""
+	Base.:*(hA::AbstractMPO, hB::AbstractMPO) -> MPO
+
+Exact (strict) operator product: bond dimensions grow, no truncation. The external
+`scaling` of `CanonicalMPO` factors is included (see the specialized methods).
+"""
+Base.:*(hA::AbstractMPO, hB::AbstractMPO) = _mul_data(hA, hB)
+
+"""
+	Base.:+(hA::CanonicalMPO, hB::CanonicalMPO) -> CanonicalMPO
+
+Exact (strict) sum as a block-diagonal direct product (no truncation). The `scaling` of
+both summands is folded into the data and the result has `scaling = 1` (mirroring the
+`CanonicalMPS` sum).
+"""
+Base.:+(hA::CanonicalMPO, hB::CanonicalMPO) =
+	CanonicalMPO(_plus_data(_fold_scaling(hA), _fold_scaling(hB)).data)
+"""
+	Base.:+(hA::CanonicalMPO, hB::AbstractMPO) -> MPO
+	Base.:+(hA::AbstractMPO, hB::CanonicalMPO) -> MPO
+
+Exact (strict) sum; the `scaling` of the `CanonicalMPO` summand is folded into the data
+of the plain-MPO result.
+"""
+Base.:+(hA::CanonicalMPO, hB::AbstractMPO) = _plus_data(_fold_scaling(hA), hB)
+Base.:+(hA::AbstractMPO, hB::CanonicalMPO) = _plus_data(hA, _fold_scaling(hB))
+
+"""
+	Base.:+(hA::AbstractMPO, hB::AbstractMPO) -> MPO
+
+Exact (strict) sum as a block-diagonal direct product (no truncation); the `scaling` of
+`CanonicalMPO` summands is included (see the specialized methods).
+"""
+Base.:+(hA::AbstractMPO, hB::AbstractMPO) = _plus_data(hA, hB)
 Base.:-(hA::AbstractMPO, hB::AbstractMPO) = hA + (-hB)
 
 distance(hA::AbstractMPO, hB::AbstractMPO) = _distance(hA, hB)
@@ -169,23 +235,36 @@ LinearAlgebra.tr(h::MPOHamiltonian) = tr(_dense(h))
 Base.:*(hA::MPOHamiltonian, hB::AbstractMPO) = _dense(hA) * hB
 Base.:*(hA::AbstractMPO, hB::MPOHamiltonian) = hA * _dense(hB)
 Base.:*(hA::MPOHamiltonian, hB::MPOHamiltonian) = _dense(hA) * _dense(hB)
+# disambiguation: the scale-free Hamiltonian mixes with a CanonicalMPO through the
+# scaling-aware wrappers (the result keeps the canonical factor's scale)
+Base.:*(hA::MPOHamiltonian, hB::CanonicalMPO) = _dense(hA) * hB
+Base.:*(hA::CanonicalMPO, hB::MPOHamiltonian) = hA * _dense(hB)
 
 Base.:+(hA::MPOHamiltonian, hB::AbstractMPO) = _dense(hA) + hB
 Base.:+(hA::AbstractMPO, hB::MPOHamiltonian) = hA + _dense(hB)
 Base.:+(hA::MPOHamiltonian, hB::MPOHamiltonian) = _dense(hA) + _dense(hB)
+Base.:+(hA::MPOHamiltonian, hB::CanonicalMPO) = _dense(hA) + hB
+Base.:+(hA::CanonicalMPO, hB::MPOHamiltonian) = hA + _dense(hB)
 
 LinearAlgebra.lmul!(f::Number, h::MPOHamiltonian) = (isempty(h.data) || lmul!(f, h.data[1]); h)
 
 """
-	todense(h::AbstractMPO) -> Matrix
+	todense(h::AbstractMPO; order=:msb) -> Matrix
 
 Dense matrix of the operator chain. Per site the physical pair is ordered `(p_out,
-p_in)`; the row index is `(p_out,1, …, p_out,L)` and the column index `(p_in,1, …,
-p_in,L)` with **site 1 the slowest** index on both sides (the Kronecker convention of
-`kron`-ing the local `(p_out, p_in)` factors site by site). The `scaling` of a
-`CanonicalMPO` is included as `scaling(h)^L`.
+p_in)`; the `order` keyword selects the endianness of the merged row/column indices:
+
+- `order = :msb` — **big-endian / Kronecker order** (default): site 1 is the most
+  significant (slowest) index on both the bra and the ket side, i.e. the matrix reads
+  like the `kron` product of the local `(p_out, p_in)` factors site by site — the
+  convention of most quantum-information texts.
+- `order = :lsb` — **little-endian / column-major flattening**: site 1 is the least
+  significant (fastest) index on both sides, the natural reading of
+  `vec(reshape(M, ds, ds))` in Julia's column-major memory layout.
+
+The `scaling` of a `CanonicalMPO` is included as `scaling(h)^L`.
 """
-function todense(h::AbstractMPO)
+function todense(h::AbstractMPO; order::Symbol=:msb)
 	L = length(h)
 	W = h[1]
 	T = permutedims(W, (1, 2, 4, 3))                             # (aL, PO, PI, aR)
@@ -196,7 +275,81 @@ function todense(h::AbstractMPO)
 		T = reshape(T2, size(T2, 1), size(T2, 2) * size(T2, 3), size(T2, 4) * size(T2, 5), size(T2, 6))
 	end
 	s = h isa CanonicalMPO ? scaling(h)^L : 1.0
-	return T[1, :, :, 1] * s
+	M = T[1, :, :, 1] * s
+	order === :msb && return M
+	order === :lsb || throw(ArgumentError("order must be :msb or :lsb"))
+	# reverse the site order on the bra and ket sides
+	ds = ophydims(h)
+	perm = (ntuple(i -> L + 1 - i, L)..., ntuple(i -> 2L + 1 - i, L)...)
+	return reshape(permutedims(reshape(M, (Tuple(ds)..., Tuple(ds)...)), perm), prod(ds), prod(ds))
+end
+
+"""
+	tompo(M, phydims; order=:msb, trunc=DefaultOrthTruncation) -> CanonicalMPO
+
+MPO representation of the dense operator matrix `M` on the physical dimensions
+`phydims` — the inverse of [`todense(::AbstractMPO)`](@ref). The `order` keyword
+selects the endianness of the merged row/column indices, matching
+[`todense(::AbstractMPO)`](@ref):
+
+- `order = :msb` — **big-endian / Kronecker order** (default): site 1 is the most
+  significant (slowest) index on both the bra and the ket side.
+- `order = :lsb` — **little-endian / column-major flattening**: site 1 is the least
+  significant (fastest) index on both sides.
+
+The chain is built from consecutive two-site SVDs on the interleaved (bra, ket) index
+pairs (right-canonical form, the center on the first site; the bond spectra are
+recorded), truncated with `trunc::TruncationScheme` (`DefaultOrthTruncation` by
+default); with a bond-cap scheme the result is exact whenever every intermediate rank
+stays within the cap. Any external scale of `M` is folded into the chain `scaling`.
+"""
+function tompo(M::AbstractMatrix, phydims::AbstractVector{Int};
+			   order::Symbol=:msb, trunc::TruncationScheme=DefaultOrthTruncation)
+	L = length(phydims)
+	prod(phydims) == size(M, 1) == size(M, 2) ||
+		throw(DimensionMismatch("matrix size $((size(M, 1), size(M, 2))) does not match prod(phydims) = $(prod(phydims)) on both sides"))
+	order in (:msb, :lsb) || throw(ArgumentError("order must be :msb or :lsb"))
+	TC = eltype(M)
+	R = float(real(TC))
+	# the dense matrix as a (po1..poL, pi1..piL) tensor with site 1 the slowest index
+	# on both sides (the big-endian flattening puts site L slowest, so the :msb branch
+	# reshapes in reverse site order and permutes back; :lsb matches directly);
+	# then interleave to T[p1o, p1i, p2o, p2i, ..., pLo, pLi] (site 1 slowest)
+	ds = Tuple(phydims)
+	perm_rev = (ntuple(i -> L + 1 - i, L)..., ntuple(i -> 2L + 1 - i, L)...)
+	Mt = order === :msb ?
+		permutedims(reshape(M, (reverse(ds)..., reverse(ds)...)), perm_rev) :
+		reshape(M, (ds..., ds...))
+	perm = ntuple(i -> isodd(i) ? (i + 1) ÷ 2 : L + i ÷ 2, 2L)
+	T = permutedims(Mt, perm)
+	data = Vector{Array{TC, 4}}(undef, L)
+	sarr = Vector{Union{Missing, Vector{R}}}(undef, L + 1)
+	sarr[1] = ones(R, 1)
+	sarr[L+1] = ones(R, 1)
+	r = 1
+	# right-to-left consecutive two-site SVDs: site i is split off and the right factor
+	# is right-orthogonal (isometry from (po, aR, pi) to the singular index), so the
+	# chain comes out right-canonical with the center (u·Diagonal(s)) on the first site
+	for i in L:-1:2
+		d = phydims[i]
+		u, sv, v, _ = tsvd(reshape(T, :, r * d * d); trunc)        # cols (po_i, pi_i, aR)
+		sarr[i] = collect(sv)
+		rn = length(sv)
+		# W_i[aL, po, aR, pi] from the right factor's rows (aL) × cols (po, pi, aR)
+		data[i] = permutedims(reshape(v, rn, d, d, r), (1, 2, 4, 3))
+		T = reshape(u * Diagonal(sv), :, rn)                       # (po1, pi1, ..., pi_{i-1}, aL)
+		r = rn
+	end
+	data[1] = reshape(permutedims(reshape(T, phydims[1], phydims[1], r), (1, 3, 2)),
+		1, phydims[1], r, phydims[1])                              # [1, po, aR, pi]
+	# data-normalized gauge: the represented scale lives in `scaling` as scaling^L, and
+	# the Schmidt values are rescaled to the normalized data (they were raw SVD values)
+	nrm = norm(data[1])
+	data[1] = data[1] / nrm
+	for i in 2:L
+		sarr[i] = sarr[i] ./ nrm
+	end
+	return CanonicalMPO(data, sarr; scaling=nrm^(1 / L))
 end
 
 """

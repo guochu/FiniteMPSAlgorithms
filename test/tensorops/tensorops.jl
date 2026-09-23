@@ -98,3 +98,14 @@ end
     s3, err3 = truncate!(collect(s), tr)
     @test all(s3 .> 0.1 * norm(s))
 end
+
+@testset "default truncation definition" begin
+    # pin the exported default: a bond-capped relative cutoff with `Defaults.D`,
+    # gauging precision `Defaults.tolgauge`, and at least one singular value kept
+    dt = FiniteMPSAlgorithms.DefaultTruncation
+    @test dt isa TruncateDimCutoff
+    @test dt.D == Defaults.D
+    @test dt.ϵ == Defaults.tolgauge
+    @test dt.add_back == 1
+    @test dt === truncdimcutoff(D=Defaults.D, ϵ=Defaults.tolgauge, add_back=1)
+end

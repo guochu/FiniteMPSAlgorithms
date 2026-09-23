@@ -38,13 +38,8 @@ Base.:*(f::Number, ψ::CanonicalMPS) = ψ * f
 Base.:/(ψ::CanonicalMPS, f::Number) = ψ * (1 / f)
 Base.:-(ψ::CanonicalMPS) = (-1) * ψ
 
-"""
-	Base.:*(h::AbstractMPO, ψ::CanonicalMPS) -> CanonicalMPS
-
-Exact (strict) application of the operator `h` to `ψ`: bond dimensions grow to `D_h·D_ψ`,
-no truncation. The `scaling` of `ψ` is carried over.
-"""
-function Base.:*(h::AbstractMPO, ψ::CanonicalMPS)
+# scaling-free (raw data) MPO·MPS application: `h`'s `scaling` is NOT included
+function _apply_data(h::AbstractMPO, ψ::CanonicalMPS)
 	(length(h) == length(ψ)) || throw(ArgumentError("dimension mismatch"))
 	T = promote_type(scalartype(h), scalartype(ψ))
 	data = Vector{Array{T,3}}(undef, length(ψ))
@@ -54,8 +49,27 @@ function Base.:*(h::AbstractMPO, ψ::CanonicalMPS)
 		@tensor r[aL, po, aR, bL, bR] := W[aL, po, aR, pin] * A[bL, pin, bR]
 		data[i] = tie(permute(r, (1, 4, 2, 3, 5)), (2, 1, 2))
 	end
-	return CanonicalMPS(data; scaling=scaling(ψ))
+	return CanonicalMPS(data)
 end
+
+"""
+	Base.:*(h::AbstractMPO, ψ::CanonicalMPS) -> CanonicalMPS
+
+Exact (strict) application of the operator `h` to `ψ`: bond dimensions grow to `D_h·D_ψ`,
+no truncation. The `scaling` of `ψ` is carried over.
+"""
+Base.:*(h::AbstractMPO, ψ::CanonicalMPS) =
+	CanonicalMPS(_apply_data(h, ψ).data; scaling=scaling(ψ))
+
+"""
+	Base.:*(h::CanonicalMPO, ψ::CanonicalMPS) -> CanonicalMPS
+
+Exact (strict) application of the operator `h` to `ψ`: bond dimensions grow to `D_h·D_ψ`,
+no truncation. The `scaling` of both factors carries into the result (the represented
+operator product is bilinear in the represented chains).
+"""
+Base.:*(h::CanonicalMPO, ψ::CanonicalMPS) =
+	CanonicalMPS(_apply_data(h, ψ).data; scaling=scaling(h) * scaling(ψ))
 
 """
 Base.:+(x::CanonicalMPS, y::CanonicalMPS) -> CanonicalMPS
@@ -146,3 +160,74 @@ The complement of [`fidelity`](@ref): `1 - fidelity`.
 """
 infidelity(ψA::CanonicalMPS, ψB::CanonicalMPS) = 1 - fidelity(ψA, ψB)
 distance2(ψA::CanonicalMPS, ψB::CanonicalMPS) = _distance2(ψA, ψB)
+
+"""
+	Base.sum(ψ::CanonicalMPS) -> Number
+
+Sum of all amplitudes `Σ_{i₁,…,i_L} ψ(i₁,…,i_L)` of the represented state (all
+physical indices contracted with all-ones vectors), including the `scaling^L` factor.
+"""
+function Base.sum(ψ::CanonicalMPS)
+	v = ones(scalartype(ψ), 1)
+	for i in length(ψ):-1:1
+		A = ψ[i]
+		# v_new[aL] = Σ_{p, aR} A[aL, p, aR]·v[aR]: the all-ones vector broadcast over p
+		v = reshape(A, size(A, 1), :) * repeat(v; inner=size(A, 2))
+	end
+	return v[1] * scaling(ψ)^length(ψ)
+end
+
+"""
+	copyphydims(ψ::CanonicalMPS) -> CanonicalMPO
+
+Reinterpret the MPS `ψ` as an operator chain on the same bond dimension: every site
+tensor `A[aL, p, aR]` becomes the physical-space diagonal `W[aL, po, aR, pi] =
+A[aL, po, aR]·δ_{po,pi}`, i.e. the physical dimensions are copied to both the bra and
+the ket side. Applying the result to another MPS with the same bond structure
+reproduces the element-wise (Hadamard) product, `copyphydims(ψA) * ψB == ⊙(ψA, ψB)`.
+The `scaling` of `ψ` is carried over. The MPS Schmidt values do not satisfy the MPO
+canonical conditions, so the Schmidt values of the result are uninitialized (as for
+any freshly constructed chain).
+"""
+function copyphydims(ψ::CanonicalMPS)
+	T = scalartype(ψ)
+	data = Vector{Array{T,4}}(undef, length(ψ))
+	for i in eachindex(ψ)
+		A = ψ[i]
+		d = size(A, 2)
+		W = zeros(T, size(A, 1), d, size(A, 3), d)
+		for p in 1:d
+			W[:, p, :, p] .= A[:, p, :]
+		end
+		data[i] = W
+	end
+	return CanonicalMPO(data; scaling=scaling(ψ))
+end
+
+"""
+	permute!(x, perm; kwargs...) -> x
+
+Reorder the site contents of the MPS/MPO chain `x` in place, so that afterwards site
+`i` carries the former content of site `perm[i]` (matching `Base.permute!` on plain
+vectors). Realized as the sequence of neighboring content swaps given by
+[`permutation2swaps`](@ref); keyword arguments are forwarded to `swap!` (`trunc`).
+Initializes the canonical form if needed.
+"""
+function Base.permute!(x::Union{CanonicalMPS, CanonicalMPO}, perm::AbstractVector{Int}; kwargs...)
+	(length(perm) == length(x) && isperm(perm)) ||
+		throw(ArgumentError("`perm` must be a permutation of 1:$(length(x))"))
+	for b in permutation2swaps(perm)
+		swap!(x, b; kwargs...)
+	end
+	return x
+end
+
+"""
+	permute(x, perm; kwargs...) -> typeof(x)
+
+Non-mutating [`permute!`](@ref): the site contents of `x` reordered according to
+`perm`, returned as a new chain. This chain-level `permute` extends the tensor
+`permute` of the tensorops layer.
+"""
+permute(x::Union{CanonicalMPS, CanonicalMPO}, perm::AbstractVector{Int}; kwargs...) =
+	permute!(copy(x), perm; kwargs...)

@@ -6,7 +6,7 @@ const maxiter   = 100
 const verbosity = 1
 end
 
-const DefaultTruncation = truncdimcutoff(D = Defaults.D, ϵ = Defaults.tolgauge; add_back = 0)
+const DefaultTruncation = truncdimcutoff(D = Defaults.D, ϵ = Defaults.tolgauge; add_back = 1)
 
 # default truncation of the canonical-form routines (`truncate!`/`canonicalize!`): a pure
 # relative-spectrum cutoff, no dimension cap — gauging must not silently cap bond dimensions
