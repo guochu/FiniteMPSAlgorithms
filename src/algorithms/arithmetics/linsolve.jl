@@ -71,8 +71,9 @@ end
 # ---------- ALS cache ----------
 
 """
-LinsolveCache: ALS problem carrier for [`linsolve`](@ref) — find x minimizing ||A·x - y||²
-with single-site sweeps over the two (A†A and A†) environment stacks.
+LinsolveCache: ALS problem carrier for [`linsolve`](@ref) — find x minimizing ||A·x − y||²
+with single-site sweeps over the two (A†A and A†) environment stacks. `ynorm2` is the
+raw-data ‖y‖², the constant of the global objective.
 """
 struct LinsolveCache{A, Y, X, T}
 	mpo::A
@@ -80,6 +81,7 @@ struct LinsolveCache{A, Y, X, T}
 	ket::X
 	hstorage::Vector{Array{T,4}}
 	bstorage::Vector{Array{T,3}}
+	ynorm2::Float64
 end
 
 _h_left!(m::LinsolveCache, s) =
@@ -121,29 +123,37 @@ function _site_solve(m::LinsolveCache, s::Integer)
 		E[i] = 1
 		Hmat[:, i] .= vec(_h_apply(E, W, m.hstorage[s], m.hstorage[s+1]))
 	end
-	return reshape(Hmat \ vec(t), shape)
+	return reshape(Hmat \ vec(t), shape), t, Hmat
+end
+
+# the exact global residual² ‖A·x − y‖², evaluated from the local decomposition at the
+# site with the updated tensor z — no global contraction is needed
+function _site_loss(m::LinsolveCache, z::AbstractArray, t::AbstractArray, Hmat::AbstractMatrix)
+	vz = vec(z)
+	return real(dot(vz, Hmat * vz)) - 2 * real(dot(vz, vec(t))) + m.ynorm2
 end
 
 """
 	leftsweep!(m::LinsolveCache, alg) -> kvals
 
 One left-to-right ALS sweep: at each site the local normal equation H z = t is solved,
-the chain is moved by QR and both environment stacks incremented.
+the chain is moved by QR and both environment stacks incremented. `kvals` collects the
+exact global residual² ‖A·x − y‖² after every site update (non-increasing).
 """
 function leftsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 	L = length(m.ket)
 	kvals = zeros(Float64, L)
 	for s in 1:L-1
-		z = _site_solve(m, s)
-		kvals[s] = norm(z)
+		z, t, Hmat = _site_solve(m, s)
+		kvals[s] = _site_loss(m, z, t, Hmat)
 		q, r = _gauge_left(z)
 		m.ket[s] = q
 		m.ket[s+1] = _contract_first(m.ket[s+1], r)
 		_h_left!(m, s)
 		_b_left!(m, s)
 	end
-	z = _site_solve(m, L)
-	kvals[L] = norm(z)
+	z, t, Hmat = _site_solve(m, L)
+	kvals[L] = _site_loss(m, z, t, Hmat)
 	m.ket[L] = z
 	return kvals
 end
@@ -152,15 +162,16 @@ end
 	rightsweep!(m::LinsolveCache, alg) -> kvals
 
 One right-to-left ALS sweep (symmetric, LQ gauge moves). `kvals` is ordered by processing
-time — sites `L, L-1, …, 1`.
+time — sites `L, L-1, …, 1` — and collects the exact global residual² ‖A·x − y‖² after
+every site update (non-increasing).
 """
 function rightsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 	L = length(m.ket)
 	kvals = zeros(Float64, L)
 	k = 1
 	for s in L:-1:2
-		z = _site_solve(m, s)
-		kvals[k] = norm(z)
+		z, t, Hmat = _site_solve(m, s)
+		kvals[k] = _site_loss(m, z, t, Hmat)
 		k += 1
 		l, q = _gauge_right(z)
 		m.ket[s] = q
@@ -168,32 +179,13 @@ function rightsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 		_h_right!(m, s)
 		_b_right!(m, s)
 	end
-	z = _site_solve(m, 1)
-	kvals[L] = norm(z)
+	z, t, Hmat = _site_solve(m, 1)
+	kvals[L] = _site_loss(m, z, t, Hmat)
 	m.ket[1] = z
 	return kvals
 end
 
 sweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm) = vcat(leftsweep!(m, alg), rightsweep!(m, alg))
-
-# ---------- global residual ||A·x - y|| ----------
-
-function _residual_norm(m::LinsolveCache)
-	T = scalartype(m.bra)
-	L = length(m.ket)
-	h = ones(T, 1, 1, 1, 1)
-	for s in 1:L
-		h = _h_updateleft(h, m.ket[s], m.mpo[s], m.ket[s])
-	end
-	t1 = real(h[1, 1, 1, 1])
-	b = ones(T, 1, 1, 1)
-	for s in 1:L
-		b = _b_updateleft(b, m.ket[s], m.mpo[s], m.bra[s])
-	end
-	t2 = real(b[1, 1])
-	r2 = t1 - 2 * t2 + real(_dot(m.bra, m.bra))
-	return sqrt(abs(r2))
-end
 
 # initial guesses: `randommps(T, ophydims(A); D=D)` or a compressed right-hand side
 # `svdguess_compress(y, trunc)` — the generic initializers cover the linsolve case
@@ -208,7 +200,8 @@ function LinsolveCache(A, y, x)
 	T = promote_type(scalartype(A), scalartype(y))
 	m = LinsolveCache(A, y, x,
 					  Vector{Array{T,4}}(undef, length(y) + 1),
-					  Vector{Array{T,3}}(undef, length(y) + 1))
+					  Vector{Array{T,3}}(undef, length(y) + 1),
+					  real(_dot(y, y)))
 	_init_storages_right!(m)
 	# the sweeps never touch Schmidt values: reset them so "initialized" always implies
 	# "properly canonical"
@@ -220,23 +213,16 @@ end
 	linsolve!(x, A, y, alg::DMRG1) -> x
 
 Single-site variational (ALS) solve of `A·x ≈ y` refined in place on the initial guess
-`x`. The residual converges with `|r_n - r_{n-1}| < alg.tol`. The solution is
-expressed in the right-hand side's per-site scaling convention (a scaling^L power is
-never materialized).
+`x`; iterated by the generic `iterative_compute!` on the exact global residual². The
+solution is expressed in the right-hand side's per-site scaling convention (a scaling^L
+power is never materialized).
 """
 function linsolve!(x, A, y, alg::DMRG1)
 	bonddim(x) != alg.D && changebond!(x; D=alg.D)
 	m = LinsolveCache(A, y, x)
-	prev = Inf
-	for _ in 1:alg.maxiter
-		sweep!(m, alg)
-		r = _residual_norm(m)
-		abs(r - prev) < alg.tol && break
-		prev = r
-	end
+	iterative_compute!(m, alg)
 	# the ALS reads raw data only: the solution is expressed in the right-hand side's
-	# per-site scaling convention (attached through the `scaling` field — a scaling^L
-	# power is never materialized)
+	# per-site scaling convention (attached through the `scaling` field)
 	setscaling!(m.ket, scaling(y))
 	return x
 end

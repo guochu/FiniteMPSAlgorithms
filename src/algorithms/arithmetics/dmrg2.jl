@@ -249,63 +249,70 @@ sweep!(m::HadamardCache, alg::DMRG2) = vcat(leftsweep!(m, alg), rightsweep!(m, a
 
 # ---------- LinsolveCache ----------
 
-# the two-site MPO block of the operator
-function _two_site_mpo(m::LinsolveCache, s::Integer)
-	return @tensor W[w1, o1, o2, w2, i1, i2] := m.mpo[s][w1, o1, c, i1] *
-											   m.mpo[s+1][c, o2, w2, i2]
-end
-
-# ⟨x|A†A|z⟩ over the pair: z2[zL, p1, p2, zR]
+# ⟨x|A†A|z⟩ over the pair: z2[zL, p1, p2, zR]; W1/W2 are the MPO site tensors (used
+# as-is — the pair block is never materialized)
 # hL legs (xL, A†-bond, A-bond, zL); hR legs (xR, A†-bond, A-bond, zR)
 # contraction order: the large MPS bonds (zL, zR — far larger than the MPO bonds and
 # physical dimensions) are folded into the environments first; every intermediate stays
 # at O(x·z·D_Aᵏ·dᵏ) instead of materializing zL·zR-scaled blocks
-function _h2_apply(z2::AbstractArray{T,4}, W2, hL::AbstractArray{T,4}, hR::AbstractArray{T,4}) where {T}
+function _h2_apply(z2::AbstractArray{T,4}, W1, W2,
+				   hL::AbstractArray{T,4}, hR::AbstractArray{T,4}) where {T}
 	# fold z2 into the right environment over the large ket bond zR
 	t1 = @tensor t1[zL, i1, i2, xR, cR, w2] := hR[xR, cR, w2, zR] * z2[zL, i1, i2, zR]
-	# apply the MPO block on the pair (small physical and A-bond legs)
-	t2 = @tensor t2[zL, xR, cR, w1, o1, o2] := t1[zL, i1, i2, xR, cR, w2] *
-											   W2[w1, o1, o2, w2, i1, i2]
+	# apply the MPO block site by site (small physical and A-bond legs)
+	t2 = @tensor t2[zL, i1, xR, cR, c, o2] := t1[zL, i1, i2, xR, cR, w2] *
+											  W2[c, o2, w2, i2]
+	t3 = @tensor t3[zL, xR, cR, w1, o1, o2] := t2[zL, i1, xR, cR, c, o2] *
+											   W1[w1, o1, c, i1]
 	# wrap with A†2: its input legs become the free physical legs of the target
-	t3 = @tensor t3[zL, xR, w1, cL, p1, p2] := conj(W2[cL, o1, o2, cR, p1, p2]) *
-											   t2[zL, xR, cR, w1, o1, o2]
+	t4 = @tensor t4[zL, xR, w1, c, o1, p2] := conj(W2[c, o2, cR, p2]) *
+											   t3[zL, xR, cR, w1, o1, o2]
+	t5 = @tensor t5[zL, xR, w1, cL, p1, p2] := conj(W1[cL, o1, c, p1]) *
+											   t4[zL, xR, w1, c, o1, p2]
 	# close with the left environment over the large ket bond zL and the small A-bonds
-	return @tensor y[xL, p1, p2, xR] := hL[xL, cL, w1, zL] * t3[zL, xR, w1, cL, p1, p2]
+	return @tensor y[xL, p1, p2, xR] := hL[xL, cL, w1, zL] * t5[zL, xR, w1, cL, p1, p2]
 end
 
 # ⟨x|A†|y⟩ over the pair: the two-site right-hand side. As in the single-site
-# `_b_target`, y's physicals contract W2's PO legs and the free legs are W2's PI legs
-# (A†y lives on A's input space). Large MPS bonds folded into the environments first
-# (same order as `_h2_apply`).
-function _b2_target(W2, y2::AbstractArray{T,4}, bL::AbstractArray{T,3}, bR::AbstractArray{T,3}) where {T}
+# `_b_target`, y's physicals contract the MPO PO legs and the free legs are the MPO PI
+# legs (A†y lives on A's input space). Large MPS bonds folded into the environments
+# first (same order as `_h2_apply`).
+function _b2_target(W1, W2, y2::AbstractArray{T,4}, bL::AbstractArray{T,3}, bR::AbstractArray{T,3}) where {T}
 	t1 = @tensor t1[kL, o1, o2, xR, cR] := bR[xR, cR, kR] * y2[kL, o1, o2, kR]
-	t2 = @tensor t2[kL, xR, cL, q1, q2] := conj(W2[cL, o1, o2, cR, q1, q2]) *
-										   t1[kL, o1, o2, xR, cR]
-	return @tensor t[xL, q1, q2, xR] := bL[xL, cL, kL] * t2[kL, xR, cL, q1, q2]
+	t2 = @tensor t2[kL, o1, xR, c, q2] := conj(W2[c, o2, cR, q2]) * t1[kL, o1, o2, xR, cR]
+	t3 = @tensor t3[kL, xR, cL, q1, q2] := conj(W1[cL, o1, c, q1]) * t2[kL, o1, xR, c, q2]
+	return @tensor t[xL, q1, q2, xR] := bL[xL, cL, kL] * t3[kL, xR, cL, q1, q2]
 end
 
 function _site_solve2(m::LinsolveCache, s::Integer)
-	W2 = _two_site_mpo(m, s)
+	W1, W2 = m.mpo[s], m.mpo[s+1]
 	y2 = @tensor yy[a, p1, p2, b] := m.bra[s][a, p1, c] * m.bra[s+1][c, p2, b]
-	t = _b2_target(W2, y2, m.bstorage[s], m.bstorage[s+2])
-	shape = (size(m.hstorage[s], 1), size(W2, 5), size(W2, 6), size(m.hstorage[s+2], 1))
+	t = _b2_target(W1, W2, y2, m.bstorage[s], m.bstorage[s+2])
+	shape = (size(m.hstorage[s], 1), size(W1, 4), size(W2, 4), size(m.hstorage[s+2], 1))
 	n = prod(shape)
-	Hmat = zeros(promote_type(scalartype(m.bra), scalartype(W2)), n, n)
+	Hmat = zeros(promote_type(scalartype(m.bra), scalartype(W1)), n, n)
 	E = zeros(scalartype(Hmat), shape)
 	for i in 1:n
 		fill!(E, 0)
 		E[i] = 1
-		Hmat[:, i] .= vec(_h2_apply(E, W2, m.hstorage[s], m.hstorage[s+2]))
+		Hmat[:, i] .= vec(_h2_apply(E, W1, W2, m.hstorage[s], m.hstorage[s+2]))
 	end
-	return reshape(Hmat \ vec(t), shape)
+	return reshape(Hmat \ vec(t), shape), t, Hmat
+end
+
+# the exact global residual² ‖A·x − y‖², evaluated from the local decomposition at the
+# pair with the updated tensor z (mirrors `_site_loss` of the seq2seq engine)
+function _site_loss(m::LinsolveCache, z::AbstractArray, t::AbstractArray, Hmat::AbstractMatrix)
+	vz = vec(z)
+	return real(dot(vz, Hmat * vz)) - 2 * real(dot(vz, vec(t))) + m.ynorm2
 end
 
 function leftsweep!(m::LinsolveCache, alg::DMRG2)
 	L = length(m.ket)
 	kvals = zeros(Float64, L)
 	for s in 1:L-1
-		z2 = _site_solve2(m, s)
-		kvals[s] = norm(z2)
+		z2, t, Hmat = _site_solve2(m, s)
+		kvals[s] = _site_loss(m, z2, t, Hmat)
 		_als2_update!(m.ket, s, z2, alg; move_right=true)
 		_h_left!(m, s)
 		_b_left!(m, s)
@@ -319,8 +326,8 @@ function rightsweep!(m::LinsolveCache, alg::DMRG2)
 	kvals = zeros(Float64, L)
 	k = 1
 	for s in L:-1:2
-		z2 = _site_solve2(m, s - 1)
-		kvals[k] = norm(z2)
+		z2, t, Hmat = _site_solve2(m, s - 1)
+		kvals[k] = _site_loss(m, z2, t, Hmat)
 		k += 1
 		_als2_update!(m.ket, s - 1, z2, alg; move_right=false)
 		_h_right!(m, s)
@@ -423,13 +430,7 @@ end
 
 function linsolve!(x, A, y, alg::DMRG2)
 	m = LinsolveCache(A, y, x)
-	prev = Inf
-	for _ in 1:alg.maxiter
-		sweep!(m, alg)
-		r = _residual_norm(m)
-		abs(r - prev) < alg.tol && break
-		prev = r
-	end
+	iterative_compute!(m, alg)
 	# the solution is expressed in the right-hand side's per-site scaling convention;
 	# fold the center norm into `scaling` (see `mult!`)
 	setscaling!(m.ket, scaling(y))
