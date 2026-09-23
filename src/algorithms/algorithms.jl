@@ -22,3 +22,5 @@ include("expec.jl")
 # experimental: positive DMRG (thermal states) and Clifford-augmented DMRG
 include("experimental/pdmrg.jl")
 include("experimental/cadmrg.jl")
+# experimental: sample-amplitude MPS reconstruction (least squares, TCI alternative)
+include("experimental/reconstruct.jl")

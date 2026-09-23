@@ -76,3 +76,44 @@ using FiniteMPSAlgorithms
 		@test real(E) ≈ E_gs atol = 1e-8
 	end
 end
+
+@testset "ALS amplitude reconstruction" begin
+        Random.seed!(20240915)
+        L = 4
+        ds = fill(2, L)
+        ψref = randommps(ComplexF64, ds; D=3)
+        vref = todense(ψref)
+        # msb flat index of a coordinate
+        idx(x) = 1 + sum((x[j] - 1) * 2^(L - j) for j in 1:L)
+        amp(x) = vref[idx(x)]
+        coords = [Tuple(1 + ((i >> (L - j)) & 1) for j in 1:L) for i in 0:2^L-1]
+
+        # oversampled exact fit: the target is representable with D=6 > 3, so the ridge-
+        # conditioned least-squares fit reproduces the tensor (tiny α for conditioning)
+        S = [(x, amp(x)) for x in coords]
+        ψ1, traj1 = reconstruct(S, Tuple(ds), ALSRecon(D=6, α=1e-10, maxiter=100, tol=1e-14))
+        @test todense(ψ1) ≈ vref atol = 1e-6 rtol = 1e-6
+        @test scaling(ψ1) == 1
+        @test bonddim(ψ1) <= 6
+        # exact local solves: the per-site losses are non-increasing in processing time
+        @test all(all(kh2 .<= kh1 .+ 1e-8) for (kh1, kh2) in zip(traj1, traj1[2:end]))
+        @test all(all(diff(kv) .<= 1e-8) for kv in traj1)
+
+        # adaptive reconstruction from a black-box oracle: residual-driven enrichment
+        ψ2, info = reconstruct(amp, Tuple(ds),
+                ALSRecon(D=6, α=1e-6, nbuffer=64, nadd=8, maxiter=25, tol=1e-8))
+        @test norm(todense(ψ2) - vref) / norm(vref) < 1e-5
+        @test info.nsamples > 64
+
+        # noise robustness (the LS selling point vs TCI's exact interpolation)
+        Sn = [(x, amp(x) + 1e-6 * (randn() + 1.0im * randn())) for x in coords]
+        ψ3, traj3 = reconstruct(Sn, Tuple(ds), ALSRecon(D=6, α=1e-8, maxiter=100, tol=1e-12))
+        @test norm(todense(ψ3) - vref) / norm(vref) < 1e-4
+
+        # in-place route: bond re-fitted to alg.D, scaling folded (result scaling 1)
+        ψ4 = randommps(ComplexF64, ds; D=4)
+        setscaling!(ψ4, 1.5)
+        ψ4, traj4 = reconstruct!(ψ4, S, ALSRecon(D=6, α=1e-10, maxiter=100, tol=1e-14))
+        @test scaling(ψ4) == 1
+        @test todense(ψ4) ≈ 1.5^L * vref atol = 1e-5 rtol = 1e-5
+end
