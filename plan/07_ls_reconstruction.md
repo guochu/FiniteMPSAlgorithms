@@ -80,7 +80,7 @@ single-site 固定键维意味着样本不能"撑开"键维：表达能力完全
 
 ```julia
 """
-	LSRecon(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D,
+	ALSRecon(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D,
 	        α=0.01, nadd=8, nbuffer=1024, verbosity=0)
 
 Sample-amplitude MPS reconstruction by quadratic (least-squares) optimization —
@@ -92,7 +92,7 @@ to the local normal equations for conditioning (the seq2seq regularization; not
 part of the reported loss); `nadd`/`nbuffer` drive the adaptive
 sample-enrichment loop (7.5).
 """
-@kwdef struct LSRecon <: IterativeMPSAlgorithm
+@kwdef struct ALSRecon <: IterativeMPSAlgorithm
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
 	D::Int = Defaults.D
@@ -110,17 +110,15 @@ end
 
 ```julia
 # 黑盒 oracle：自适应采样（7.5）+ 内环 ALS，主入口
-reconstruct(Afun::Function, ds::NTuple{L,Int}, alg::LSRecon = LSRecon())
+# （稠密张量 A 的调用方直接传 Afun = (𝐱) -> A[𝐱...]）
+reconstruct(Afun::Function, ds::NTuple{L,Int}, alg::ALSRecon = ALSRecon())
 	-> (ψ::CanonicalMPS, info::NamedTuple{(:loss, :maxres, :nsamples, :rounds)})
 
-# 稠密张量 oracle（小系统验证用；同上自适应循环, Afun = A[𝐱]）
-reconstruct(A::DenseArray, ds, alg = LSRecon())
-
 # 固定样本集（无自适应）：samples::Vector{Pair{NTuple{L,Int},T}} 或 (𝐱, a) 元组
-reconstruct(samples, ds, alg = LSRecon())
+reconstruct(samples, ds, alg = ALSRecon())
 
 # in-place 精化（样本固定；调用方提供初值；键型由 changebond! 调整到 alg.D）
-reconstruct!(ψ::CanonicalMPS, samples, alg::LSRecon) -> (ψ, loss)
+reconstruct!(ψ::CanonicalMPS, samples, alg::ALSRecon) -> (ψ, loss)
 ```
 
 命名：`reconstruct`（从振幅数据重构链）；弃用 `fit`（与 StatsAPI 混淆）、
@@ -198,12 +196,11 @@ end
 
 | 函数 | 位置 | 说明 |
 |---|---|---|
-| `LSRecon` | algdefs.jl | 算法配置（7.2；single-site, 固定 `D`） |
+| `ALSRecon` | algdefs.jl | 算法配置（7.2；single-site, 固定 `D`） |
 | `reconstruct(Afun, ds, alg)` | reconstruct.jl | 主入口（自适应） |
-| `reconstruct(A::Array, ds, alg)` | reconstruct.jl | 稠密 oracle 包装 |
 | `reconstruct(samples, ds, alg)` | reconstruct.jl | 固定样本 |
 | `reconstruct!(ψ, samples, alg)` | reconstruct.jl | in-place（`changebond!` 到 `alg.D`） |
-| `struct LSCache` | reconstruct.jl | ψ、样本矩阵 X（L×N）、值 a、语境栈 Lmat/Rmat、ridge 栈 gstorage |
+| `struct ALSReconCache` | reconstruct.jl | ψ、样本矩阵 X（L×N）、值 a、语境栈 Lmat/Rmat、ridge 栈 gstorage |
 | `_init_contexts_right!(c)` | reconstruct.jl | 右→左预计算 Rmat + gstorage（对照 `_init_hstorage_right!` / seq2seq） |
 | `_left_transfer!(c, s)` / `_right_transfer!(c, s)` | reconstruct.jl | 语境传递（扫掠中） |
 | `_g_transfer!(c, s)` | reconstruct.jl | ridge 栈 ⟨ψ\|ψ⟩_HS 转移（秩 3 版 seq2seq `_g_updateleft`） |
@@ -211,7 +208,7 @@ end
 | `_add_ridge!(M, c, s, alg)` | reconstruct.jl | 局域 Hessian 加 `α·(g_s ⊗ I ⊗ g_{s+1})`（对照 seq2seq `_add_ridge!`） |
 | `_ls_solve(c, s, alg)` | reconstruct.jl | `(M + α·R) \ b` → `w`（附 `(w, t, H)` 供 `_site_loss`） |
 | `_site_loss(c, s, w, t, H)` | reconstruct.jl | 该 site 更新后的精确全局 loss（seq2seq 同款） |
-| `leftsweep!/rightsweep!/sweep!(c, alg::LSRecon)` | reconstruct.jl | 统一扫掠接口（包约定） |
+| `leftsweep!/rightsweep!/sweep!(c, alg::ALSRecon)` | reconstruct.jl | 统一扫掠接口（包约定） |
 | `_ls_loss(c)` | reconstruct.jl | 当前 ℒ（收敛判据 + 单调性测试；ridge 不计入） |
 | `_residual_candidates(Afun, ψ, nbuffer)` | reconstruct.jl | 候选池残差评估（自适应外环） |
 | `_enrich_samples!(c, Afun, nadd)` | reconstruct.jl | 样本增补 + 语境栈扩容 |
