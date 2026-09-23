@@ -1,8 +1,3 @@
-using Test
-using LinearAlgebra
-using Random
-using FiniteMPSAlgorithms
-
 @testset "CA-DMRG CAMPS" begin
 	Random.seed!(2024)
 	L = 4

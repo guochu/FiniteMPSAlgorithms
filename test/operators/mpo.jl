@@ -1,8 +1,3 @@
-using FiniteMPSAlgorithms
-using Test, LinearAlgebra, Random
-
-
-
 @testset "operators and expectation" begin
 	Random.seed!(42)
 	L = 6

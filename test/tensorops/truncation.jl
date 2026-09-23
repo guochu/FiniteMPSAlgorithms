@@ -1,6 +1,3 @@
-using FiniteMPSAlgorithms
-using Test, LinearAlgebra, Random
-
 # Truncation schemes, SVD compression and related utilities
 
 @testset "truncation schemes          " begin

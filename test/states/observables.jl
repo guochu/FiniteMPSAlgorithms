@@ -1,8 +1,3 @@
-using FiniteMPSAlgorithms
-using Test, LinearAlgebra, Random
-
-
-
 @testset "CanonicalMPO entanglement" begin
 	Random.seed!(73)
 	L = 6

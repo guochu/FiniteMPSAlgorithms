@@ -1,6 +1,3 @@
-using FiniteMPSAlgorithms
-using Test, Random, LinearAlgebra
-
 @testset "direct sampling" begin
 	Random.seed!(314)
 	L = 4

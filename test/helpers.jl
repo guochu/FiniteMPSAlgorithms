@@ -1,6 +1,3 @@
-using LinearAlgebra
-using TensorOperations
-
 # ---------- test model: non-uniform complex next-nearest-neighbour chain ----------
 #
 #   H = -Σ_i h_i σx_i - Σ_i J1_i σz_i σz_{i+1} - Σ_i J2_i σy_i σy_{i+2}

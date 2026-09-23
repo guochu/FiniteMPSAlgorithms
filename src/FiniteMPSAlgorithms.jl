@@ -53,7 +53,7 @@ export mult, add, compress, compress!,
         CAMPS, CliffordGate, PauliTerm,
         ALSRecon, ALSReconCache, reconstruct, reconstruct!
 # gates
-export AbstractGate, UnitaryGate, GeneralGate, apply!, swap!, positions, operator, shift
+export AbstractGate, UnitaryGate, GeneralGate, apply!, swap!, positions, shift
 
 include("tensorops/tensorops.jl")
 include("defaults.jl")

@@ -1,9 +1,3 @@
-using FiniteMPSAlgorithms
-using Test, LinearAlgebra, Random
-using FiniteMPSAlgorithms: SVD, QR, QRpos, LQ, LQpos, SDD, Polar, l_LL, r_RR
-
-
-
 @testset "structures" begin
 	Random.seed!(1234)
 	L = 6

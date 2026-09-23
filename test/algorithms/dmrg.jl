@@ -1,9 +1,3 @@
-using FiniteMPSAlgorithms
-using Test, LinearAlgebra, Random
-using FiniteMPSAlgorithms: SVD, QR, QRpos, LQ, LQpos, SDD, Polar
-
-
-
 @testset "dmrg" begin
 	Random.seed!(2024)
 	L = 8

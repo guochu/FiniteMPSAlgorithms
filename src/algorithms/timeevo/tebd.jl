@@ -5,14 +5,13 @@
 	AbstractGate{N,T}
 
 Abstract supertype of quantum gates acting on `N` sites: `positions(g)::NTuple{N,Int}`
-(ascending), `operator(g)::Array{T,M}` — the rank-`M = 2N` operator tensor in the index
+(ascending), `g.op::Array{T,M}` — the rank-`M = 2N` operator tensor in the index
 convention `(i1', i2', …, iN', i1, …, iN)`, i.e. all bra (output) indices first and all
 ket (input) indices second, each block ordered with site 1 the slowest index.
 """
 abstract type AbstractGate{N, T} end
 
 positions(g::AbstractGate) = g.positions
-operator(g::AbstractGate) = g.op
 scalartype(::Type{<:AbstractGate{N, T}}) where {N, T} = T
 
 """
@@ -99,7 +98,7 @@ function _nn_gate_apply!(g::AbstractGate{2}, ψ::CanonicalMPS, i::Integer; trunc
 	svectors_uninitialized(ψ) && canonicalize!(ψ)
 	A = ψ[i]
 	B = ψ[i+1]
-	G = operator(g)
+	G = g.op
 	# unweighted two-site block
 	@tensor block[a, p, q, b] := A[a, p, c] * B[c, q, b]
 	# post-gate block

@@ -1,8 +1,3 @@
-using FiniteMPSAlgorithms
-using Test, LinearAlgebra, Random
-
-
-
 @testset "vectorize / devectorize" begin
 	Random.seed!(5)
 	L = 4

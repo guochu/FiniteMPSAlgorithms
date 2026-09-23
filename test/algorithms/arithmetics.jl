@@ -1,9 +1,3 @@
-using FiniteMPSAlgorithms
-using Test, LinearAlgebra, Random
-using FiniteMPSAlgorithms: SVD, QR, QRpos, LQ, LQpos, SDD, Polar, DefaultTruncation
-
-
-
 @testset "arithmetics" begin
 	Random.seed!(7)
 	L = 6

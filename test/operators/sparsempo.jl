@@ -1,11 +1,5 @@
 # sparse (Schur matrix-of-matrices) MPO: construction, dense conversion, WI/WII, dispatch
 
-using Test
-using LinearAlgebra
-using FiniteMPSAlgorithms
-
-
-
 @testset "sparse MPO" begin
 	Random.seed!(1234)
 	σx = Float64[0 1; 1 0]

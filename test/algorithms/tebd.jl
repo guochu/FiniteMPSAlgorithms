@@ -1,9 +1,3 @@
-using FiniteMPSAlgorithms
-using Test, LinearAlgebra, Random
-using FiniteMPSAlgorithms: SVD, QR, QRpos, LQ, LQpos, SDD, Polar
-
-
-
 # matrix in the Kronecker convention (i1 i2)',(i1 i2), i1 slowest -> documented gate
 # tensor (i1', i2', i1, i2)
 function gate_tensor(M::AbstractMatrix)
@@ -61,12 +55,12 @@ end
 	@test positions(g) == (1, 2)
 	# adjoint of a unitary gate is unitary and equals conj-transposed
 	gt = adjoint(g)
-	@test operator(gt) ≈ permutedims(conj(operator(g)), (3, 4, 1, 2))
+	@test gt.op ≈ permutedims(conj(g.op), (3, 4, 1, 2))
 
 	# GeneralGate stores the given op verbatim (no unitarity check, caller builds exp);
 	# gate_tensor converts the Kronecker-convention matrix to the documented tensor
 	gg = GeneralGate((2, 3), gate_tensor(exp(Matrix(-im * hh * 0.1))))
-	@test operator(gg) ≈ permutedims(reshape(exp(Matrix(-im * hh * 0.1)), 2, 2, 2, 2), (2, 1, 4, 3)) atol = 1e-12
+	@test gg.op ≈ permutedims(reshape(exp(Matrix(-im * hh * 0.1)), 2, 2, 2, 2), (2, 1, 4, 3)) atol = 1e-12
 
 	# apply! of an exact unitary vs dense contraction
 	L = 6
@@ -74,7 +68,7 @@ end
 	canonicalize!(ψ)
 	@test iscanonical(ψ)
 	ψref = todense(ψ)
-	Vd = two_site_dense(operator(gg), 2, L)
+	Vd = two_site_dense(gg.op, 2, L)
 	apply!(gg, ψ; trunc=NoTruncation())
 	ψnew = todense(ψ)
 	@test ψnew ≈ Vd * ψref atol = 1e-10
@@ -90,7 +84,7 @@ end
 	gateAt = Dict{Int,Matrix{ComplexF64}}()
 	for i in 1:2:L-1
 		ggl = UnitaryGate((i, i + 1), gate_tensor(exp(Matrix(-im * hh * 0.07))))
-		gateAt[i] = reshape(permutedims(operator(ggl), (2, 1, 4, 3)), 4, 4)
+		gateAt[i] = reshape(permutedims(ggl.op, (2, 1, 4, 3)), 4, 4)
 		apply!(ggl, ψ2; trunc=NoTruncation())
 	end
 	@test iscanonical(ψ2; atol=1e-8)
@@ -154,9 +148,9 @@ end
 	h = randn(4, 4) + im * randn(4, 4)
 	@test_throws ArgumentError UnitaryGate((1, 2), gate_tensor(h))
 	gg = GeneralGate((1, 2), gate_tensor(h))
-	@test operator(gg) ≈ permutedims(reshape(Matrix{ComplexF64}(h), 2, 2, 2, 2), (2, 1, 4, 3))
+	@test gg.op ≈ permutedims(reshape(Matrix{ComplexF64}(h), 2, 2, 2, 2), (2, 1, 4, 3))
 	# adjoint swaps the ket/bra index blocks and conjugates
-	@test operator(adjoint(gg)) ≈ permutedims(conj(operator(gg)), (3, 4, 1, 2))
+	@test adjoint(gg).op ≈ permutedims(conj(gg.op), (3, 4, 1, 2))
 
 	# apply! of a non-unitary gate: physical state matches the dense application,
 	# and the state is re-canonicalized (Hastings alone cannot keep it canonical)
@@ -164,7 +158,7 @@ end
 	canonicalize!(ψ)
 	ψref = todense(ψ)
 	apply!(gg, ψ; trunc=NoTruncation())
-	K = two_site_dense(operator(gg), 1, L)
+	K = two_site_dense(gg.op, 1, L)
 	@test todense(ψ) ≈ K * ψref atol = 1e-10
 	@test norm(ψ) ≈ norm(K * ψref) atol = 1e-10
 	@test iscanonical(ψ; atol=1e-8)
@@ -175,7 +169,7 @@ end
 	ψuref = todense(ψu)
 	hh = h + h'
 	gu = GeneralGate((3, 4), gate_tensor(exp(Matrix(-im * hh))))
-	Vd = two_site_dense(operator(gu), 3, L)
+	Vd = two_site_dense(gu.op, 3, L)
 	apply!(gu, ψu; trunc=NoTruncation())
 	@test todense(ψu) ≈ Vd * ψuref atol = 1e-10
         @test iscanonical(ψu; atol=1e-8)
@@ -193,7 +187,7 @@ end
     # shift: move gate by 2 sites
     g2 = shift(g, 2)
     @test positions(g2) == (3, 4)
-    @test operator(g2) ≈ operator(g)
+    @test g2.op ≈ g.op
     # shift back
     g3 = shift(g2, -2)
     @test positions(g3) == (1, 2)
@@ -324,7 +318,7 @@ end
     gu = UnitaryGate((2, 5), gate_tensor(U))
     ψu = copy(ψ)
     apply!(gu, ψu; trunc=NoTruncation())
-    Vu = two_site_dense_pair(operator(gu), 2, 5, L)
+    Vu = two_site_dense_pair(gu.op, 2, 5, L)
     @test norm(todense(ψu) - Vu * v0) / norm(v0) < 1e-10
     # the content swaps are exact unitary re-gaugings: canonical form and norm preserved
     @test iscanonical(ψu; atol=1e-8)
@@ -334,7 +328,7 @@ end
     gg = GeneralGate((2, 5), gate_tensor(randn(ComplexF64, 4, 4)))
     ψg = copy(ψ)
     apply!(gg, ψg; trunc=NoTruncation())
-    Vg = two_site_dense_pair(operator(gg), 2, 5, L)
+    Vg = two_site_dense_pair(gg.op, 2, 5, L)
     @test norm(todense(ψg) - Vg * v0) / norm(Vg * v0) < 1e-10
     @test iscanonical(ψg; atol=1e-8)
 

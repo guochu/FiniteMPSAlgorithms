@@ -1,8 +1,3 @@
-using FiniteMPSAlgorithms
-using Test, LinearAlgebra, Random
-
-
-
 @testset "seq2seq" begin
 	Random.seed!(902)
 	L = 6

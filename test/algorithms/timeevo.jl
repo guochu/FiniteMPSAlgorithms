@@ -1,9 +1,3 @@
-using FiniteMPSAlgorithms
-using Test, LinearAlgebra, Random
-using FiniteMPSAlgorithms: SVD, QR, QRpos, LQ, LQpos, SDD, Polar
-
-
-
 @testset "timeevo (TDVP1)" begin
 	Random.seed!(99)
 	L = 6
