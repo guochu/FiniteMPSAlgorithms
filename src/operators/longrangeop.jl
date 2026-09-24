@@ -90,6 +90,7 @@ phydim(s::ExpDecayOpSum) = size(s.a, 1)
 # `MPOHamiltonian(::Vector{<:SchurMPOTensor})` constructor handles this through the
 # row/column selection of `tompotensors`.
 function SchurMPOTensor(s::ExpDecayOpSum{M,T}, hloc::AbstractMatrix) where {M,T}
+	# (M = Matrix{T} by construction, so the Schur tensor is parameterized by T alone)
 	d = phydim(s)
 	n = length(s.αs)
 	(size(hloc, 1) == size(hloc, 2) == d) ||
@@ -104,7 +105,7 @@ function SchurMPOTensor(s::ExpDecayOpSum{M,T}, hloc::AbstractMatrix) where {M,T}
 		logical[k+1, n+2] = s.b                      # B: channel k -> closing
 	end
 	logical[1, n+2] = hloc                           # D: on-site term
-	return SchurMPOTensor{M,T}(logical)
+	return SchurMPOTensor{T}(logical)
 end
 SchurMPOTensor(t::ExpDecayOpTerm, hloc::AbstractMatrix) = SchurMPOTensor(ExpDecayOpSum(t), hloc)
 

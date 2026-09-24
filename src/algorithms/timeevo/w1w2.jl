@@ -47,10 +47,6 @@ complex_stepper(dt::Number) = ((1 - im) * dt / 2, (1 + im) * dt / 2)
 
 # Schur block extraction: A = interior, B = last column interior (completions),
 # C = first row interior (starts), D = top-right corner (on-site terms)
-get_A(x::SchurMPOTensor) = [x[i, j] for i in 2:size(x, 1)-1, j in 2:size(x, 2)-1]
-get_B(x::SchurMPOTensor) = [x[i, size(x, 2)] for i in 2:size(x, 1)-1]
-get_C(x::SchurMPOTensor) = [x[1, j] for j in 2:size(x, 2)-1]
-get_D(x::SchurMPOTensor) = x[1, size(x, 2)]
 
 function _SiteW_impl(WA, WB, WC, WD)
 	s1, s2 = size(WA)
@@ -91,20 +87,26 @@ MPO (a `SparseMPOHamiltonian{<:SparseMPOTensor}`; `ComplexStepper` returns the p
 half-step results).
 """
 function timeevompo(m::SchurMPOTensor, dt::Number, alg::WI)
-	WA = get_A(m)
+	d = phydim(m)
 	δ₁, δ₂ = _sqrt2(dt)
-	WB = get_B(m) .* δ₁
-	WC = get_C(m) .* δ₂
-	D = get_D(m)
-	WD = isometry(scalartype(D), size(D, 1)) + dt * D
+	# raw blocks may store proportional-to-identity scalars — expand to dense blocks
+	WA = _expand_element.(m.A, d)
+	WB = δ₁ .* _expand_element.(m.B, d)
+	WC = δ₂ .* _expand_element.(m.C, d)
+	D = _expand_element(m.D, d)
+	WD = isometry(scalartype(D), d) + dt * D
 	return _SiteW_impl(WA, WB, WC, WD)
 end
 
 function timeevompo(m::SchurMPOTensor, dt::Number, alg::WII)
-	A, B, C, D = get_A(m), get_B(m), get_C(m), get_D(m)
+	# raw blocks may store proportional-to-identity scalars — expand to dense blocks
+	d = phydim(m)
+	A = _expand_element.(m.A, d)
+	B = _expand_element.(m.B, d)
+	C = _expand_element.(m.C, d)
+	D = _expand_element(m.D, d)
 	Ddt = dt * D
 	WD = exp(Ddt)
-	d = phydim(m)
 	mo = zero(Ddt)
 	nA_rows, nA_cols = size(A)
 	nB, nC = length(B), length(C)

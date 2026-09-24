@@ -177,13 +177,13 @@ function _mpohamiltonian_from_terms(L::Int, terms::AbstractVector{<:OpTerm})
 	end
 	n = nextch + 1
 
-	tensors = Vector{SchurMPOTensor{Matrix{T}, T}}(undef, L)
+	tensors = Vector{SchurMPOTensor{T}}(undef, L)
 	for s in 1:L
 		# logical shape: the first site loses the closing row, the last site the vacuum column
 		ml = s == 1 ? 1 : n
 		nr = s == L ? 1 : n
-		W = SchurMPOTensor{Matrix{T}, T}(d, (ml, nr))
-		D = getfield(W, :D)
+		W = SchurMPOTensor{T}(d, (ml, nr))
+		D = getfield(W, :_D)
 		# terms may carry a narrower scalar type than the unified Hamiltonian type T
 		asM = v -> convert(Matrix{T}, v)
 		for (a, t) in enumerate(terms)

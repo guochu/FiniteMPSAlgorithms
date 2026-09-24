@@ -82,10 +82,10 @@ end
 # validate a matrix of local operators, compress proportional-to-identity blocks to
 # scalars and return the homogeneous element matrix plus the physical dimension
 # the same row should have the same left space; the same column the same right space
-function compute_mpotensor_data(::Type{M}, ::Type{T}, data::AbstractMatrix) where {M<:AbstractMatrix, T<:Number}
+function compute_mpotensor_data(::Type{T}, data::AbstractMatrix) where {T<:Number}
 	@assert !isempty(data)
 	m, n = size(data)
-	new_data = Array{Union{M, T}, 2}(undef, m, n)
+	new_data = Array{Union{Matrix{T}, T}, 2}(undef, m, n)
 
 	d::Union{Nothing, Int} = nothing
 	for i in 1:m, j in 1:n
@@ -108,7 +108,7 @@ function compute_mpotensor_data(::Type{M}, ::Type{T}, data::AbstractMatrix) wher
 			_is_id && (sj = scal)
 		end
 		if isa(sj, AbstractMatrix)
-			sj = convert(M, sj)
+			sj = convert(Matrix{T}, sj)
 		else
 			isa(sj, Number) || throw(ArgumentError("elt should either be a tensor or a scalar"))
 			sj = convert(T, sj)
@@ -118,14 +118,14 @@ function compute_mpotensor_data(::Type{M}, ::Type{T}, data::AbstractMatrix) wher
 	return new_data, d
 end
 
-# convert a setindex! input into a storable element: scalar -> T, d×d matrix -> M
-function _as_element(::Type{M}, ::Type{T}, v, d::Int) where {M<:AbstractMatrix, T<:Number}
+# convert a setindex! input into a storable element: scalar -> T, d×d matrix -> Matrix{T}
+function _as_element(::Type{T}, v, d::Int) where {T<:Number}
 	if v isa Number
 		return convert(T, v)
 	elseif v isa AbstractMatrix
 		(size(v, 1) == size(v, 2) == d) ||
 			throw(DimensionMismatch("input matrix size mismatch with phydim"))
-		return convert(M, v)
+		return convert(Matrix{T}, v)
 	end
 	return throw(ArgumentError("input should be scalar or Matrix type"))
 end
@@ -137,44 +137,44 @@ end; A)
 # ---------- SparseMPOTensor: general matrix form ----------
 
 """
-	SparseMPOTensor{M<:AbstractMatrix, T<:Number} <: AbstractSparseMPOTensor
+	SparseMPOTensor{T<:Number} <: AbstractSparseMPOTensor
 
 A general sparse MPOTensor: a (non-triangular) matrix whose entries are either local
-`d×d` operators or scalars (scalars denote proportional-to-identity blocks).
+`d×d` operators (`Matrix{T}`) or scalars (scalars denote proportional-to-identity blocks).
 """
-struct SparseMPOTensor{M<:AbstractMatrix, T<:Number} <: AbstractSparseMPOTensor
-	Os::Array{Union{M, T}, 2}
+struct SparseMPOTensor{T<:Number} <: AbstractSparseMPOTensor
+	Os::Array{Union{Matrix{T}, T}, 2}
 	d::Int
 end
 
-SparseMPOTensor{M, T}(data::AbstractMatrix) where {M<:AbstractMatrix, T<:Number} =
-	SparseMPOTensor{M, T}(compute_mpotensor_data(M, T, data)...)
+SparseMPOTensor{T}(data::AbstractMatrix) where {T<:Number} =
+	SparseMPOTensor{T}(compute_mpotensor_data(T, data)...)
 function SparseMPOTensor(data::AbstractMatrix)
 	T = compute_scalartype(data)
-	return SparseMPOTensor{Matrix{T}, T}(data)
+	return SparseMPOTensor{T}(data)
 end
 function SparseMPOTensor(data::AbstractMatrix{Union{M, T}}) where {M<:AbstractMatrix, T<:Number}
 	# a homogeneous Matrix{M} resolves the diagonal with T = Union{}; recover the
 	# scalar type from the matrix element type
 	T2 = T === Union{} ? scalartype(M) : T
-	return SparseMPOTensor{M, T2}(data)
+	return SparseMPOTensor{T2}(data)
 end
 # direct construction from a homogeneous element matrix uses the default struct
-# constructor, e.g. SparseMPOTensor{M,T}(Os, d)
+# constructor, e.g. SparseMPOTensor{T}(Os, d)
 
 Base.size(m::SparseMPOTensor) = size(m.Os)
 Base.size(m::SparseMPOTensor, i::Int) = size(m.Os, i)
 _rawelement(m::SparseMPOTensor, i::Int, j::Int) = m.Os[i, j]
 
 Base.copy(x::SparseMPOTensor) = SparseMPOTensor(copy(x.Os), phydim(x))
-scalartype(::Type{SparseMPOTensor{M, T}}) where {M, T} = T
-function Base.complex(x::SparseMPOTensor{M, T}) where {M, T}
+scalartype(::Type{SparseMPOTensor{T}}) where {T} = T
+function Base.complex(x::SparseMPOTensor{T}) where {T}
 	TC = complex(T)
-	return SparseMPOTensor{Matrix{TC}, TC}(complex.(x.Os), phydim(x))
+	return SparseMPOTensor{TC}(complex.(x.Os), phydim(x))
 end
 
-function Base.setindex!(m::SparseMPOTensor{M, T}, v, i::Int, j::Int) where {M, T}
-	m.Os[i, j] = _as_element(M, T, v, phydim(m))
+function Base.setindex!(m::SparseMPOTensor{T}, v, i::Int, j::Int) where {T}
+	m.Os[i, j] = _as_element(T, v, phydim(m))
 	return m
 end
 
@@ -192,18 +192,21 @@ end
 # the closing column) arise from the same structure with empty interior blocks.
 
 """
-	SchurMPOTensor{M<:AbstractMatrix, T<:Number} <: AbstractSparseMPOTensor
+	SchurMPOTensor{T<:Number} <: AbstractSparseMPOTensor
 
 Upper triangular Jordan/Schur block form of an MPO site tensor, stored as the four
 blocks `A` (interior), `B` (interior→closing), `C` (vacuum→interior) and `D`
 (vacuum→closing), with implicit identity corners — MPSKit `JordanMPOTensor` style.
+The `D` corner lives in a `RefValue` (`_D`) to keep the struct immutable while the
+corner stays mutable; `getproperty` dereferences it, so `W.D` reads and writes the
+corner value directly.
 """
-struct SchurMPOTensor{M<:AbstractMatrix, T<:Number} <: AbstractSparseMPOTensor
+struct SchurMPOTensor{T<:Number} <: AbstractSparseMPOTensor
 	V::NTuple{2, Int}
-	A::Array{Union{M, T}, 2}
-	B::Array{Union{M, T}, 1}
-	C::Array{Union{M, T}, 1}
-	D::Base.RefValue{Union{M, T}}
+	A::Array{Union{Matrix{T}, T}, 2}
+	B::Array{Union{Matrix{T}, T}, 1}
+	C::Array{Union{Matrix{T}, T}, 1}
+	_D::Base.RefValue{Union{Matrix{T}, T}}
 	d::Int
 end
 
@@ -211,8 +214,8 @@ end
 _interior_counts(V::NTuple{2, Int}) = (V[1] == 1 ? 0 : V[1] - 2, V[2] == 1 ? 0 : V[2] - 2)
 
 # full data constructor (validated, MPSKit-style)
-function SchurMPOTensor{M, T}(d::Int, V::NTuple{2, Int},
-		A::AbstractMatrix, B::AbstractVector, C::AbstractVector, D) where {M<:AbstractMatrix, T<:Number}
+function SchurMPOTensor{T}(d::Int, V::NTuple{2, Int},
+		A::AbstractMatrix, B::AbstractVector, C::AbstractVector, D) where {T<:Number}
 	nr, nc = _interior_counts(V)
 	size(A) == (nr, nc) ||
 		throw(DimensionMismatch("A block has size $(size(A)), expected ($nr, $nc)"))
@@ -220,25 +223,25 @@ function SchurMPOTensor{M, T}(d::Int, V::NTuple{2, Int},
 		throw(DimensionMismatch("B block has length $(length(B)), expected $nr"))
 	length(C) == nc ||
 		throw(DimensionMismatch("C block has length $(length(C)), expected $nc"))
-	De = D isa Number ? convert(T, D) : convert(M, D)
+	De = D isa Number ? convert(T, D) : convert(Matrix{T}, D)
 	# build via the default field-order constructor (this outer method is d-first)
-	return SchurMPOTensor{M, T}(V, A, B, C, Base.RefValue{Union{M, T}}(De), d)
+	return SchurMPOTensor{T}(V, A, B, C, Base.RefValue{Union{Matrix{T}, T}}(De), d)
 end
 
 # zero-initialized tensor: every slot absent (scalar zero)
-function SchurMPOTensor{M, T}(d::Int, V::NTuple{2, Int}) where {M<:AbstractMatrix, T<:Number}
+function SchurMPOTensor{T}(d::Int, V::NTuple{2, Int}) where {T<:Number}
 	nr, nc = _interior_counts(V)
 	z = zero(T)
-	A = fill!(Array{Union{M, T}, 2}(undef, nr, nc), z)
-	B = fill!(Array{Union{M, T}, 1}(undef, nr), z)
-	C = fill!(Array{Union{M, T}, 1}(undef, nc), z)
-	return SchurMPOTensor{M, T}(d, V, A, B, C, z)
+	A = fill!(Array{Union{Matrix{T}, T}, 2}(undef, nr, nc), z)
+	B = fill!(Array{Union{Matrix{T}, T}, 1}(undef, nr), z)
+	C = fill!(Array{Union{Matrix{T}, T}, 1}(undef, nc), z)
+	return SchurMPOTensor{T}(d, V, A, B, C, z)
 end
 
 # construct from a logical block matrix: compress identities, verify the Jordan
 # structure, then split into the four blocks
-function SchurMPOTensor{M, T}(data::AbstractMatrix) where {M<:AbstractMatrix, T<:Number}
-	Os, d = compute_mpotensor_data(M, T, data)
+function SchurMPOTensor{T}(data::AbstractMatrix) where {T<:Number}
+	Os, d = compute_mpotensor_data(T, data)
 	return _schur_from_logical(Os, d)
 end
 """
@@ -250,9 +253,9 @@ implicit and need not be supplied.
 """
 SchurMPOTensor(data::AbstractMatrix) = SchurMPOTensor(compute_scalartype(data), data)
 SchurMPOTensor(::Type{T}, data::AbstractMatrix) where {T<:Number} =
-	SchurMPOTensor{Matrix{T}, T}(data)
+	SchurMPOTensor{T}(data)
 
-function _schur_from_logical(Os::Array{Union{M, T}, 2}, d::Int) where {M<:AbstractMatrix, T<:Number}
+function _schur_from_logical(Os::Array{Union{Matrix{T}, T}, 2}, d::Int) where {T<:Number}
 	m, n = size(Os)
 	nr, nc = _interior_counts((m, n))
 
@@ -279,9 +282,9 @@ function _schur_from_logical(Os::Array{Union{M, T}, 2}, d::Int) where {M<:Abstra
 		end
 	end
 
-	A = Array{Union{M, T}, 2}(undef, nr, nc)
-	B = Array{Union{M, T}, 1}(undef, nr)
-	C = Array{Union{M, T}, 1}(undef, nc)
+	A = Array{Union{Matrix{T}, T}, 2}(undef, nr, nc)
+	B = Array{Union{Matrix{T}, T}, 1}(undef, nr)
+	C = Array{Union{Matrix{T}, T}, 1}(undef, nc)
 	for a in 1:nr
 		B[a] = Os[a+1, n]
 		for b in 1:nc
@@ -294,30 +297,31 @@ function _schur_from_logical(Os::Array{Union{M, T}, 2}, d::Int) where {M<:Abstra
 	for b in 1:nc
 		C[b] = Os[1, b+1]
 	end
-	return SchurMPOTensor{M, T}(d, (m, n), A, B, C, Os[1, n])
+	return SchurMPOTensor{T}(d, (m, n), A, B, C, Os[1, n])
 end
 
 Base.size(W::SchurMPOTensor) = W.V
 Base.size(W::SchurMPOTensor, i::Int) = W.V[i]
-scalartype(::Type{SchurMPOTensor{M, T}}) where {M, T} = T
+scalartype(::Type{SchurMPOTensor{T}}) where {T} = T
 
-# D is kept in a Ref (mutable slot without a mutable struct); present it as a plain field
+# D is kept in a Ref under the field name `_D` (mutable slot without a mutable struct);
+# it is presented as a plain property: W.D reads/writes the dereferenced corner value
 function Base.getproperty(W::SchurMPOTensor, s::Symbol)
-	s === :D && return getfield(W, :D)[]
+	s === :D && return getfield(W, :_D)[]
 	return getfield(W, s)
 end
 function Base.setproperty!(W::SchurMPOTensor, s::Symbol, v)
 	if s === :D
-		getfield(W, :D)[] = v isa Number ? convert(scalartype(W), v) : v
+		getfield(W, :_D)[] = v isa Number ? convert(scalartype(W), v) : v
 		return v
 	end
 	return setfield!(W, s, v)
 end
 
-function _rawelement(W::SchurMPOTensor{M, T}, i::Int, j::Int) where {M, T}
+function _rawelement(W::SchurMPOTensor{T}, i::Int, j::Int) where {T}
 	m, n = W.V
 	if i == 1
-		j == n && return getfield(W, :D)[]
+		j == n && return getfield(W, :_D)[]
 		(1 < j < n) && return W.C[j-1]
 		(n > 1 && j == 1) && return one(T)
 	elseif 1 < i < m
@@ -329,12 +333,12 @@ function _rawelement(W::SchurMPOTensor{M, T}, i::Int, j::Int) where {M, T}
 	return nothing
 end
 
-function Base.setindex!(W::SchurMPOTensor{M, T}, v, i::Int, j::Int) where {M, T}
+function Base.setindex!(W::SchurMPOTensor{T}, v, i::Int, j::Int) where {T}
 	m, n = W.V
 	(1 <= i <= m && 1 <= j <= n) || throw(BoundsError(W, (i, j)))
-	x = _as_element(M, T, v, phydim(W))
+	x = _as_element(T, v, phydim(W))
 	if i == 1 && j == n
-		getfield(W, :D)[] = x
+		getfield(W, :_D)[] = x
 	elseif i == 1 && 1 < j < n
 		W.C[j-1] = x
 	elseif 1 < i < m && j == n
@@ -350,23 +354,23 @@ end
 
 _copy_orelse(x::Number) = x
 _copy_orelse(x::AbstractMatrix) = copy(x)
-Base.copy(W::SchurMPOTensor{M, T}) where {M, T} =
-	SchurMPOTensor{M, T}(phydim(W), W.V, copy(W.A), copy(W.B), copy(W.C),
-		_copy_orelse(getfield(W, :D)[]))
+Base.copy(W::SchurMPOTensor{T}) where {T} =
+	SchurMPOTensor{T}(phydim(W), W.V, copy(W.A), copy(W.B), copy(W.C),
+		_copy_orelse(getfield(W, :_D)[]))
 
-function Base.complex(W::SchurMPOTensor{M, T}) where {M, T}
+function Base.complex(W::SchurMPOTensor{T}) where {T}
 	TC = complex(T)
-	return SchurMPOTensor{Matrix{TC}, TC}(phydim(W), W.V,
-		complex.(W.A), complex.(W.B), complex.(W.C), complex(getfield(W, :D)[]))
+	return SchurMPOTensor{TC}(phydim(W), W.V,
+		complex.(W.A), complex.(W.B), complex.(W.C), complex(getfield(W, :_D)[]))
 end
 
 # expand the logical Jordan form into a general SparseMPOTensor (identity corners explicit)
-function Base.convert(::Type{SparseMPOTensor}, W::SchurMPOTensor{M, T}) where {M, T}
+function Base.convert(::Type{SparseMPOTensor}, W::SchurMPOTensor{T}) where {T}
 	m, n = W.V
-	data = fill!(Array{Union{M, T}, 2}(undef, m, n), zero(T))
+	data = fill!(Array{Union{Matrix{T}, T}, 2}(undef, m, n), zero(T))
 	(n > 1) && (data[1, 1] = one(T))
 	(m > 1) && (data[m, n] = one(T))
-	data[1, n] = getfield(W, :D)[]
+	data[1, n] = getfield(W, :_D)[]
 	for b in eachindex(W.C)
 		data[1, b+1] = W.C[b]
 	end
@@ -376,14 +380,14 @@ function Base.convert(::Type{SparseMPOTensor}, W::SchurMPOTensor{M, T}) where {M
 	for a in axes(W.A, 1), b in axes(W.A, 2)
 		data[a+1, b+1] = W.A[a, b]
 	end
-	return SparseMPOTensor{M, T}(data, phydim(W))
+	return SparseMPOTensor{T}(data, phydim(W))
 end
 
 function LinearAlgebra.lmul!(f::Number, W::SchurMPOTensor)
 	_lmul_elements!(f, W.A)
 	_lmul_elements!(f, W.B)
 	_lmul_elements!(f, W.C)
-	D = getfield(W, :D)
-	D[] = f * D[]
+	_D = getfield(W, :_D)
+	_D[] = f * _D[]
 	return W
 end
