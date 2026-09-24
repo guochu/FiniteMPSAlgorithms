@@ -8,5 +8,4 @@ Manifest.toml
 debug/
 
 # benchmark: cloned third-party packages (TensorCrossInterpolation.jl)
-benchmark/TensorCrossInterpolation.jl/
-benchmark/Manifest.toml
+benchmark/
