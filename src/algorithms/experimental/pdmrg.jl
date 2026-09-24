@@ -256,11 +256,13 @@ function leftsweep!(env::ThermalDMRGCache, alg::PDMRG; β::Real)
 	fvals = zeros(Float64, L)
 	for s in 1:L-1
 		fvals[s] = _left_move!(env, s, β, alg)
+		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, fvals[s])
 	end
 	m, f = thermalize_center(env, L, β, alg)
 	env.rho.mcenter[] = m
 	env.rho.center[] = L
 	fvals[L] = f
+	(alg.verbosity > 2) && _logupdate(stdout, "l2r", L, fvals[L])
 	return fvals
 end
 
@@ -293,12 +295,14 @@ function rightsweep!(env::ThermalDMRGCache, alg::PDMRG; β::Real)
 	k = 1
 	for s in L:-1:2
 		fvals[k] = _right_move!(env, s, β, alg)
+		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s, fvals[k])
 		k += 1
 	end
 	m, f = thermalize_center(env, 1, β, alg)
 	env.rho.mcenter[] = m
 	env.rho.center[] = 1
 	fvals[L] = f
+	(alg.verbosity > 2) && _logupdate(stdout, "r2l", 1, fvals[L])
 	return fvals
 end
 

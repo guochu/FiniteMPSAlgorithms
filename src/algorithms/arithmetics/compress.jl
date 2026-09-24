@@ -13,6 +13,7 @@ function leftsweep!(c::OverlapCache, alg::DMRG1)
 	for s in 1:L-1
 		t = _reduce_compress_site(c, s)
 		kvals[s] = norm(t)
+		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		q, r = _gauge_left(t)
 		c.bra[s] = q
 		c.bra[s+1] = _contract_first(c.bra[s+1], r)
@@ -20,6 +21,7 @@ function leftsweep!(c::OverlapCache, alg::DMRG1)
 	end
 	t = _reduce_compress_site(c, L)
 	kvals[L] = norm(t)
+	(alg.verbosity > 2) && _logupdate(stdout, "l2r", L, kvals[L])
 	c.bra[L] = t
 	return kvals
 end
@@ -31,6 +33,7 @@ function rightsweep!(c::OverlapCache, alg::DMRG1)
 	for s in L:-1:2
 		t = _reduce_compress_site(c, s)
 		kvals[k] = norm(t)
+		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s, kvals[k])
 		k += 1
 		l, q = _gauge_right(t)
 		c.bra[s] = q
@@ -39,6 +42,7 @@ function rightsweep!(c::OverlapCache, alg::DMRG1)
 	end
 	t = _reduce_compress_site(c, 1)
 	kvals[L] = norm(t)
+	(alg.verbosity > 2) && _logupdate(stdout, "r2l", 1, kvals[L])
 	c.bra[1] = t
 	return kvals
 end
@@ -117,6 +121,7 @@ function leftsweep!(c::OverlapCache, alg::DMRG2)
 	for s in 1:L-1
 		t2 = _reduce_two_site(c, s)
 		kvals[s] = norm(t2)
+		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		_als2_update!(c.bra, s, t2, alg; move_right=true)
 		updateleft!(c, s)
 	end
@@ -131,6 +136,7 @@ function rightsweep!(c::OverlapCache, alg::DMRG2)
 	for s in L:-1:2
 		t2 = _reduce_two_site(c, s - 1)
 		kvals[k] = norm(t2)
+		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s - 1, kvals[k])
 		k += 1
 		_als2_update!(c.bra, s - 1, t2, alg; move_right=false)
 		updateright!(c, s)

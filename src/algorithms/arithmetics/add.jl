@@ -79,6 +79,7 @@ function leftsweep!(m::AddCache, alg::DMRG1)
 	for s in 1:L-1
 		mpsj = _reduce_site(m, s)
 		kvals[s] = norm(mpsj)
+		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		q, r = _gauge_left(mpsj)
 		# normalize the gauge factor: ALS determines only the direction, and keeping the
 		# bra data O(1) stabilizes the sweeps when inputs have tiny norms. The exact scale
@@ -93,6 +94,7 @@ function leftsweep!(m::AddCache, alg::DMRG1)
 	end
 	mpsj = _reduce_site(m, L)
 	kvals[L] = norm(mpsj)
+	(alg.verbosity > 2) && _logupdate(stdout, "l2r", L, kvals[L])
 	m.bra[L] = mpsj
 	return kvals
 end
@@ -104,6 +106,7 @@ function rightsweep!(m::AddCache, alg::DMRG1)
 	for s in L:-1:2
 		mpsj = _reduce_site(m, s)
 		kvals[k] = norm(mpsj)
+		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s, kvals[k])
 		k += 1
 		l, q = _gauge_right(mpsj)
 		ln = norm(l)
@@ -116,6 +119,7 @@ function rightsweep!(m::AddCache, alg::DMRG1)
 	end
 	mpsj = _reduce_site(m, 1)
 	kvals[L] = norm(mpsj)
+	(alg.verbosity > 2) && _logupdate(stdout, "r2l", 1, kvals[L])
 	m.bra[1] = mpsj
 	return kvals
 end
@@ -218,6 +222,7 @@ function leftsweep!(m::AddCache, alg::DMRG2)
 	for s in 1:L-1
 		t2 = _reduce_two_site(m, s)
 		kvals[s] = norm(t2)
+		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		_als2_update!(m.bra, s, t2, alg; move_right=true)
 		for c in m.hstorage
 			updateleft!(c, s)
@@ -234,6 +239,7 @@ function rightsweep!(m::AddCache, alg::DMRG2)
 	for s in L:-1:2
 		t2 = _reduce_two_site(m, s - 1)
 		kvals[k] = norm(t2)
+		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s - 1, kvals[k])
 		k += 1
 		_als2_update!(m.bra, s - 1, t2, alg; move_right=false)
 		for c in m.hstorage

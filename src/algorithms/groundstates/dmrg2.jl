@@ -74,6 +74,7 @@ function leftsweep!(env::DMRGCache, alg::DMRG2)
 	kvals = zeros(Float64, L)
 	for s in 1:L-1
 		kvals[s], _ = _dmrg2_local_update!(env, s, alg; move_right=true)
+		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		# rebuild the left environment with the updated site s
 		updateleft!(env, s)
 	end
@@ -96,6 +97,7 @@ function rightsweep!(env::DMRGCache, alg::DMRG2)
 	k = 1
 	for s in L:-1:2
 		kvals[k], _, sv = _dmrg2_local_update!(env, s - 1, alg; move_right=false)
+		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s - 1, kvals[k])
 		# the SVD singular values are the Schmidt spectrum at bond s - 1
 		env.ket.s[s] = collect(sv)
 		k += 1
@@ -172,6 +174,6 @@ of bond `Defaults.D`.
 function ground_state(h::MPOHamiltonian, alg::DMRG2)
 	ψ = randommps(scalartype(h), ophydims(h); D=_guess_bond(alg.trunc))
 	khist = ground_state!(ψ, h, alg)
-	(alg.verbosity > 0) && println("DMRG2 converged (delta = $(_iterative_delta(khist)))")
+	(alg.verbosity > 1) && println("DMRG2 converged (delta = $(_iterative_delta(khist)))")
 	return expectation(h, ψ), ψ
 end

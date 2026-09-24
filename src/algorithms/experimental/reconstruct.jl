@@ -308,6 +308,7 @@ function leftsweep!(c::ALSReconCache, alg::ALSRecon)
 	for s in 1:L-1
 		w = _ls_solve(c, s, alg)
 		kvals[s] = _site_loss(c, s, w)
+		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		q, r = _gauge_left(w)
 		c.ψ[s] = q
 		c.ψ[s+1] = _contract_first(c.ψ[s+1], r)
@@ -316,6 +317,7 @@ function leftsweep!(c::ALSReconCache, alg::ALSRecon)
 	end
 	w = _ls_solve(c, L, alg)
 	kvals[L] = _site_loss(c, L, w)
+	(alg.verbosity > 2) && _logupdate(stdout, "l2r", L, kvals[L])
 	c.ψ[L] = w
 	return kvals
 end
@@ -333,6 +335,7 @@ function rightsweep!(c::ALSReconCache, alg::ALSRecon)
 	for s in L:-1:2
 		w = _ls_solve(c, s, alg)
 		kvals[k] = _site_loss(c, s, w)
+		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s, kvals[k])
 		k += 1
 		l, q = _gauge_right(w)
 		c.ψ[s] = q
@@ -342,6 +345,7 @@ function rightsweep!(c::ALSReconCache, alg::ALSRecon)
 	end
 	w = _ls_solve(c, 1, alg)
 	kvals[L] = _site_loss(c, 1, w)
+	(alg.verbosity > 2) && _logupdate(stdout, "r2l", 1, kvals[L])
 	c.ψ[1] = w
 	return kvals
 end
@@ -425,6 +429,7 @@ function leftsweep!(c::ALSReconCache, alg::ALSRecon2)
 	for s in 1:L-1
 		w = _ls2_solve(c, s, alg)
 		kvals[s] = _ls2_loss(c, s, w)
+		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		_als2_update!(c.ψ, s, w, alg; move_right=true)
 		_left_transfer!(c, s)
 		_g_transfer_left!(c, s)
@@ -440,6 +445,7 @@ function rightsweep!(c::ALSReconCache, alg::ALSRecon2)
 	for s in L:-1:2
 		w = _ls2_solve(c, s - 1, alg)
 		kvals[k] = _ls2_loss(c, s - 1, w)
+		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s - 1, kvals[k])
 		k += 1
 		_als2_update!(c.ψ, s - 1, w, alg; move_right=false)
 		_right_transfer!(c, s)
@@ -552,7 +558,7 @@ function reconstruct(Afun::Function, ds::Vector{Int},
 			   sum(abs2(amplitude(ψ, x) - v) for (x, v) in zip(xs, vals))
 		union!(seen, xs)
 		append!(S, zip(xs, vals))
-		(alg.verbosity > 0) &&
+		(alg.verbosity > 1) &&
 			println("reconstruct round $rounds: nsamples = $(length(S)), val loss = ",
 					round(loss; sigdigits=4))
 		delta = (isfinite(prevloss) && !iszero(prevloss)) ?

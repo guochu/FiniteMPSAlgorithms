@@ -144,6 +144,7 @@ function leftsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 	for s in 1:L-1
 		z, t = _site_solve(m, s, _solverof(alg))
 		kvals[s] = _site_loss1(m, s, z, t)
+		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		q, r = _gauge_left(z)
 		m.ket[s] = q
 		m.ket[s+1] = _contract_first(m.ket[s+1], r)
@@ -152,6 +153,7 @@ function leftsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 	end
 	z, t = _site_solve(m, L, _solverof(alg))
 	kvals[L] = _site_loss1(m, L, z, t)
+	(alg.verbosity > 2) && _logupdate(stdout, "l2r", L, kvals[L])
 	m.ket[L] = z
 	return kvals
 end
@@ -170,6 +172,7 @@ function rightsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 	for s in L:-1:2
 		z, t = _site_solve(m, s, _solverof(alg))
 		kvals[k] = _site_loss1(m, s, z, t)
+		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s, kvals[k])
 		k += 1
 		l, q = _gauge_right(z)
 		m.ket[s] = q
@@ -179,6 +182,7 @@ function rightsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 	end
 	z, t = _site_solve(m, 1, _solverof(alg))
 	kvals[L] = _site_loss1(m, 1, z, t)
+	(alg.verbosity > 2) && _logupdate(stdout, "r2l", 1, kvals[L])
 	m.ket[1] = z
 	return kvals
 end
@@ -316,6 +320,7 @@ function leftsweep!(m::LinsolveCache, alg::ALSLinSolve2)
 	for s in 1:L-1
 		z2, t = _site_solve2(m, s, _solverof(alg))
 		kvals[s] = _site_loss2(m, s, z2, t)
+		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		_als2_update!(m.ket, s, z2, alg; move_right=true)
 		_h_left!(m, s)
 		_b_left!(m, s)
@@ -331,6 +336,7 @@ function rightsweep!(m::LinsolveCache, alg::ALSLinSolve2)
 	for s in L:-1:2
 		z2, t = _site_solve2(m, s - 1, _solverof(alg))
 		kvals[k] = _site_loss2(m, s - 1, z2, t)
+		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s - 1, kvals[k])
 		k += 1
 		_als2_update!(m.ket, s - 1, z2, alg; move_right=false)
 		_h_right!(m, s)

@@ -353,6 +353,7 @@ function leftsweep!(env::CADMRGCache, alg::CADMRG)
 	kvals = zeros(Float64, L)
 	for s in 1:L-1
 		kvals[s], _ = _cadmrg_local_update!(env, s, alg; move_right=true)
+		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		# rebuild the left environment with the (possibly transformed) H[s]
 		updateleft!(env, s)
 	end
@@ -375,6 +376,7 @@ function rightsweep!(env::CADMRGCache, alg::CADMRG)
 	k = 1
 	for s in L:-1:2
 		kvals[k], _ = _cadmrg_local_update!(env, s - 1, alg; move_right=false)
+		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s - 1, kvals[k])
 		k += 1
 		# rebuild the right environment with the (possibly transformed) H[s]
 		updateright!(env, s)
@@ -425,7 +427,7 @@ function ground_state(h::MPOHamiltonian, alg::CADMRG)
 	hd = _dense_mpo(h)   # CA-DMRG rewrites MPO tensors in place; use dense form
 	env = CADMRGCache(hd, ψ)
 	khist = iterative_compute!(env, alg)
-	(alg.verbosity > 0) && println("CA-DMRG converged (delta = $(_iterative_delta(khist)))")
+	(alg.verbosity > 1) && println("CA-DMRG converged (delta = $(_iterative_delta(khist)))")
 	setscaling!(ψ, 1.0)
 	lmul!(1 / norm(ψ), ψ)
 	return CAMPS(ψ, env.gates)

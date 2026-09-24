@@ -52,12 +52,14 @@ function leftsweep!(env::ExcitedStateCache, alg::DMRG1)
 	kvals = zeros(Float64, L)
 	for s in 1:L-1
 		kvals[s], _ = _projected_local_update!(env, s, alg)
+		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		q, r = leftorth!(env.ket[s], (1, 2), (3,))
 		env.ket[s] = q
 		env.ket[s+1] = _contract_first(env.ket[s+1], r)
 		updateleft!(env, s)
 	end
 	kvals[L], _ = _projected_local_update!(env, L, alg)
+	(alg.verbosity > 2) && _logupdate(stdout, "l2r", L, kvals[L])
 	return kvals
 end
 
@@ -73,6 +75,7 @@ function rightsweep!(env::ExcitedStateCache, alg::DMRG1)
 	k = 1
 	for s in L:-1:2
 		kvals[k], _ = _projected_local_update!(env, s, alg)
+		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s, kvals[k])
 		k += 1
 		l, q = rightorth!(env.ket[s], (1,), (2, 3))
 		env.ket[s] = q
@@ -80,6 +83,7 @@ function rightsweep!(env::ExcitedStateCache, alg::DMRG1)
 		updateright!(env, s)
 	end
 	kvals[L], _ = _projected_local_update!(env, 1, alg)
+	(alg.verbosity > 2) && _logupdate(stdout, "r2l", 1, kvals[L])
 	return kvals
 end
 
@@ -128,7 +132,7 @@ random initial state of bond dimension `alg.D`.
 function excited_state(h::MPOHamiltonian, alg::DMRG1, ψ0::CanonicalMPS...)
 	ψ = randommps(scalartype(h), ophydims(h); D=alg.D)
 	khist = excited_state!(ψ, h, collect(ψ0), alg)
-	(alg.verbosity > 0) && println("excited DMRG1 converged (delta = $(_iterative_delta(khist)))")
+	(alg.verbosity > 1) && println("excited DMRG1 converged (delta = $(_iterative_delta(khist)))")
 	return expectation(h, ψ), ψ
 end
 

@@ -88,6 +88,7 @@ function leftsweep!(m::HadamardCache, alg::DMRG1)
 	for s in 1:L-1
 		mpsj = _reduce_hadamard_site(m.ketx[s], m.kety[s], m.hstorage[s], m.hstorage[s+1])
 		kvals[s] = norm(mpsj)
+		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		q, r = _gauge_left(mpsj)
 		m.bra[s] = q
 		m.bra[s+1] = _contract_first(m.bra[s+1], r)
@@ -95,6 +96,7 @@ function leftsweep!(m::HadamardCache, alg::DMRG1)
 	end
 	mpsj = _reduce_hadamard_site(m.ketx[L], m.kety[L], m.hstorage[L], m.hstorage[L+1])
 	kvals[L] = norm(mpsj)
+	(alg.verbosity > 2) && _logupdate(stdout, "l2r", L, kvals[L])
 	m.bra[L] = mpsj
 	return kvals
 end
@@ -112,6 +114,7 @@ function rightsweep!(m::HadamardCache, alg::DMRG1)
 	for s in L:-1:2
 		mpsj = _reduce_hadamard_site(m.ketx[s], m.kety[s], m.hstorage[s], m.hstorage[s+1])
 		kvals[k] = norm(mpsj)
+		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s, kvals[k])
 		k += 1
 		l, q = _gauge_right(mpsj)
 		m.bra[s] = q
@@ -120,6 +123,7 @@ function rightsweep!(m::HadamardCache, alg::DMRG1)
 	end
 	mpsj = _reduce_hadamard_site(m.ketx[1], m.kety[1], m.hstorage[1], m.hstorage[2])
 	kvals[L] = norm(mpsj)
+	(alg.verbosity > 2) && _logupdate(stdout, "r2l", 1, kvals[L])
 	m.bra[1] = mpsj
 	return kvals
 end
@@ -238,6 +242,7 @@ function leftsweep!(m::HadamardCache, alg::DMRG2)
 	for s in 1:L-1
 		t2 = _reduce_hadamard_site2(m, s)
 		kvals[s] = norm(t2)
+		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		_als2_update!(m.bra, s, t2, alg; move_right=true)
 		_env_updateleft!(m, s)
 	end
@@ -252,6 +257,7 @@ function rightsweep!(m::HadamardCache, alg::DMRG2)
 	for s in L:-1:2
 		t2 = _reduce_hadamard_site2(m, s - 1)
 		kvals[k] = norm(t2)
+		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s - 1, kvals[k])
 		k += 1
 		_als2_update!(m.bra, s - 1, t2, alg; move_right=false)
 		_env_updateright!(m, s)

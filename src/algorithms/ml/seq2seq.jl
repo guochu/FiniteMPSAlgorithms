@@ -232,6 +232,7 @@ function leftsweep!(m::Seq2SeqCache, alg::Seq2Seq)
 	for s in 1:L-1
 		w, t = _site_solve(m, s, alg.α)
 		kvals[s] = _site_loss(m, s, w, t)
+		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		q, r = _gauge_left(w)
 		m.H[s] = q
 		m.H[s+1] = _contract_first(m.H[s+1], r)
@@ -239,6 +240,7 @@ function leftsweep!(m::Seq2SeqCache, alg::Seq2Seq)
 	end
 	w, t = _site_solve(m, L, alg.α)
 	kvals[L] = _site_loss(m, L, w, t)
+	(alg.verbosity > 2) && _logupdate(stdout, "l2r", L, kvals[L])
 	m.H[L] = w
 	return kvals
 end
@@ -256,6 +258,7 @@ function rightsweep!(m::Seq2SeqCache, alg::Seq2Seq)
 	for s in L:-1:2
 		w, t = _site_solve(m, s, alg.α)
 		kvals[k] = _site_loss(m, s, w, t)
+		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s, kvals[k])
 		k += 1
 		l, q = _gauge_right(w)
 		m.H[s] = q
@@ -264,6 +267,7 @@ function rightsweep!(m::Seq2SeqCache, alg::Seq2Seq)
 	end
 	w, t = _site_solve(m, 1, alg.α)
 	kvals[L] = _site_loss(m, 1, w, t)
+	(alg.verbosity > 2) && _logupdate(stdout, "r2l", 1, kvals[L])
 	m.H[1] = w
 	return kvals
 end
@@ -440,7 +444,7 @@ function seq2seq(pairfun::Function, dxs::Vector{Int}, dys::Vector{Int},
 		ys = [pairfun(x) for x in cand]
 		errs = [distance(W * x, y) / max(norm(y), 1e-12) for (x, y) in zip(cand, ys)]
 		maxerr = maximum(errs)
-		(alg.verbosity > 0) &&
+		(alg.verbosity > 1) &&
 			println("Seq2Seq round $rounds: maxerr = $(round(maxerr; sigdigits=4))")
 		(maxerr < alg.tol || rounds >= alg.maxiter) && break
 		worst = partialsortperm(errs, 1:min(alg.nadd, length(errs)); rev=true)

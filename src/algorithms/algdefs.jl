@@ -113,7 +113,7 @@ _guess_bond(t::TruncationScheme) = something(_truncation_bond(t), Defaults.D)
 const DefaultMultAlg = SVDCompression(trunc=DefaultTruncation)
 
 """
-	iterative_compute!(cache, alg::DMRG1) -> khist
+	iterative_compute!(cache, alg) -> khist
 
 Repeat `sweep!(cache, alg)` until the relative difference of the LAST loss of two
 successive sweeps satisfies `|lₙ - lₙ₋₁| / |lₙ₋₁| < alg.tol` (or `alg.maxiter` is
@@ -124,18 +124,23 @@ sweeps. Returns `khist`, the loss history of every sweep.
 The sweeps keep the working data in mixed canonical form but never touch the Schmidt
 values; the cache constructors therefore reset them (`unset_svectors!`) on the working
 guess, so no stale spectrum can masquerade as a canonical gauge.
+
+Logging follows the package-wide `verbosity` convention (header of
+`FiniteMPSAlgorithms.jl`): level ≥ 2 summarizes the final (best) loss of every sweep
+(`_logiter`); level ≥ 3 additionally prints the loss of every local update from within
+the sweeps, tagged with the half-sweep direction (`_logupdate`).
 """
 function iterative_compute!(cache, alg; kwargs...)
 	khist = Vector{Vector{Float64}}()
 	prev = Inf
 	delta = Inf
 	converged = false
-	for _ in 1:alg.maxiter
+	for iter in 1:alg.maxiter
 		kvals = sweep!(cache, alg; kwargs...)
 		push!(khist, kvals)
 		last = kvals[end]
 		delta = isfinite(prev) ? (prev == 0 ? abs(last) : abs(last - prev) / abs(prev)) : Inf
-		(alg.verbosity > 1) && println("DMRG iteration: delta = ", delta)
+		(alg.verbosity > 1) && _logiter(stdout, _algname(alg), iter, delta, "loss" => last)
 		if delta < alg.tol
 			converged = true
 			break
@@ -146,6 +151,23 @@ function iterative_compute!(cache, alg; kwargs...)
 		"converging: $(alg.maxiter) sweeps, final delta = $(round(delta; sigdigits=4)), tol = $(alg.tol)"
 	return khist
 end
+
+# iteration logging (following InfiniteMPSAlgorithms `_logiter`)
+function _logiter(io::IO, name::AbstractString, iter::Int, err::Real, extra::Pair...)
+	str = join(["$k = $(repr(round(v; sigdigits = 8)))" for (k, v) in extra], ", ")
+	@printf(io, "%s iter %4d : ϵ = %.3e %s\n", name, iter, err, str)
+	return nothing
+end
+
+# per-local-update loss logging inside the sweeps (`leftsweep!` / `rightsweep!` call
+# this right after each local optimization), tagged with the half-sweep direction
+function _logupdate(io::IO, dir::AbstractString, i::Int, k::Real)
+	@printf(io, "%s site %3d : loss = %.6e\n", dir, i, k)
+	return nothing
+end
+
+# the per-algorithm name for the iteration log (`DMRG2{...}` -> "DMRG2")
+_algname(alg) = string(typeof(alg).name.name)
 
 # final relative difference of the last losses of the last two sweeps — the convergence
 # measure of `iterative_compute!`, evaluated a posteriori from the loss history

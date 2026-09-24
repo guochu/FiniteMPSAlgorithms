@@ -2,12 +2,19 @@ module FiniteMPSAlgorithms
 
 using LinearAlgebra
 using LinearAlgebra: BlasFloat
+using Printf
 using TensorOperations
 import TensorOperations: scalartype
 using MatrixAlgebraKit: MatrixAlgebraKit, left_orth!, right_orth!, svd_compact!,
 	QRIteration, DivideAndConquer, SafeDivideAndConquer, TruncatedAlgorithm, trunctol,
 	LeftOrthAlgorithm, RightOrthAlgorithm, diagview, isunitary
 using KrylovKit: KrylovKit, eigsolve, exponentiate
+
+# verbosity level for iterative MPS algorithms
+# verbosity = 0: absolutely no message
+# verbosity >= 1: only non-convergence warnings
+# verbosity >= 2: only summarize the loss function after a full sweep
+# verbosity >= 3: print the loss function for each local update, including whether we are at left-to-right or right-to-left sweep
 
 # tensorops
 export TruncationScheme, NoTruncation, TruncateDim, TruncateRelError, TruncateDimCutoff,
