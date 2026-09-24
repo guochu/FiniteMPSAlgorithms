@@ -128,15 +128,22 @@ guess, so no stale spectrum can masquerade as a canonical gauge.
 function iterative_compute!(cache, alg; kwargs...)
 	khist = Vector{Vector{Float64}}()
 	prev = Inf
+	delta = Inf
+	converged = false
 	for _ in 1:alg.maxiter
 		kvals = sweep!(cache, alg; kwargs...)
 		push!(khist, kvals)
 		last = kvals[end]
 		delta = isfinite(prev) ? (prev == 0 ? abs(last) : abs(last - prev) / abs(prev)) : Inf
 		(alg.verbosity > 1) && println("DMRG iteration: delta = ", delta)
-		delta < alg.tol && break
+		if delta < alg.tol
+			converged = true
+			break
+		end
 		prev = last
 	end
+	(!converged && alg.verbosity > 0) && @warn "iterative_compute! reached maxiter without " *
+		"converging: $(alg.maxiter) sweeps, final delta = $(round(delta; sigdigits=4)), tol = $(alg.tol)"
 	return khist
 end
 
