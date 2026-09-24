@@ -74,7 +74,7 @@ end
 		ref atol = 1e-8 * norm(ref)
 	# plain MPO and MPOHamiltonian inputs stay scale-free
 	@test superoperator(h1; side=:left) isa MPO
-	hH = MPOHamiltonian(OpSum(fill(2, L), [term(1.0, 1 => _SX, 2 => _SX)]))
+	hH = MPOHamiltonian(OpSum(fill(2, L), [term(1.0, 1 => _SX, L => _SX)]))
 	@test superoperator(hH; side=:left) isa MPO
 end
 

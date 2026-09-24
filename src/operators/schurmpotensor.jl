@@ -100,7 +100,7 @@ function compute_mpotensor_data(::Type{T}, data::AbstractMatrix) where {T<:Numbe
 			end
 		end
 	end
-	isnothing(d) && throw(ArgumentError("pspace is missing"))
+	isnothing(d) && throw(ArgumentError("cannot infer phydim: the logical matrix contains no operator (all-scalar input)"))
 	for i in 1:m, j in 1:n
 		sj = data[i, j]
 		if isa(sj, AbstractMatrix)
@@ -153,12 +153,6 @@ function SparseMPOTensor(data::AbstractMatrix)
 	T = compute_scalartype(data)
 	return SparseMPOTensor{T}(data)
 end
-function SparseMPOTensor(data::AbstractMatrix{Union{M, T}}) where {M<:AbstractMatrix, T<:Number}
-	# a homogeneous Matrix{M} resolves the diagonal with T = Union{}; recover the
-	# scalar type from the matrix element type
-	T2 = T === Union{} ? scalartype(M) : T
-	return SparseMPOTensor{T2}(data)
-end
 # direct construction from a homogeneous element matrix uses the default struct
 # constructor, e.g. SparseMPOTensor{T}(Os, d)
 
@@ -180,7 +174,7 @@ end
 
 # ---------- SchurMPOTensor: Jordan upper-triangular block form ----------
 #
-# logical block matrix (m rows × n columns):
+# logical block matrix (m rows × n columns, always m, n >= 2):
 #
 #   [ 1  C  D
 #     0  A  B
@@ -188,8 +182,9 @@ end
 #
 # A is the interior×interior block, B the interior→closing column, C the vacuum→interior
 # row and D the vacuum→closing corner; the two identity corners are implicit and are
-# not stored. Edge tensors (first site 1×n keeps the vacuum row; last site n×1 keeps
-# the closing column) arise from the same structure with empty interior blocks.
+# not stored. SchurMPOTensor does not handle chain boundaries — the logical shape is
+# always size(W.A) .+ 2 (so space_l/space_r > 1); the vacuum row / closing column of
+# the boundary sites are selected downstream by tompotensors.
 
 """
 	SchurMPOTensor{T<:Number} <: AbstractSparseMPOTensor
@@ -201,7 +196,9 @@ The logical shape is not stored: `space_l`/`space_r` are inferred from the size 
 The `D` corner lives in a `RefValue` (`_D`) to keep the struct immutable while the
 corner stays mutable; `getproperty` dereferences it, so `W.D` reads and writes the
 corner value directly. The logical shape `V` is not part of the constructor API:
-both constructors take the logical block matrix and store its size.
+both constructors take the logical block matrix and store its size. Chain
+boundaries are not handled — `V[1], V[2] >= 2` always; use `tompotensors` to
+select the boundary channels of a finite chain.
 """
 struct SchurMPOTensor{T<:Number} <: AbstractSparseMPOTensor
 	V::NTuple{2, Int}
@@ -236,29 +233,25 @@ SchurMPOTensor(data::AbstractMatrix) = SchurMPOTensor{compute_scalartype(data)}(
 
 function _schur_from_logical(Os::Array{Union{Matrix{T}, T}, 2}, d::Int) where {T<:Number}
 	m, n = size(Os)
+	(m >= 2 && n >= 2) || throw(ArgumentError(
+		"SchurMPOTensor requires the full logical shape (m, n >= 2), got ($m, $n) — chain boundaries are handled by tompotensors"))
 	nr, nc = _interior_counts((m, n))
 
 	# implicit identity corners: if supplied, the entry must be absent or exactly identity
 	_check_corner(x) = (x isa Number && (iszero(x) || isone(x))) ||
 		throw(ArgumentError("identity corner of SchurMPOTensor cannot be set to $x"))
-	n > 1 && _check_corner(Os[1, 1])
-	m > 1 && _check_corner(Os[m, n])
+	_check_corner(Os[1, 1])
+	_check_corner(Os[m, n])
 
-	# vacuum column (col 1, unless it is the single closing column at the last site)
-	# carries only the (1,1) identity
-	if n > 1
-		for i in 2:m
-			Os[i, 1] == zero(T) ||
-				throw(ArgumentError("SchurMPOTensor should be upper triangular"))
-		end
+	# vacuum column (col 1) carries only the (1,1) identity
+	for i in 2:m
+		Os[i, 1] == zero(T) ||
+			throw(ArgumentError("SchurMPOTensor should be upper triangular"))
 	end
-	# closing row (row m, unless it is the single vacuum row at the first site)
-	# carries only the (m,n) identity
-	if m > 1
-		for j in 1:n-1
-			Os[m, j] == zero(T) ||
-				throw(ArgumentError("SchurMPOTensor should be upper triangular"))
-		end
+	# closing row (row m) carries only the (m,n) identity
+	for j in 1:n-1
+		Os[m, j] == zero(T) ||
+			throw(ArgumentError("SchurMPOTensor should be upper triangular"))
 	end
 
 	A = Array{Union{Matrix{T}, T}, 2}(undef, nr, nc)
@@ -300,12 +293,12 @@ function _rawelement(W::SchurMPOTensor{T}, i::Int, j::Int) where {T}
 	if i == 1
 		j == n && return getfield(W, :_D)[]
 		(1 < j < n) && return W.C[j-1]
-		(n > 1 && j == 1) && return one(T)
+		j == 1 && return one(T)
 	elseif 1 < i < m
 		j == n && return W.B[i-1]
 		(1 < j < n) && return W.A[i-1, j-1]
 	elseif i == m
-		(m > 1 && j == n) && return one(T)
+		j == n && return one(T)
 	end
 	return nothing
 end
@@ -345,8 +338,8 @@ end
 function Base.convert(::Type{SparseMPOTensor}, W::SchurMPOTensor{T}) where {T}
 	m, n = size(W)
 	data = fill!(Array{Union{Matrix{T}, T}, 2}(undef, m, n), zero(T))
-	(n > 1) && (data[1, 1] = one(T))
-	(m > 1) && (data[m, n] = one(T))
+	data[1, 1] = one(T)
+	data[m, n] = one(T)
 	data[1, n] = getfield(W, :_D)[]
 	for b in eachindex(W.C)
 		data[1, b+1] = W.C[b]

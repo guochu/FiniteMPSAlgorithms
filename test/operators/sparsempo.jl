@@ -13,10 +13,12 @@
 
 	@testset "Schur construction and dense conversion" begin
 		@test hs[1] isa SchurMPOTensor
-		# 6 on-site + 5 bond + 4 next-nearest terms -> 9 private channels + 2
-		@test size(hs[1]) == (1, 11)    # rectangular first site: vacuum row only
-		@test size(hs[2]) == (11, 11)   # square Jordan-form interior
-		@test size(hs[end]) == (11, 1)  # rectangular last site: closing column only
+		# 6 on-site + 5 bond + 4 next-nearest terms -> 9 private channels + 2;
+		# every site carries the full logical shape (boundaries are tompotensors' job)
+		@test size(hs[1]) == (11, 11)
+		@test size(hs[2]) == (11, 11)
+		@test size(hs[end]) == (11, 11)
+		@test all(W -> size(W) == (11, 11), hs)
 		@test scalartype(hs) == ComplexF64
 		@test todense(hs) ≈ todense(hd) atol = 1.0e-12
 		@test todense(hs) ≈ dense_model(p) atol = 1.0e-12
@@ -34,25 +36,18 @@
 		@test W[2, 3] ≈ 2 * isometry(Float64, 2)
 		@test all(iszero, W[1, 3])
 
-		# last-site edge: closing column only = [D; B; 1]; the bottom-right identity is
-		# implicit and must not be replaced by a non-identity operator
+		# boundary handling is not SchurMPOTensor's business: edge-shaped logical
+		# matrices (m < 2 or n < 2) are rejected
 		edata = Matrix{Any}(undef, 3, 1)
 		edata[1, 1] = 0.0; edata[2, 1] = σx; edata[3, 1] = 1.0
-		E = SchurMPOTensor(edata)
-		@test size(E) == (3, 1)
-		@test E[2, 1] == σx
-		@test E[3, 1] ≈ isometry(Float64, 2)
-		@test !contains(E, 1, 1)
-		@test_throws ArgumentError (E[3, 1] = σz)
-
-		# first-site edge: vacuum row only = [1, C, D]
+		@test_throws ArgumentError SchurMPOTensor(edata)
 		fdata = Matrix{Any}(undef, 1, 3)
 		fdata[1, 1] = 1.0; fdata[1, 2] = σx; fdata[1, 3] = 0.0
-		F = SchurMPOTensor(fdata)
-		@test size(F) == (1, 3)
-		@test F[1, 2] == σx
-		@test F[1, 1] ≈ isometry(Float64, 2)
-		@test_throws ArgumentError (F[1, 1] = σz)
+		@test_throws ArgumentError SchurMPOTensor(fdata)
+		# an all-scalar logical matrix cannot infer phydim
+		sdata = fill(0.0, 2, 2)
+		@test_throws ArgumentError SchurMPOTensor(sdata)
+		@test_throws ArgumentError SparseMPOTensor(sdata)
 	end
 
 	@testset "expectation and ground state via sparse MPO" begin

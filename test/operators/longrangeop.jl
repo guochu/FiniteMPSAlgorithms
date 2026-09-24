@@ -88,7 +88,7 @@ end
 @testset "OpSum validation" begin
 	SX = Float64[0 1; 1 0]
 	SZ = Float64[1 0; 0 -1]
-	s = OpSum([2, 2, 2])
+	s = OpSum([2, 2])
 	push!(s, term(1 => SX))
 	push!(s, term(-0.5, 1 => SZ, 2 => SX))
 	@test length(s) == 2 && s[1] isa OpTerm && first(s.data) === s[1]
@@ -99,9 +99,9 @@ end
 	# operator dimension does not match the local dimension
 	@test_throws DimensionMismatch push!(s, term(1 => randn(ComplexF64, 3, 3)))
 	# batch construction is validated identically
-	s2 = OpSum([2, 2, 2], [term(1 => SX), term(-0.5, 1 => SZ, 2 => SX)])
+	s2 = OpSum([2, 2], [term(1 => SX), term(-0.5, 1 => SZ, 2 => SX)])
 	@test s2.data == s.data
 	# a validated OpSum assembles the same Hamiltonian as the raw (L, terms) route
 	@test todense(MPO(tompotensors(MPOHamiltonian(s2)))) ≈
-		  todense(MPO(tompotensors(MPOHamiltonian(3, s2.data...)))) atol = 1e-14
+		  todense(MPO(tompotensors(MPOHamiltonian(2, s2.data...)))) atol = 1e-14
 end

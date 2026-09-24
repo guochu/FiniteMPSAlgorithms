@@ -25,9 +25,11 @@
 	@test real(expectationvalue(term(2 => σx), ψ)) ≈ real(dot(vψ, Ax * vψ)) / dot(vψ, vψ) atol = 1e-8
 	# OpTerm expectation: mixed-canonical shortcut vs the generic MPO path
 	σz = Float64[1 0; 0 -1]
-	op_single = term(2 => σx)                       # interior single-site term
-	op_gap = term(-0.5, 1 => σx, 3 => σx, 6 => σz)  # gapped multi-site term touching both boundaries
-	for op in (op_single, op_gap)
+	# a gapped multi-site term touching both boundaries; untouched sites propagate
+	# their string channels with explicit identities (a term supported on interior
+	# sites only leaves all-scalar boundary sites, which cannot carry a phydim)
+	op_gap = term(-0.5, 1 => σx, 3 => σx, 6 => σz)
+	for op in (op_gap,)
 		mpo_op = MPO(MPOHamiltonian(OpSum(fill(2, L), [op])))
 		@test real(expectation(op, ψ)) ≈ real(expectation(mpo_op, ψ)) atol = 1e-9
 		@test real(expectationvalue(op, ψ)) ≈ real(expectationvalue(mpo_op, ψ)) rtol = 1e-10

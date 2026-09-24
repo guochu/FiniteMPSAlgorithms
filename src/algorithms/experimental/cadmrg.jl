@@ -240,6 +240,9 @@ function _dense_mpo(h::AbstractMPO)
 	data = [convert(Array{TC,4}, _dense_mpotensor(h[s])) for s in 1:length(h)]
 	return MPO{TC}(data)
 end
+# Schur-form Hamiltonians keep the full logical shape at every site (no boundary
+# collapse), so the dense conversion must select the boundary channels first
+_dense_mpo(h::MPOHamiltonian{<:SchurMPOTensor}) = _dense_mpo(MPO(tompotensors(h)))
 
 # ---------- local two-site update with Clifford search ----------
 

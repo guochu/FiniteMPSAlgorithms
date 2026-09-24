@@ -179,10 +179,10 @@ function _mpohamiltonian_from_terms(L::Int, terms::AbstractVector{<:OpTerm})
 
 	tensors = Vector{SchurMPOTensor{T}}(undef, L)
 	for s in 1:L
-	        # logical shape: the first site loses the closing row, the last site the vacuum column
-	        ml = s == 1 ? 1 : n
-	        nr = s == L ? 1 : n
-	        Os = fill!(Array{Union{Matrix{T}, T}, 2}(undef, ml, nr), zero(T))
+	        # full logical shape at every site: MPOHamiltonian does not handle chain
+	        # boundaries — the vacuum row / closing column of the boundary sites are
+	        # selected downstream by tompotensors
+	        Os = fill!(Array{Union{Matrix{T}, T}, 2}(undef, n, n), zero(T))
 	        # terms may carry a narrower scalar type than the unified Hamiltonian type T
 	        asM = v -> convert(Matrix{T}, v)
 	        for (a, t) in enumerate(terms)
@@ -194,12 +194,12 @@ function _mpohamiltonian_from_terms(L::Int, terms::AbstractVector{<:OpTerm})
 	                        for k in 1:nt-1
 	                                if t.positions[k] < s < t.positions[k+1]
 	                                        li = bases[a] + k - 2
-	                                        Os[li+1, li+1] = _add_block(Os[li+1, li+1], one(T))
+	                                        Os[li+1, li+1] = _add_block(Os[li+1, li+1], isometry(T, d))
 	                                end
 	                end
 	                elseif nt == 1
 	                        # on-site term: vacuum -> closing corner
-	                        Os[1, nr] = _add_block(Os[1, nr], asM(t.coeff * t.operators[1]))
+	                        Os[1, n] = _add_block(Os[1, n], asM(t.coeff * t.operators[1]))
 	                elseif j == 1
 	                        # string start: vacuum -> interior
 	                        li = bases[a] - 1
@@ -207,7 +207,7 @@ function _mpohamiltonian_from_terms(L::Int, terms::AbstractVector{<:OpTerm})
 	                elseif j == nt
 	                        # string end: interior -> closing
 	                        li = bases[a] + nt - 3
-	                        Os[li+1, nr] = _add_block(Os[li+1, nr], asM(t.operators[end]))
+	                        Os[li+1, n] = _add_block(Os[li+1, n], asM(t.operators[end]))
 	                else
 	                        # interior transition of the string
 	                        r = bases[a] + j - 3
@@ -215,12 +215,9 @@ function _mpohamiltonian_from_terms(L::Int, terms::AbstractVector{<:OpTerm})
 	                        Os[r+1, c+1] = _add_block(Os[r+1, c+1], asM(t.operators[j]))
 	                end
 	        end
-	        # a site with no operator support carries no pspace information; plant a zero
-	        # matrix in the D corner so the constructor can infer the physical dimension
-	        any(x -> x isa AbstractMatrix, Os) || (Os[1, nr] = zeros(T, d, d))
 	        tensors[s] = SchurMPOTensor{T}(Os)
 	        end
-	return MPOHamiltonian(tensors)
+	        return MPOHamiltonian(tensors)
 end
 
 _add_block(old, v) = (old == 0) ? v : (isa(old, Number) ? old * isometry(scalartype(v), size(v, 1)) : old) + v
