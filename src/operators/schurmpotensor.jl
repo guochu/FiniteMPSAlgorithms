@@ -192,16 +192,14 @@ end
 Upper triangular Jordan/Schur block form of an MPO site tensor, stored as the four
 blocks `A` (interior), `B` (interior→closing), `C` (vacuum→interior) and `D`
 (vacuum→closing), with implicit identity corners — MPSKit `JordanMPOTensor` style.
-The logical shape is not stored: `space_l`/`space_r` are inferred from the size of `A`.
-The `D` corner lives in a `RefValue` (`_D`) to keep the struct immutable while the
-corner stays mutable; `getproperty` dereferences it, so `W.D` reads and writes the
-corner value directly. The logical shape `V` is not part of the constructor API:
-both constructors take the logical block matrix and store its size. Chain
-boundaries are not handled — `V[1], V[2] >= 2` always; use `tompotensors` to
-select the boundary channels of a finite chain.
+The logical shape is not stored: `size`/`space_l`/`space_r` are inferred from the
+size of `A`. The `D` corner lives in a `RefValue` (`_D`) to keep the struct
+immutable while the corner stays mutable; `getproperty` dereferences it, so `W.D`
+reads and writes the corner value directly. Chain boundaries are not handled —
+`space_l`/`space_r > 1` always; use `tompotensors` to select the boundary
+channels of a finite chain.
 """
 struct SchurMPOTensor{T<:Number} <: AbstractSparseMPOTensor
-	V::NTuple{2, Int}
 	A::Array{Union{Matrix{T}, T}, 2}
 	B::Array{Union{Matrix{T}, T}, 1}
 	C::Array{Union{Matrix{T}, T}, 1}
@@ -209,11 +207,10 @@ struct SchurMPOTensor{T<:Number} <: AbstractSparseMPOTensor
 	d::Int
 end
 
-# interior block counts belonging to a logical shape
-_interior_counts(V::NTuple{2, Int}) = (V[1] == 1 ? 0 : V[1] - 2, V[2] == 1 ? 0 : V[2] - 2)
-
-Base.size(W::SchurMPOTensor) = W.V
-Base.size(W::SchurMPOTensor, i::Int) = W.V[i]
+# the logical shape is always size(W.A) .+ 2: interior counts plus the vacuum
+# row and the closing column
+Base.size(W::SchurMPOTensor) = (size(W.A, 1) + 2, size(W.A, 2) + 2)
+Base.size(W::SchurMPOTensor, i::Int) = size(W.A, i) + 2
 
 # construct from a logical block matrix: compress identities, verify the Jordan
 # structure, then split into the four blocks (the logical shape is taken from
@@ -235,7 +232,7 @@ function _schur_from_logical(Os::Array{Union{Matrix{T}, T}, 2}, d::Int) where {T
 	m, n = size(Os)
 	(m >= 2 && n >= 2) || throw(ArgumentError(
 		"SchurMPOTensor requires the full logical shape (m, n >= 2), got ($m, $n) — chain boundaries are handled by tompotensors"))
-	nr, nc = _interior_counts((m, n))
+	nr, nc = m - 2, n - 2
 
 	# implicit identity corners: if supplied, the entry must be absent or exactly identity
 	_check_corner(x) = (x isa Number && (iszero(x) || isone(x))) ||
@@ -269,7 +266,7 @@ function _schur_from_logical(Os::Array{Union{Matrix{T}, T}, 2}, d::Int) where {T
 	for b in 1:nc
 		C[b] = Os[1, b+1]
 	end
-	return SchurMPOTensor{T}((m, n), A, B, C, Base.RefValue{Union{Matrix{T}, T}}(Os[1, n]), d)
+	return SchurMPOTensor{T}(A, B, C, Base.RefValue{Union{Matrix{T}, T}}(Os[1, n]), d)
 end
 
 scalartype(::Type{SchurMPOTensor{T}}) where {T} = T
@@ -325,12 +322,12 @@ end
 _copy_orelse(x::Number) = x
 _copy_orelse(x::AbstractMatrix) = copy(x)
 Base.copy(W::SchurMPOTensor{T}) where {T} =
-	SchurMPOTensor{T}(W.V, copy(W.A), copy(W.B), copy(W.C),
+	SchurMPOTensor{T}(copy(W.A), copy(W.B), copy(W.C),
 		Base.RefValue{Union{Matrix{T}, T}}(_copy_orelse(getfield(W, :_D)[])), phydim(W))
 
 function Base.complex(W::SchurMPOTensor{T}) where {T}
 	TC = complex(T)
-	return SchurMPOTensor{TC}(W.V, complex.(W.A), complex.(W.B), complex.(W.C),
+	return SchurMPOTensor{TC}(complex.(W.A), complex.(W.B), complex.(W.C),
 		Base.RefValue{Union{Matrix{TC}, TC}}(complex(getfield(W, :_D)[])), phydim(W))
 end
 
