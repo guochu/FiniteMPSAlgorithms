@@ -179,45 +179,47 @@ function _mpohamiltonian_from_terms(L::Int, terms::AbstractVector{<:OpTerm})
 
 	tensors = Vector{SchurMPOTensor{T}}(undef, L)
 	for s in 1:L
-		# logical shape: the first site loses the closing row, the last site the vacuum column
-		ml = s == 1 ? 1 : n
-		nr = s == L ? 1 : n
-		W = SchurMPOTensor{T}(d, (ml, nr))
-		D = getfield(W, :_D)
-		# terms may carry a narrower scalar type than the unified Hamiltonian type T
-		asM = v -> convert(Matrix{T}, v)
-		for (a, t) in enumerate(terms)
-			nt = length(t.positions)
-			j = findfirst(==(s), t.positions)
-			if j === nothing
-				# idle propagation of a started string across a gap: an identity on the
-				# interior block diagonal
-				for k in 1:nt-1
-					if t.positions[k] < s < t.positions[k+1]
-						li = bases[a] + k - 2
-						W.A[li, li] = _add_block(W.A[li, li], one(T))
-					end
-				end
-			elseif nt == 1
-				# on-site term: vacuum -> closing corner
-				D[] = _add_block(D[], asM(t.coeff * t.operators[1]))
-			elseif j == 1
-				# string start: vacuum -> interior
-				li = bases[a] - 1
-				W.C[li] = _add_block(W.C[li], asM(t.coeff * t.operators[1]))
-			elseif j == nt
-				# string end: interior -> closing
-				li = bases[a] + nt - 3
-				W.B[li] = _add_block(W.B[li], asM(t.operators[end]))
-			else
-				# interior transition of the string
-				r = bases[a] + j - 3
-				c = bases[a] + j - 2
-				W.A[r, c] = _add_block(W.A[r, c], asM(t.operators[j]))
-			end
-		end
-		tensors[s] = W
-	end
+	        # logical shape: the first site loses the closing row, the last site the vacuum column
+	        ml = s == 1 ? 1 : n
+	        nr = s == L ? 1 : n
+	        Os = fill!(Array{Union{Matrix{T}, T}, 2}(undef, ml, nr), zero(T))
+	        # terms may carry a narrower scalar type than the unified Hamiltonian type T
+	        asM = v -> convert(Matrix{T}, v)
+	        for (a, t) in enumerate(terms)
+	                nt = length(t.positions)
+	                j = findfirst(==(s), t.positions)
+	                if j === nothing
+	                        # idle propagation of a started string across a gap: an identity on the
+	                        # interior block diagonal
+	                        for k in 1:nt-1
+	                                if t.positions[k] < s < t.positions[k+1]
+	                                        li = bases[a] + k - 2
+	                                        Os[li+1, li+1] = _add_block(Os[li+1, li+1], one(T))
+	                                end
+	                end
+	                elseif nt == 1
+	                        # on-site term: vacuum -> closing corner
+	                        Os[1, nr] = _add_block(Os[1, nr], asM(t.coeff * t.operators[1]))
+	                elseif j == 1
+	                        # string start: vacuum -> interior
+	                        li = bases[a] - 1
+	                        Os[1, li+1] = _add_block(Os[1, li+1], asM(t.coeff * t.operators[1]))
+	                elseif j == nt
+	                        # string end: interior -> closing
+	                        li = bases[a] + nt - 3
+	                        Os[li+1, nr] = _add_block(Os[li+1, nr], asM(t.operators[end]))
+	                else
+	                        # interior transition of the string
+	                        r = bases[a] + j - 3
+	                        c = bases[a] + j - 2
+	                        Os[r+1, c+1] = _add_block(Os[r+1, c+1], asM(t.operators[j]))
+	                end
+	        end
+	        # a site with no operator support carries no pspace information; plant a zero
+	        # matrix in the D corner so the constructor can infer the physical dimension
+	        any(x -> x isa AbstractMatrix, Os) || (Os[1, nr] = zeros(T, d, d))
+	        tensors[s] = SchurMPOTensor{T}(Os)
+	        end
 	return MPOHamiltonian(tensors)
 end
 

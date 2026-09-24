@@ -197,9 +197,11 @@ end
 Upper triangular Jordan/Schur block form of an MPO site tensor, stored as the four
 blocks `A` (interior), `B` (interior→closing), `C` (vacuum→interior) and `D`
 (vacuum→closing), with implicit identity corners — MPSKit `JordanMPOTensor` style.
+The logical shape is not stored: `space_l`/`space_r` are inferred from the size of `A`.
 The `D` corner lives in a `RefValue` (`_D`) to keep the struct immutable while the
 corner stays mutable; `getproperty` dereferences it, so `W.D` reads and writes the
-corner value directly.
+corner value directly. The logical shape `V` is not part of the constructor API:
+both constructors take the logical block matrix and store its size.
 """
 struct SchurMPOTensor{T<:Number} <: AbstractSparseMPOTensor
 	V::NTuple{2, Int}
@@ -213,33 +215,12 @@ end
 # interior block counts belonging to a logical shape
 _interior_counts(V::NTuple{2, Int}) = (V[1] == 1 ? 0 : V[1] - 2, V[2] == 1 ? 0 : V[2] - 2)
 
-# full data constructor (validated, MPSKit-style)
-function SchurMPOTensor{T}(d::Int, V::NTuple{2, Int},
-		A::AbstractMatrix, B::AbstractVector, C::AbstractVector, D) where {T<:Number}
-	nr, nc = _interior_counts(V)
-	size(A) == (nr, nc) ||
-		throw(DimensionMismatch("A block has size $(size(A)), expected ($nr, $nc)"))
-	length(B) == nr ||
-		throw(DimensionMismatch("B block has length $(length(B)), expected $nr"))
-	length(C) == nc ||
-		throw(DimensionMismatch("C block has length $(length(C)), expected $nc"))
-	De = D isa Number ? convert(T, D) : convert(Matrix{T}, D)
-	# build via the default field-order constructor (this outer method is d-first)
-	return SchurMPOTensor{T}(V, A, B, C, Base.RefValue{Union{Matrix{T}, T}}(De), d)
-end
-
-# zero-initialized tensor: every slot absent (scalar zero)
-function SchurMPOTensor{T}(d::Int, V::NTuple{2, Int}) where {T<:Number}
-	nr, nc = _interior_counts(V)
-	z = zero(T)
-	A = fill!(Array{Union{Matrix{T}, T}, 2}(undef, nr, nc), z)
-	B = fill!(Array{Union{Matrix{T}, T}, 1}(undef, nr), z)
-	C = fill!(Array{Union{Matrix{T}, T}, 1}(undef, nc), z)
-	return SchurMPOTensor{T}(d, V, A, B, C, z)
-end
+Base.size(W::SchurMPOTensor) = W.V
+Base.size(W::SchurMPOTensor, i::Int) = W.V[i]
 
 # construct from a logical block matrix: compress identities, verify the Jordan
-# structure, then split into the four blocks
+# structure, then split into the four blocks (the logical shape is taken from
+# `size(data)` — the constructors never take it explicitly)
 function SchurMPOTensor{T}(data::AbstractMatrix) where {T<:Number}
 	Os, d = compute_mpotensor_data(T, data)
 	return _schur_from_logical(Os, d)
@@ -251,9 +232,7 @@ Construct from a matrix whose entries are either `d×d` local operators or scala
 Identity operators are compressed to their scalar; the two identity corners are
 implicit and need not be supplied.
 """
-SchurMPOTensor(data::AbstractMatrix) = SchurMPOTensor(compute_scalartype(data), data)
-SchurMPOTensor(::Type{T}, data::AbstractMatrix) where {T<:Number} =
-	SchurMPOTensor{T}(data)
+SchurMPOTensor(data::AbstractMatrix) = SchurMPOTensor{compute_scalartype(data)}(data)
 
 function _schur_from_logical(Os::Array{Union{Matrix{T}, T}, 2}, d::Int) where {T<:Number}
 	m, n = size(Os)
@@ -297,11 +276,9 @@ function _schur_from_logical(Os::Array{Union{Matrix{T}, T}, 2}, d::Int) where {T
 	for b in 1:nc
 		C[b] = Os[1, b+1]
 	end
-	return SchurMPOTensor{T}(d, (m, n), A, B, C, Os[1, n])
+	return SchurMPOTensor{T}((m, n), A, B, C, Base.RefValue{Union{Matrix{T}, T}}(Os[1, n]), d)
 end
 
-Base.size(W::SchurMPOTensor) = W.V
-Base.size(W::SchurMPOTensor, i::Int) = W.V[i]
 scalartype(::Type{SchurMPOTensor{T}}) where {T} = T
 
 # D is kept in a Ref under the field name `_D` (mutable slot without a mutable struct);
@@ -319,7 +296,7 @@ function Base.setproperty!(W::SchurMPOTensor, s::Symbol, v)
 end
 
 function _rawelement(W::SchurMPOTensor{T}, i::Int, j::Int) where {T}
-	m, n = W.V
+	m, n = size(W)
 	if i == 1
 		j == n && return getfield(W, :_D)[]
 		(1 < j < n) && return W.C[j-1]
@@ -334,7 +311,7 @@ function _rawelement(W::SchurMPOTensor{T}, i::Int, j::Int) where {T}
 end
 
 function Base.setindex!(W::SchurMPOTensor{T}, v, i::Int, j::Int) where {T}
-	m, n = W.V
+	m, n = size(W)
 	(1 <= i <= m && 1 <= j <= n) || throw(BoundsError(W, (i, j)))
 	x = _as_element(T, v, phydim(W))
 	if i == 1 && j == n
@@ -355,18 +332,18 @@ end
 _copy_orelse(x::Number) = x
 _copy_orelse(x::AbstractMatrix) = copy(x)
 Base.copy(W::SchurMPOTensor{T}) where {T} =
-	SchurMPOTensor{T}(phydim(W), W.V, copy(W.A), copy(W.B), copy(W.C),
-		_copy_orelse(getfield(W, :_D)[]))
+	SchurMPOTensor{T}(W.V, copy(W.A), copy(W.B), copy(W.C),
+		Base.RefValue{Union{Matrix{T}, T}}(_copy_orelse(getfield(W, :_D)[])), phydim(W))
 
 function Base.complex(W::SchurMPOTensor{T}) where {T}
 	TC = complex(T)
-	return SchurMPOTensor{TC}(phydim(W), W.V,
-		complex.(W.A), complex.(W.B), complex.(W.C), complex(getfield(W, :_D)[]))
+	return SchurMPOTensor{TC}(W.V, complex.(W.A), complex.(W.B), complex.(W.C),
+		Base.RefValue{Union{Matrix{TC}, TC}}(complex(getfield(W, :_D)[])), phydim(W))
 end
 
 # expand the logical Jordan form into a general SparseMPOTensor (identity corners explicit)
 function Base.convert(::Type{SparseMPOTensor}, W::SchurMPOTensor{T}) where {T}
-	m, n = W.V
+	m, n = size(W)
 	data = fill!(Array{Union{Matrix{T}, T}, 2}(undef, m, n), zero(T))
 	(n > 1) && (data[1, 1] = one(T))
 	(m > 1) && (data[m, n] = one(T))
