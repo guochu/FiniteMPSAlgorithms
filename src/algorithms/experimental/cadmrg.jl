@@ -13,7 +13,7 @@
 # ---------- algorithm type ----------
 
 """
-	CADMRG(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=truncdim(D=Defaults.D), verbosity=0)
+	CADMRG(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=DefaultTruncation, verbosity=0)
 
 Parameters of the Clifford-augmented two-site DMRG ground-state search. `trunc` is the
 truncation scheme applied to the SVD after each two-site update (its bond cap bounds
@@ -22,7 +22,7 @@ the bond dimension).
 @kwdef struct CADMRG{TR<:TruncationScheme} <: TwoSiteUpdate
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
-	trunc::TR = truncdim(D=Defaults.D)
+	trunc::TR = DefaultTruncation
 	verbosity::Int = 0
 end
 

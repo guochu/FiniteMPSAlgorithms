@@ -17,7 +17,7 @@
 # ---------- algorithm type ----------
 
 """
-	PDMRG(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=truncdim(D=Defaults.D), R=20, verbosity=0)
+	PDMRG(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=DefaultTruncation, R=20, verbosity=0)
 
 Parameters of the positive DMRG thermal-state search. `trunc` is the truncation scheme
 applied to the center-movement SVDs (its bond cap bounds the MPS bond dimension of the
@@ -27,7 +27,7 @@ Schmidt number of the represented mixed state).
 @kwdef struct PDMRG{TR<:TruncationScheme} <: TwoSiteUpdate
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
-	trunc::TR = truncdim(D=Defaults.D)
+	trunc::TR = DefaultTruncation
 	R::Int = 20
 	verbosity::Int = 0
 end

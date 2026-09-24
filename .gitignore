@@ -6,3 +6,7 @@
 # Julia manifest: resolved dependency lock file, regenerated locally via `Pkg.update()`
 Manifest.toml
 debug/
+
+# benchmark: cloned third-party packages (TensorCrossInterpolation.jl)
+benchmark/TensorCrossInterpolation.jl/
+benchmark/Manifest.toml

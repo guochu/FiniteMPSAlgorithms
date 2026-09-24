@@ -49,7 +49,7 @@ truncate.
 end
 
 """
-	DMRG2(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=truncdim(D=Defaults.D), verbosity=0)
+	DMRG2(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=DefaultTruncation, verbosity=0)
 
 Parameters of the two-site variational sweep engine: the neighboring site pair is
 optimized jointly and re-split by an SVD under `trunc::TruncationScheme`, so the bond
@@ -63,7 +63,7 @@ consulted for the bond cap of automatically drawn initial guesses
 @kwdef struct DMRG2{TR<:TruncationScheme} <: TwoSiteUpdate
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
-	trunc::TR = truncdim(D=Defaults.D)
+	trunc::TR = DefaultTruncation
 	verbosity::Int = 0
 end
 
@@ -85,7 +85,7 @@ tensor as warm start).
 end
 
 """
-	ALSLinSolve2(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=truncdim(D=Defaults.D),
+	ALSLinSolve2(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=DefaultTruncation,
 	             solver=DefaultLinearSolver, verbosity=0)
 
 Algorithm configuration of the two-site iterative `linsolve`: two-site ALS sweeps over
@@ -93,11 +93,11 @@ the normal-equation stacks with the bond profile `alg.trunc`; the local normal e
 are solved by the KrylovKit iterative solver `alg.solver` (matrix-free, the current
 site-pair tensor as warm start).
 """
-@kwdef struct ALSLinSolve2{TR<:TruncationScheme} <: TwoSiteUpdate
+@kwdef struct ALSLinSolve2{TR<:TruncationScheme, S<:KrylovKit.LinearSolver} <: TwoSiteUpdate
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
-	trunc::TR = truncdim(D=Defaults.D)
-	solver::KrylovKit.LinearSolver = DefaultLinearSolver
+	trunc::TR = DefaultTruncation
+	solver::S = DefaultLinearSolver
 	verbosity::Int = 0
 end
 

@@ -51,7 +51,7 @@ export mult, add, compress, compress!,
         PDMRG, CADMRG, PositiveMPA, ThermalDMRGCache,
         randompmpa, thermalstate, thermalstate!, freeenergy, tr,
         CAMPS, CliffordGate, PauliTerm,
-        ALSRecon, ALSReconCache, reconstruct, reconstruct!
+        ALSRecon, ALSRecon2, ALSReconCache, reconstruct, reconstruct!
 # gates
 export AbstractGate, UnitaryGate, GeneralGate, apply!, swap!, positions, shift
 

@@ -18,7 +18,7 @@
 
 """
 	ALSRecon(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D, α=1.0e-4,
-	         solver=DefaultLinearSolver, nadd=8, nbuffer=1024, verbosity=0)
+	         solver=DefaultLinearSolver, nbuffer=1024, nadd=128, nrounds=20, verbosity=0)
 
 Sample-amplitude MPS reconstruction by quadratic (least-squares) optimization —
 the variational alternative to tensor cross interpolation. Given the sample set
@@ -34,8 +34,10 @@ out-of-place entry points draw a random guess of bond `alg.D`, the in-place rout
 re-fits the caller's guess with `changebond!`). `α ≥ 0` is the Hilbert-Schmidt ridge
 added to the local normal equations for conditioning (the seq2seq regularization; not
 part of the reported loss). The local normal equations are solved by the KrylovKit
-iterative solver `alg.solver`. `nadd`/`nbuffer` drive the adaptive
-sample-enrichment loop of [`reconstruct`](@ref).
+iterative solver `alg.solver`. `nbuffer`/`nadd`/`nrounds` drive the adaptive
+sample-enrichment loop of [`reconstruct`](@ref): an initial random pool of `nbuffer`
+oracle queries, then `nadd` Born samples of the current fit (re-evaluated by the
+oracle) per round, for at most `nrounds` rounds.
 """
 @kwdef struct ALSRecon{S<:KrylovKit.LinearSolver} <: SingleSiteUpdate
 	maxiter::Int = Defaults.maxiter
@@ -43,8 +45,34 @@ sample-enrichment loop of [`reconstruct`](@ref).
 	D::Int = Defaults.D
 	α::Float64 = 1.0e-4      # HS ridge on the local solves (seq2seq regularizer)
 	solver::S = DefaultLinearSolver
-	nadd::Int = 8            # samples added per adaptive enrichment round
-	nbuffer::Int = 1024      # random candidate pool of the residual evaluation
+	nbuffer::Int = 1024      # initial random sample pool of the adaptive loop
+	nadd::Int = 128          # Born samples of the current fit added per round
+	nrounds::Int = 20        # adaptive enrichment round cap
+	verbosity::Int = 0
+end
+
+"""
+	ALSRecon2(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=truncdim(D=Defaults.D),
+	          α=1.0e-4, solver=DefaultLinearSolver, nbuffer=1024, nadd=128, nrounds=20,
+	          verbosity=0)
+
+Two-site variant of [`ALSRecon`](@ref): the neighboring site pair is optimized jointly
+(the same rank-4 local normal equation structure, solved matrix-free by `alg.solver`)
+and re-split by a truncating SVD under `alg.trunc::TruncationScheme`, so the bond
+dimension adapts during the sweeps — growth where the samples demand it, truncation
+where the scheme caps it. The single-site ALS losses stay monotone; the two-site
+re-split further relieves local minima of the single-site problem. Shares the
+adaptive sample-enrichment loop of [`reconstruct`](@ref).
+"""
+@kwdef struct ALSRecon2{TR<:TruncationScheme,S<:KrylovKit.LinearSolver} <: TwoSiteUpdate
+	maxiter::Int = Defaults.maxiter
+	tol::Float64 = Defaults.tol
+	trunc::TR = truncdim(D=Defaults.D)
+	α::Float64 = 1.0e-4      # HS ridge on the local solves (seq2seq regularizer)
+	solver::S = DefaultLinearSolver
+	nbuffer::Int = 1024      # initial random sample pool of the adaptive loop
+	nadd::Int = 128          # Born samples of the current fit added per round
+	nrounds::Int = 20        # adaptive enrichment round cap
 	verbosity::Int = 0
 end
 
@@ -320,96 +348,217 @@ end
 
 sweep!(c::ALSReconCache, alg::ALSRecon) = vcat(leftsweep!(c, alg), rightsweep!(c, alg))
 
+# ---------- two-site (ALSRecon2) sweeps ----------
+
+# model amplitude of sample k with the pair tensor w: gₖ = ℓₖ·w[:,xₛ,xₛ₊₁,:]·rₖ
+@inline function _model2_amplitude(Lm::AbstractMatrix{T}, Rm::AbstractMatrix{T},
+								   w::AbstractArray{T,4}, k::Integer, p::Integer,
+								   q::Integer) where {T}
+	Dl, Dr = size(w, 1), size(w, 4)
+	return sum(reshape(@view(Lm[k, :]), Dl, 1) .* (@view w[:, p, q, :]) .*
+			   reshape(@view(Rm[k, :]), 1, Dr))
+end
+
+# the two-site local data Hessian action: (M·z)[a,p,q,b] = Σₖ:gₖ = ℓₖᵀz e ⊗ rₖ
+# conj(ℓₖ[a]rₖ[b])·δ_{p,xₛ}δ_{q,xₛ₊₁}; plus the ridge α·(g_s ⊗ I ⊗ I ⊗ g_{s+2})·z
+function _ls2_apply(c::ALSReconCache, s::Integer, z::AbstractArray{T,4}, α::Real) where {T}
+	Dl, d1, d2, Dr = size(z)
+	out = zeros(T, Dl, d1, d2, Dr)
+	Lm, Rm = c.Lmat[s], c.Rmat[s+1]
+	xs, xs2 = _xcol(c, s), _xcol(c, s + 1)
+	for k in eachindex(c.a)
+		p, q = xs[k], xs2[k]
+		gk = _model2_amplitude(Lm, Rm, z, k, p, q)
+		@views out[:, p, q, :] .+= gk .* conj(reshape(Lm[k, :], Dl, 1) .*
+											  reshape(Rm[k, :], 1, Dr))
+	end
+	if α != 0
+		gL, gR = c.gstorage[s], c.gstorage[s+2]
+		for q in 1:d2, p in 1:d1
+			@views out[:, p, q, :] .+= α .* (gL * z[:, p, q, :] * transpose(gR))
+		end
+	end
+	return out
+end
+
+# the two-site normal-equation right-hand side:
+# b[a,p,q,b'] = Σₖ:(xₛ,xₛ₊₁)=(p,q) aₖ·conj(ℓₖ[a]rₖ[b'])
+function _ls2_rhs(c::ALSReconCache, s::Integer)
+	Dl, d1, d2, Dr = size(c.ψ[s], 1), size(c.ψ[s], 2), size(c.ψ[s+1], 2), size(c.ψ[s+1], 3)
+	b = zeros(eltype(c.a), Dl, d1, d2, Dr)
+	Lm, Rm, xs, xs2 = c.Lmat[s], c.Rmat[s+1], _xcol(c, s), _xcol(c, s + 1)
+	for k in eachindex(c.a)
+		@views b[:, xs[k], xs2[k], :] .+= c.a[k] .* conj(reshape(Lm[k, :], Dl, 1) .*
+														 reshape(Rm[k, :], 1, Dr))
+	end
+	return b
+end
+
+"""
+	_ls2_solve(c, s, alg) -> w
+
+Solve the two-site local normal equation (M + α·R)·w = b iteratively with KrylovKit's
+`linsolve` (matrix-free through the per-sample features; the pair tensor of the current
+chain is the warm start). Returns the updated pair tensor of shape (Dl, d, d, Dr).
+"""
+function _ls2_solve(c::ALSReconCache, s::Integer, alg::ALSRecon2)
+	b = _ls2_rhs(c, s)
+	w0 = @tensor w0[a, p, q, b] := c.ψ[s][a, p, j] * c.ψ[s+1][j, q, b]
+	w, _ = KrylovKit.linsolve(z -> _ls2_apply(c, s, z, alg.α), b, w0, alg.solver)
+	return w
+end
+
+# exact global data objective after the pair update (ridge excluded)
+function _ls2_loss(c::ALSReconCache, s::Integer, w::AbstractArray)
+	Lm, Rm, xs, xs2 = c.Lmat[s], c.Rmat[s+1], _xcol(c, s), _xcol(c, s + 1)
+	loss = 0.0
+	for k in eachindex(c.a)
+		gk = _model2_amplitude(Lm, Rm, w, k, xs[k], xs2[k])
+		loss += abs2(gk - c.a[k])
+	end
+	return loss
+end
+
+function leftsweep!(c::ALSReconCache, alg::ALSRecon2)
+	L = length(c.ψ)
+	kvals = zeros(Float64, L)
+	for s in 1:L-1
+		w = _ls2_solve(c, s, alg)
+		kvals[s] = _ls2_loss(c, s, w)
+		_als2_update!(c.ψ, s, w, alg; move_right=true)
+		_left_transfer!(c, s)
+		_g_transfer_left!(c, s)
+	end
+	kvals[L] = kvals[L-1]
+	return kvals
+end
+
+function rightsweep!(c::ALSReconCache, alg::ALSRecon2)
+	L = length(c.ψ)
+	kvals = zeros(Float64, L)
+	k = 1
+	for s in L:-1:2
+		w = _ls2_solve(c, s - 1, alg)
+		kvals[k] = _ls2_loss(c, s - 1, w)
+		k += 1
+		_als2_update!(c.ψ, s - 1, w, alg; move_right=false)
+		_right_transfer!(c, s)
+		_g_transfer_right!(c, s)
+	end
+	kvals[L] = kvals[L-1]
+	return kvals
+end
+
+sweep!(c::ALSReconCache, alg::ALSRecon2) = vcat(leftsweep!(c, alg), rightsweep!(c, alg))
+
 # ---------- global data objective & amplitudes ----------
-
-# amplitudes ⟨𝐱⁽ᵏ⁾|ψ⟩ of all samples, by per-sample chain folding
-function _amplitudes(c::ALSReconCache)
-	v = ones(eltype(c.a), length(c.a), 1)
-	for s in 1:length(c.ψ)
-		v = _left_context_transfer(v, c.ψ[s], _xcol(c, s))
-	end
-	return vec(v)
-end
-
-_ls_loss(c::ALSReconCache) = sum(abs2, _amplitudes(c) .- c.a)
-
-# amplitude ⟨𝐱|ψ⟩ at one coordinate (adaptive-residual evaluation)
-function _amplitude(ψ::CanonicalMPS, 𝐱::Vector{Int})
-	L = length(ψ)
-	L == 1 && return ψ[1][1, 𝐱[1], 1]
-	v = reshape(ψ[1][1, 𝐱[1], :], 1, :)
-	for s in 2:L-1
-		v = v * ψ[s][:, 𝐱[s], :]
-	end
-	return (v * ψ[L][:, 𝐱[L], :])[1]
-end
 
 _random_coords(ds::Vector{Int}, n::Integer) =
 	[[rand(1:ds[j]) for j in eachindex(ds)] for _ in 1:n]
 
 # ---------- drivers ----------
 
-"""
-	reconstruct(samples, ds, alg::ALSRecon = ALSRecon()) -> (ψ, traj)
+# the bond cap of the automatically drawn initial guesses
+_initial_bond(alg::ALSRecon) = alg.D
+_initial_bond(alg::ALSRecon2) = _guess_bond(alg.trunc)
 
-Fit an MPS `ψ` to a fixed sample set of tensor amplitudes by single-site ALS sweeps
-(`samples::Vector` of `Pair{Vector{Int},T}` or `(𝐱, a)` tuples with
-`𝐱::Vector{Int}`). The initial guess
-is a random chain of bond `alg.D`. Returns `ψ` (scaling 1; the represented amplitudes
-are fitted) and `traj`, the per-sweep loss history of `iterative_compute!`.
 """
-function reconstruct(samples, ds::Vector{Int}, alg::ALSRecon = ALSRecon())
-	ψ = randommps(ComplexF64, ds; D=alg.D, normalize=false)
+	reconstruct(samples, ds, alg = ALSRecon()) -> (ψ, traj)
+
+Fit an MPS `ψ` to a fixed sample set of tensor amplitudes by ALS sweeps
+(`samples::Vector` of `Pair{Vector{Int},T}` or `(𝐱, a)` tuples with
+`𝐱::Vector{Int}`; `alg` is an [`ALSRecon`](@ref) or [`ALSRecon2`](@ref)). The
+initial guess is a random chain of the bond profile demanded by `alg`. Returns `ψ`
+(scaling 1; the represented amplitudes are fitted) and `traj`, the per-sweep loss
+history of `iterative_compute!`.
+"""
+function reconstruct(samples, ds::Vector{Int}, alg::Union{ALSRecon,ALSRecon2} = ALSRecon())
+	# normalized init: an unnormalized random chain of bond D carries amplitudes of
+	# magnitude ~(d·D²)^(L/2), which wrecks the conditioning of the local normal
+	# equations (the CG solves make no progress at all)
+	ψ = randommps(ComplexF64, ds; D=_initial_bond(alg), normalize=true)
 	ψ, traj = reconstruct!(ψ, samples, alg)
 	return ψ, traj
 end
 
 """
-	reconstruct!(ψ, samples, alg::ALSRecon = ALSRecon()) -> (ψ, traj)
+	reconstruct!(ψ, samples, alg = ALSRecon()) -> (ψ, traj)
 
 In-place variant of [`reconstruct`](@ref): refine the provided chain on the fixed
 sample set (the per-site scaling is folded into the data and the bond profile is
-re-fitted to `alg.D` with `changebond!`). Returns `(ψ, traj)`.
+re-fitted to `alg`'s demand with `changebond!`). Returns `(ψ, traj)`.
 """
-function reconstruct!(ψ::CanonicalMPS, samples, alg::ALSRecon = ALSRecon())
+function reconstruct!(ψ::CanonicalMPS, samples, alg::Union{ALSRecon,ALSRecon2} = ALSRecon())
 	ds = phydims(ψ)
 	X, a = _normalize_samples(ds, samples)
-	bonddim(ψ) != alg.D && changebond!(ψ; D=alg.D)
+	D0 = _initial_bond(alg)
+	bonddim(ψ) != D0 && changebond!(ψ; D=D0)
 	c = ALSReconCache(ψ, X, a)
 	traj = iterative_compute!(c, alg)
 	return ψ, traj
 end
 
 """
-	reconstruct(Afun, ds, alg::ALSRecon = ALSRecon())
-	-> (ψ, info::NamedTuple{(:loss, :maxres, :nsamples, :rounds)})
+	reconstruct(Afun, ds, alg = ALSRecon())
+	-> (ψ, info::NamedTuple{(:loss, :nsamples, :rounds)})
 
-Adaptive reconstruction from a black-box amplitude oracle `Afun(𝐱)` (a dense tensor
-`A` is wrapped by the caller as `Afun = (𝐱) -> A[𝐱...]`): alternate the inner ALS fit
-on the current sample set with residual-driven sample enrichment — each round evaluates
-`|⟨𝐱′|ψ⟩ − A(𝐱′)|` on a fresh random candidate pool (`alg.nbuffer` points) and adds the
-`alg.nadd` worst points to the sample set (the least-squares analog of TCI's pivot
-selection). Stops when the maximal pool residual drops below `alg.tol` or after
-`alg.maxiter` rounds.
+Adaptive black-box reconstruction: alternate the inner ALS fit on the current sample
+pool with **active sample enrichment** — each round queries the oracle on `alg.nadd`
+fresh configurations, half drawn from the Born distribution of the current fit
+(`sample`, exploitation) and half uniformly random (exploration: an overfitted chain
+concentrates its Born distribution on the training points, so pure Born sampling
+would starve the loop of new information). This is the least-squares analog of TCI's
+pivot selection. The initial pool is `alg.nbuffer` uniformly random queries.
+
+The fresh Born samples act as the round's **held-out validation set** before joining
+the training pool: the loop stops when the validation loss drops below `alg.tol` or
+stagnates (relative change < `alg.tol`), or after `alg.nrounds` rounds. The
+validation-based criterion is essential — an overparameterized chain can drive the
+*training* loss to zero on any sample set, which carries no generalization
+information. Each round runs the inner sweeps of `iterative_compute!` up to
+`alg.maxiter`.
 """
-function reconstruct(Afun::Function, ds::Vector{Int}, alg::ALSRecon = ALSRecon())
-	ψ = randommps(ComplexF64, ds; D=alg.D, normalize=false)
-	S = [(𝐱, Afun(𝐱)) for 𝐱 in _random_coords(ds, alg.nbuffer)]
-	maxres = Inf
+function reconstruct(Afun::Function, ds::Vector{Int},
+					 alg::Union{ALSRecon,ALSRecon2} = ALSRecon())
+	ψ = randommps(ComplexF64, ds; D=_initial_bond(alg), normalize=true)
+	seen = Set{Vector{Int}}()
+	x0 = _random_coords(ds, 1)[1]
+	S = Tuple{Vector{Int},typeof(Afun(x0))}[(x0, Afun(x0))]
+	push!(seen, x0)
+	for x in _random_coords(ds, alg.nbuffer - 1)
+		(x in seen) && continue
+		push!(seen, x)
+		push!(S, (x, Afun(x)))
+	end
+	prevloss = Inf
+	loss = Inf
 	rounds = 0
-	while rounds < alg.maxiter
+	while rounds < alg.nrounds
 		reconstruct!(ψ, S, alg)
 		rounds += 1
-		cand = _random_coords(ds, alg.nbuffer)
-		ρ = [abs(Afun(𝐱) - _amplitude(ψ, 𝐱)) for 𝐱 in cand]
-		maxres = maximum(ρ)
+		# active enrichment: half Born samples of the current fit (exploit — queries
+		# concentrate where the fit puts weight), half uniform random (explore — an
+		# overfitted chain concentrates its Born distribution on the training points,
+		# so pure Born sampling would starve the loop of fresh information). The
+		# sweeps leave the chain gauged arbitrarily; re-canonicalize (no truncation)
+		# so that `sample` follows the exact Born distribution |ψ(𝐱)|². The fresh
+		# points validate the fit BEFORE joining the training pool.
+		unset_svectors!(ψ)
+		cand = vcat(sample(ψ, alg.nadd ÷ 2),
+					_random_coords(ds, alg.nadd - alg.nadd ÷ 2))
+		xs = [x for x in cand if x ∉ seen]
+		vals = [Afun(x) for x in xs]
+		loss = isempty(vals) ? 0.0 :
+			   sum(abs2(amplitude(ψ, x) - v) for (x, v) in zip(xs, vals))
+		union!(seen, xs)
+		append!(S, zip(xs, vals))
 		(alg.verbosity > 0) &&
-			println("ALSRecon round $rounds: maxres = $(round(maxres; sigdigits=4))")
-		(maxres < alg.tol || rounds >= alg.maxiter) && break
-		worst = partialsortperm(ρ, 1:min(alg.nadd, length(ρ)); rev=true)
-		append!(S, [(𝐱, Afun(𝐱)) for 𝐱 in cand[worst]])
+			println("reconstruct round $rounds: nsamples = $(length(S)), val loss = ",
+					round(loss; sigdigits=4))
+		delta = (isfinite(prevloss) && !iszero(prevloss)) ?
+				abs(loss - prevloss) / prevloss : Inf
+		(loss < alg.tol || delta < alg.tol) && break
+		prevloss = loss
 	end
-	X, a = _normalize_samples(ds, S)
-	c = ALSReconCache(ψ, X, a)
-	return ψ, (loss = _ls_loss(c), maxres = maxres, nsamples = length(S), rounds = rounds)
+	return ψ, (loss = loss, nsamples = length(S), rounds = rounds)
 end

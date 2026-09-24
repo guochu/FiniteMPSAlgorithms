@@ -94,11 +94,12 @@ end
         @test all(all(kh2 .<= kh1 .+ 1e-8) for (kh1, kh2) in zip(traj1, traj1[2:end]))
         @test all(all(diff(kv) .<= 1e-8) for kv in traj1)
 
-        # adaptive reconstruction from a black-box oracle: residual-driven enrichment
+        # adaptive reconstruction from a black-box oracle: active Born-sampling
+        # enrichment (the dedup makes the sample set converge to the 2^L cover)
         ψ2, info = reconstruct(amp, ds,
                 ALSRecon(D=6, α=1e-6, nbuffer=64, nadd=8, maxiter=25, tol=1e-8))
         @test norm(todense(ψ2) - vref) / norm(vref) < 1e-5
-        @test info.nsamples > 64
+        @test info.nsamples >= 2^L
 
         # noise robustness (the LS selling point vs TCI's exact interpolation)
         Sn = [(x, amp(x) + 1e-6 * (randn() + 1.0im * randn())) for x in coords]
@@ -112,4 +113,66 @@ end
         ψ4, traj4 = reconstruct!(ψ4, S, ALSRecon(D=6, α=1e-10, maxiter=100, tol=1e-14))
         @test scaling(ψ4) == 1
         @test todense(ψ4) ≈ vref atol = 1e-5 rtol = 1e-5
+end
+
+@testset "ALSRecon2 (two-site) reconstruction" begin
+        Random.seed!(5150)
+        L = 4
+        ds = fill(2, L)
+        ψref = randommps(ComplexF64, ds; D=3)
+        vref = todense(ψref)
+        idx(x) = 1 + sum((x[j] - 1) << (L - j) for j in 1:L)
+        amp(x) = vref[idx(x)]
+        coords = [[1 + ((i >> (L - j)) & 1) for j in 1:L] for i in 0:2^L-1]
+
+        # oversampled exact fit: the pair-wise LS problem reproduces the tensor
+        S = [(x, amp(x)) for x in coords]
+        ψ1, traj1 = reconstruct(S, ds,
+                ALSRecon2(trunc=truncdim(D=6), α=1e-10, maxiter=100, tol=1e-14))
+        @test todense(ψ1) ≈ vref atol = 1e-6 rtol = 1e-6
+        @test scaling(ψ1) == 1
+        @test bonddim(ψ1) <= 6
+        # exact local solves: the per-pair losses are non-increasing in processing time
+        @test all(all(kh2 .<= kh1 .+ 1e-8) for (kh1, kh2) in zip(traj1, traj1[2:end]))
+        @test all(all(diff(kv) .<= 1e-8) for kv in traj1)
+
+        # in-place route: bond re-fitted to the truncation's cap
+        ψ2 = randommps(ComplexF64, ds; D=4)
+        ψ2, traj2 = reconstruct!(ψ2, S,
+                ALSRecon2(trunc=truncdim(D=6), α=1e-10, maxiter=100, tol=1e-14))
+        @test todense(ψ2) ≈ vref atol = 1e-5 rtol = 1e-5
+end
+
+@testset "adaptive reconstruction (active Born sampling)" begin
+        Random.seed!(5151)
+        L = 4
+        ds = fill(2, L)
+        ψref = randommps(ComplexF64, ds; D=3)
+        vref = todense(ψref)
+        idx(x) = 1 + sum((x[j] - 1) << (L - j) for j in 1:L)
+        amp(x) = vref[idx(x)]
+
+        # mechanism test on the tiny lattice: the oracle is NOISY, so the held-out
+        # validation loss has a floor above alg.tol and the enrichment rounds run
+        # while Born samples keep growing the sample set (a noiseless representable
+        # target would be overfitted within the first round, stopping the loop —
+        # the validation criterion exists precisely to catch that)
+        amp_noisy(x) = amp(x) + 1e-4 * (randn() + im * randn())
+        ψ1, info1 = reconstruct(amp_noisy, ds,
+                ALSRecon(D=2, α=1e-8, nbuffer=8, nadd=16, maxiter=25, tol=1e-12, nrounds=10))
+        @test info1.rounds >= 2
+        @test info1.nsamples > 8
+
+        ψ2, info2 = reconstruct(amp_noisy, ds,
+                ALSRecon2(trunc=truncdim(D=2), α=1e-8, nbuffer=8, nadd=16,
+                          maxiter=25, tol=1e-12, nrounds=10))
+        @test info2.rounds >= 2
+        @test info2.nsamples > 8
+
+        # with the lattice fully covered by the initial pool, both variants
+        # reconstruct the target to its truncation accuracy
+        coords = [[1 + ((i >> (L - j)) & 1) for j in 1:L] for i in 0:2^L-1]
+        S = [(x, amp(x)) for x in coords]
+        ψ3, _ = reconstruct(S, ds, ALSRecon(D=6, α=1e-10, maxiter=100, tol=1e-14))
+        @test norm(todense(ψ3) - vref) / norm(vref) < 1e-5
 end
