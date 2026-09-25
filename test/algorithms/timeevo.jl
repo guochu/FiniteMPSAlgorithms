@@ -10,7 +10,7 @@
 	# --- real-time evolution vs exact ---
 	dt = 0.05
 	nsteps = 10
-	alg = TDVP1(stepsize=dt)   # real stepsize = real time: one sweep of exp(-i H dt)
+	alg = TDVP1(stepsize=-im * dt)   # stepsize = -im*τ: one sweep of exp(-i H τ)
 	env = DMRGCache(H, ψ)
 	ψ_ref = todense(ψ)
 	for t in 1:nsteps
@@ -29,7 +29,7 @@
 	ψg = randommps(ComplexF64, fill(2, L); D=8)
 	normalize!(ψg)
 	envg = DMRGCache(H, ψg)
-	alg_im = TDVP1(stepsize=-im * 0.2)   # stepsize = -im*τ: exp(-H τ)
+	alg_im = TDVP1(stepsize=-0.2)   # stepsize = -τ: one sweep of exp(-H τ)
 	for _ in 1:150
 		sweep!(envg, alg_im)
 	end
@@ -147,17 +147,17 @@ end
 	end
 	@test relerr(todense(ψwi)) < 5e-2
 
-	# --- TDVP1 on the non-Hermitian generator (stepsize im·dt: exp(𝓛·dt)) ---
+	# --- TDVP1 on the non-Hermitian generator (stepsize dt: exp(𝓛·dt)) ---
 	ψt = changebond!(copy(ρ); D=16)
 	env = DMRGCache(𝓛, ψt)
-	alg = TDVP1(stepsize=im * T / 40, ishermitian=false, verbosity=0)
+	alg = TDVP1(stepsize=T / 40, ishermitian=false, verbosity=0)
 	for _ in 1:40
 		sweep!(env, alg)
 	end
 	@test relerr(todense(env.ket)) < 5e-2
 end
 
-@testset "timeevo (MPO-TDVP1)" begin
+@testset "timeevo (TDVP1, density operator)" begin
 	Random.seed!(43)
 	σx = Float64[0 1; 1 0]
 	σy = ComplexF64[0 -im; im 0]
@@ -187,51 +187,72 @@ end
 		H
 	end
 
-	# --- L=1: the tangent space is the full operator space, one step is exact ---
+	# --- L=1: the tangent space is the full operator space, one step is exact.
+	#     Cooling by τ is `stepsize = -τ`, so one sweep applies exp(-τ·h₁) ---
 	d = 2
 	h1 = randn(ComplexF64, d, d); h1 = (h1 + h1') / 2
 	h1mpo = MPO([reshape(h1, 1, d, 1, d)])
 	dt = 0.01
-	ρ1 = randommpo(ComplexF64, [d]; D=4)
-	ρ1d = todense(ρ1)
-	env = MPOTDVPCache(h1mpo, ρ1)
-	sweep!(env, TDVP1(stepsize=dt))
-	@test norm(todense(env.rho) - exp(-im * dt * h1) * ρ1d * exp(im * dt * h1)) /
-		  norm(ρ1d) < 1e-8
 	ρ2 = randommpo(ComplexF64, [d]; D=4)
 	ρ2d = todense(ρ2)
-	env = MPOTDVPCache(h1mpo, ρ2)
-	sweep!(env, TDVP1(stepsize=-im * dt))
-	@test norm(todense(env.rho) - exp(-dt / 2 * h1) * ρ2d * exp(-dt / 2 * h1)) /
-		  norm(ρ2d) < 1e-8
+	env = TDVPCache(h1mpo, ρ2)
+	sweep!(env, TDVP1(stepsize=-dt))
+	@test norm(todense(env.state) - exp(-dt * h1) * ρ2d) / norm(ρ2d) < 1e-8
 
 	# --- L=1 cooling over many steps: ρ(τ) = e^{-τh} ---
 	ρI = tompo(Matrix{ComplexF64}(I, d, d), [d])
-	env = MPOTDVPCache(h1mpo, ρI)
+	env = TDVPCache(h1mpo, ρI)
 	τ = 0.0
 	for _ in 1:20
-		sweep!(env, TDVP1(stepsize=-im * 0.05))
+		sweep!(env, TDVP1(stepsize=-0.05))
 		τ += 0.05
 	end
-	@test norm(todense(env.rho) - exp(-τ * h1)) / norm(exp(-τ * h1)) < 1e-6
+	@test norm(todense(env.state) - exp(-τ * h1)) / norm(exp(-τ * h1)) < 1e-6
 
-	# --- L=3 invariants: real-time trace/hermiticity/purity conservation ---
+	# --- L=3: the density-operator cooling coincides with the vectorized
+	#     `superoperator(h, :left)` route (the same left multiplication h·ρ, driven by a
+	#     DMRGCache on the doubled chain) ---
 	L = 3
 	h = MPOHamiltonian(heisenberg_terms(L))
-	H3 = denseH(L)
-	ρd = todense(randommpo(ComplexF64, fill(2, L); D=2))
-	ρd = (ρd + ρd') / tr(ρd + ρd')
-	ρh = tompo(ρd, fill(2, L))
-	tr0 = tr(todense(ρh))
-	p0 = real(tr(ρd * ρd))
-	env = MPOTDVPCache(h, ρh)
-	for _ in 1:10
-		sweep!(env, TDVP1(stepsize=0.1))
+	ρv = randommpo(ComplexF64, fill(2, L); D=4)
+	ψv = vectorize(deepcopy(ρv))
+	envA = TDVPCache(h, ρv)
+	envB = DMRGCache(superoperator(h, :left), ψv)
+	for _ in 1:2
+		sweep!(envA, TDVP1(stepsize=-0.05, verbosity=0))
+		sweep!(envB, TDVP1(stepsize=-0.05, verbosity=0))
+		ρA = todense(envA.state)
+		ρB = todense(devectorize(envB.ket))
+		@test norm(ρA - ρB) / norm(ρA) < 1e-8
 	end
-	ρdN = todense(env.rho)
-	@test abs(tr(ρdN) - tr0) / abs(tr0) < 1e-8
-	@test norm(ρdN - ρdN') / norm(ρdN) < 1e-8
-	@test abs(real(tr(ρdN * ρdN)) - p0) < 1e-6
+
+	# --- L=3 with the *full* manifold (a generic three-site operator has MPO bond
+	#     dimension 4, so `tompo` of a dense operator fills the whole space): the cooling
+	#     must reproduce the dense propagator exactly (the projector splitting is exact
+	#     for the projected flow, and here nothing is projected away) ---
+	Mr = randn(ComplexF64, 2^L, 2^L); Mr = (Mr + Mr') / 2
+	Hd3 = denseH(L)
+	ρfull = tompo(Mr, fill(2, L))
+	@test all(==(4), bonddims(ρfull))
+	nt = 5; dt3 = 0.05
+	envi = TDVPCache(h, deepcopy(ρfull))
+	for _ in 1:nt
+		sweep!(envi, TDVP1(stepsize=-dt3, verbosity=0))
+	end
+	@test norm(todense(envi.state) - exp(-(dt3 * nt) * Hd3) * Mr) / norm(Mr) < 1e-10
+
+	# --- real-time evolution of a mixed state is two-sided, ρ(t) = e^{-i·t·H}ρe^{+i·t·H},
+	#     so it goes through the vectorized superoperator difference and a DMRGCache
+	#     (again on the full manifold, where the step is exact) ---
+	ρrt = deepcopy(ρfull)
+	ψrt = vectorize(ρrt)
+	envrt = DMRGCache(superoperator(h, :left) - superoperator(h, :right), ψrt)
+	nrt = 5; dt4 = 0.05
+	for _ in 1:nrt
+		sweep!(envrt, TDVP1(stepsize=-im * dt4, verbosity=0))
+	end
+	ρ_exact = exp(-im * (dt4 * nrt) * Hd3) * Mr * exp(im * (dt4 * nrt) * Hd3)
+	@test norm(todense(devectorize(envrt.ket)) - ρ_exact) / norm(ρ_exact) < 1e-8
 
 	# --- L=3 cooling from the identity: monotone energy decrease (with a random field;
 	#     for a purely interacting h the projected flow vanishes at the product state) ---
@@ -242,11 +263,11 @@ end
 	end
 	hf = MPOHamiltonian(termsf)
 	Hf = denseH(L; field)
-	env = MPOTDVPCache(hf, tompo(Matrix{ComplexF64}(I, 2^L, 2^L), fill(2, L)))
+	env = TDVPCache(hf, tompo(Matrix{ComplexF64}(I, 2^L, 2^L), fill(2, L)))
 	prevE = Inf
 	for _ in 1:6
-		sweep!(env, TDVP1(stepsize=-im * 0.25))
-		ρdN = todense(env.rho)
+		sweep!(env, TDVP1(stepsize=-0.25))
+		ρdN = todense(env.state)
 		E = real(tr(Hf * ρdN) / tr(ρdN))
 		@test E <= prevE + 1e-10
 		prevE = E
@@ -256,9 +277,21 @@ end
 	hd = MPO(h)
 	ρt1 = randommpo(ComplexF64, fill(2, L); D=2)
 	ρt2 = deepcopy(ρt1)
-	e1 = MPOTDVPCache(h, ρt1)
-	e2 = MPOTDVPCache(hd, ρt2)
-	sweep!(e1, TDVP1(stepsize=-im * 0.1))
-	sweep!(e2, TDVP1(stepsize=-im * 0.1))
-	@test todense(e1.rho) == todense(e2.rho)
+	e1 = TDVPCache(h, ρt1)
+	e2 = TDVPCache(hd, ρt2)
+	sweep!(e1, TDVP1(stepsize=-0.1))
+	sweep!(e2, TDVP1(stepsize=-0.1))
+	@test todense(e1.state) == todense(e2.state)
+
+	# --- CanonicalMPS state: the same cache and the same sweeps as DMRGCache ---
+	ψ1 = randommps(ComplexF64, fill(2, L); D=4)
+	normalize!(ψ1)
+	ψ2 = deepcopy(ψ1)
+	ev1 = TDVPCache(h, ψ1)
+	ev2 = DMRGCache(h, ψ2)
+	@test ev1.estorage == ev2.hstorage
+	sweep!(ev1, TDVP1(stepsize=-0.1, verbosity=0))
+	sweep!(ev2, TDVP1(stepsize=-0.1, verbosity=0))
+	@test todense(ev1.state) ≈ todense(ev2.ket)
+	@test all(ev1.estorage[i] ≈ ev2.hstorage[i] for i in eachindex(ev1.estorage))
 end

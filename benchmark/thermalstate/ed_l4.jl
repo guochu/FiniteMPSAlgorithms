@@ -21,7 +21,7 @@ function bench_ed()
     ψ = changebond!(vectorize(infinite_temperature_state(ComplexF64, ds)); D=16, noise=0)
     restore_gauge!(ψ)
     env = DMRGCache(𝒦, ψ)
-    alg = TDVP1(stepsize=-im * β / 2 / 80, verbosity=0)
+    alg = TDVP1(stepsize=-β / 2 / 80, verbosity=0)
     for _ in 1:80
         sweep!(env, alg)
     end

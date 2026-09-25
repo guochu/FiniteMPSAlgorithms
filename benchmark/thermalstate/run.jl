@@ -9,11 +9,13 @@
 #   scale_l20  L = 20, β = 0.05: TDVP (superoperator) vs itebd (no ED at this scale)
 #   lowtemp    L = 10, β = 1.0 : itebd and TDVP vs exact diag. (spin-1/2 convention)
 #   pdmrg      L = 4,  β = 1.0 : p-DMRG thermal state vs exact diag.
-#   mpo_tdvp   L = 6/10        : MPO-manifold TDVP (MPOTDVPCache) vs the vectorized
-#                                TDVP — strict per-step equivalence + efficiency
+#   mpo_tdvp   L = 6/10        : density-operator TDVP (TDVPCache, left multiplication
+#                                H·ρ) vs the vectorized left-superoperator route —
+#                                strict per-step equivalence + efficiency
 #
-# Each route evolves the infinite-temperature state I/2^L with its thermal generator to
-# T = β/2, giving ρ(β) = e^{-βH/2}·I·e^{-βH/2}/2^L.
+# Each route evolves the infinite-temperature state I/2^L with its thermal generator: the
+# two-sided routes go to T = β/2, giving ρ(β) = e^{-βH/2}·I·e^{-βH/2}/2^L, while the
+# left-multiplication route of `mpo_tdvp` goes to T = β, giving ρ(β) = e^{-βH}·I/2^L.
 
 include(joinpath(@__DIR__, "common.jl"))
 include(joinpath(@__DIR__, "ed_l4.jl"))

@@ -23,16 +23,47 @@ scale in the data and was unaffected). The factor is now included, matching the
 documented contract; in `expectationvalue` the operator scale is part of the represented
 value, while the `ψ`/`ρ` scalings still cancel between numerator and denominator.
 
-## Restored: `MPOTDVPCache` (MPO-manifold TDVP1)
+## Redesigned: `TDVPCache` — one environment stack, left action of a generator MPO
 
-The MPO-TDVP1 implementation (TDVP1 on the operator manifold: the generator MPO
-multiplies the CanonicalMPO state, with its own two environment stacks) is back. It is
-the same projected flow as the vectorized route — `MPOTDVPCache` with imaginary
-`stepsize = -im·τ` matches the vectorized `TDVP1` on
-`(superoperator(H, :left) + superoperator(H, :right)) / 2` step for step, at matched
-bond dimensions — while touching only half-size local site tensors (physical dim 2 vs
-the fused 4), which makes it ~3× faster per step. The two routes are benchmarked in
-`benchmark/thermalstate/` (`mpo_tdvp`).
+`MPOTDVPCache` is renamed `TDVPCache` (exported under the new name) and now serves both
+manifolds with a **single** environment stack, because the algorithm applies the generator
+from the left only: `sweep!` applies `exp(stepsize·H)`.
+
+- `state::CanonicalMPS` — the ordinary MPS TDVP1, for real and imaginary time alike.
+  `estorage` is the `⟨ψ|h|ψ⟩` stack and the sweeps are exactly those of a `DMRGCache`.
+- `state::CanonicalMPO` — cooling of a density operator by the left multiplication
+  `exp(-τ·H)·ρ`. This is meaningful in **imaginary time only**: from the
+  infinite-temperature state `ρ₀ ∝ I` it cools to the Gibbs state,
+  `exp(-τ·H)·I ∝ exp(-τ·H)`, i.e. `β_eff = n·τ` after `n` steps — the same `β_eff` as the
+  symmetric two-sided cooling `exp(-τ/2·h)·ρ₀·exp(-τ/2·h)` at half the cost per site
+  update.
+
+The state field is `state` (was `rho`) and the type parameter is
+`V <: Union{CanonicalMPO,CanonicalMPS}`. The sweeps (`_tdvp_leftsweep!` /
+`_tdvp_rightsweep!`) are shared by `DMRGCache` and `TDVPCache`; only the local generator
+map, the gauge groups and the environment transfer dispatch on the state, while the
+complement-space map (the shared `c_prime`) and the gauge moves (`_gauge_left` /
+`_gauge_right`) are common to both manifolds.
+
+Real-time evolution of a density operator is **not** `exp(-i·t·H)·ρ` but the two-sided
+`exp(-i·t·H)·ρ·exp(+i·t·H)`, which this cache does not implement (it stores the
+left-action environment only). Vectorize the state and use a `DMRGCache` on the
+superoperator instead,
+`DMRGCache(superoperator(h, :left) - superoperator(h, :right), vectorize(ρ))`; the
+symmetric cooling is the `(superoperator(h, :left) + superoperator(h, :right)) / 2`
+generator.
+
+## Changed: `TDVP1` stepsize is the complex time increment itself
+
+The sweeps apply `exp(stepsize·H)` directly (no hidden `-im` factor), so the caller picks
+the flow through the complex stepsize:
+
+- real-time evolution by `τ`: `TDVP1(stepsize = -im*τ)` — e.g. `-im*0.1`;
+- imaginary-time evolution (cooling) by `τ`: `TDVP1(stepsize = -τ)` — e.g. `-0.1`.
+
+This replaces the previous convention, under which a real stepsize meant real time and
+`-im*τ` meant imaginary time; every in-repo call site has been converted (the numerical
+evolution is unchanged, only the spelling of `stepsize`).
 
 ## Removed: `recalculate!`
 

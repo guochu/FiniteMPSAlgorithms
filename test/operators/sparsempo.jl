@@ -103,8 +103,8 @@
 		ψb = copy(ψa)
 		enva = DMRGCache(hs, ψa)
 		envb = DMRGCache(hd, ψb)
-		sweep!(enva, TDVP1(stepsize=-im * 0.05))
-		sweep!(envb, TDVP1(stepsize=-im * 0.05))
+		sweep!(enva, TDVP1(stepsize=-0.05))
+		sweep!(envb, TDVP1(stepsize=-0.05))
 		@test distance(ψa, ψb) < 1.0e-6
 	end
 end

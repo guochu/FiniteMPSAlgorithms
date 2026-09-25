@@ -3,7 +3,8 @@
 # Three routes to the low-temperature equilibrium state rho(beta) ~ exp(-beta H):
 #   TEBD  - rho vectorized into a d=4 MPS chain, Strang-ordered imaginary-time
 #           gates exp(-dt K) on every bond (K the (Hrho+rhoH)/2 generator);
-#   TDVP  - MPO-TDVP1 (density operator evolved directly on the MPO manifold).
+#   TDVP  - TDVP1 on the density-operator manifold with the left multiplication H·rho
+#           (TDVPCache).
 #           A purely interacting h has a VANISHING projected flow at the product
 #           state rho = I (the tangent space carries no two-site correlations), so
 #           the leg is TEBD-warmed to beta0 = BETA0 (untimed) and only the
@@ -21,7 +22,7 @@ using Random
 
 const BETA = 2.0            # target inverse temperature
 const BETA0 = 0.5           # TEBD warm-up point for the TDVP leg
-const DT = 0.05             # shared step: TEBD Trotter step == TDVP stepsize (imaginary)
+const DT = 0.05             # shared step: TEBD Trotter step == TDVP stepsize (=-dt, imaginary time)
 const DVEC = 128            # bond cap of the vectorized chain / TDVP seed MPO
 const EPS_TRUNC = 1e-10
 
@@ -89,7 +90,7 @@ function run_tebd(h, L; beta=BETA, dt=DT)
 	return (time=t, rho=ρ, E=expectationvalue(MPO(h), ρ), D=bonddim(ρ))
 end
 
-# ---------- TDVP (MPO-TDVP1, TEBD-warmed) ----------
+# ---------- TDVP (TDVP1 on the density operator, left multiplication, TEBD-warmed) ----------
 function run_tdvp(h, L; beta=BETA, beta0=BETA0, dt=DT)
 	ψ = vectorize(infinite_temperature_state(ComplexF64, fill(2, L)))
 	nwarm = round(Int, beta0 / dt)
@@ -97,14 +98,14 @@ function run_tdvp(h, L; beta=BETA, beta0=BETA0, dt=DT)
 		tebd_step!(ψ, L; dt)
 	end
 	ρ = devectorize(ψ)
-	env = MPOTDVPCache(h, ρ)
-	alg = TDVP1(stepsize=-im * dt)
+	env = TDVPCache(h, ρ)
+	alg = TDVP1(stepsize=-dt)
 	nsteps = round(Int, (beta - beta0) / dt)
 	t = @elapsed for _ in 1:nsteps
 		sweep!(env, alg)
 	end
-	return (time=t, warm=beta0, rho=env.rho,
-			E=expectationvalue(MPO(h), env.rho), D=bonddim(env.rho))
+	return (time=t, warm=beta0, rho=env.state,
+			E=expectationvalue(MPO(h), env.state), D=bonddim(env.state))
 end
 
 # ---------- PDMRG (purification free-energy minimization) ----------
@@ -153,17 +154,17 @@ function validate()
 	err_tebd = norm(todense(devectorize(ψ); order=:msb) -
 					exp(-DT / 2 * Hermitian(H)) * ρd0 * exp(-DT / 2 * Hermitian(H))) /
 			   norm(ρd0)
-	# one MPO-TDVP cooling step vs dense at L=1 (the tangent space is the full
-	# single-site operator space, so the projected flow is the exact cooling)
+	# one TDVP cooling step vs dense at L=1 (the tangent space is the full
+	# single-site operator space, so the projected flow is the exact left action)
 	d = 2
 	h1 = randn(ComplexF64, d, d); h1 = (h1 + h1') / 2
 	h1mpo = MPO([reshape(h1, 1, d, 1, d)])
 	ρ1 = randommpo(ComplexF64, [d]; D=4)
 	ρ1d = todense(ρ1; order=:msb)
-	env = MPOTDVPCache(h1mpo, ρ1)
-	sweep!(env, TDVP1(stepsize=-im * DT))
-	exact1 = exp(-DT / 2 * h1) * ρ1d * exp(-DT / 2 * h1)
-	err_tdvp = norm(todense(env.rho; order=:msb) - exact1) / norm(exact1)
+	env = TDVPCache(h1mpo, ρ1)
+	sweep!(env, TDVP1(stepsize=-DT))
+	exact1 = exp(-DT * h1) * ρ1d
+	err_tdvp = norm(todense(env.state; order=:msb) - exact1) / norm(exact1)
 	@printf "validation: one-step |Δρ|_TEBD(L=3) = %.2e   |Δρ|_TDVP(L=1) = %.2e\n" err_tebd err_tdvp
 	err_tebd < 5e-3 && err_tdvp < 1e-8 || error("validation failed")
 	return nothing

@@ -186,7 +186,8 @@ excited_state!(ψ, h::AbstractMPO, projectors::Vector{CanonicalMPS}; alg::DMRG1)
 abstract type TimeEvolutionAlgorithm <: MPSAlgorithm end
 
 @with_kw struct TDVP1{S<:Number} <: TimeEvolutionAlgorithm
-    stepsize::S                     # 每步时间步长(复数允许; stepsize=-im*τ 即虚时)
+    stepsize::S                     # 复时间增量(直接进指数: sweep! 施加 exp(stepsize·H))
+                                    #   -im*τ = 实时 τ;  -τ = 虚时 τ
     D::Int = Defaults.D
     ishermitian::Bool = true        # hermitian→Lanczos, 否则 Arnoldi
     verbosity::Int = Defaults.verbosity
@@ -197,7 +198,8 @@ leftsweep!(env, alg::TDVP1)    # 前半步(Strang): 位点 s: exp(+dt/2·ac_prim
 rightsweep!(env, alg::TDVP1)   # 另半步
 sweep!(env, alg::TDVP1)        # = 一个完整时间步 alg.stepsize(左扫+右扫)
 #   指数化: KrylovKit.exponentiate(x -> ac_prime/c_prime, t, x0; ishermitian=alg.ishermitian)
-#   stepsize=-im*τ(纯虚)即虚时演化 e^{-H·τ} —— 基态求解器备选(与 DMRG1 互验);
+#   stepsize=-τ(负实)即虚时演化 e^{-H·τ} —— 基态求解器备选(与 DMRG1 互验);
+#   stepsize=-im*τ 即实时演化 e^{-i·H·τ};
 #   时间循环由调用方重复 sweep!(env, alg) 完成(不提供 timeevo! 封装)
 ```
 
@@ -213,4 +215,4 @@ sweep!(env, alg::TDVP1)        # = 一个完整时间步 alg.stepsize(左扫+右
 - `DMRG1` ALS 对随机问题在 `maxiter` 内收敛（`std/mean < tol`）。
 - **ground_state**：横场 Ising / Heisenberg L=10，`E0` 与解析或稠密对角化误差 < 1e-10；逐 sweep 损失单调下降。
 - **激发态**：第一激发能与对角化一致；`dot(ψ0, ψ1) ≈ 0`。
-- **TDVP**：小系统精确态演化保范数（1e-12），保真度与 exp 对比 < 1e-8；虚时（实 dt）收敛到 DMRG1 的 E0。
+- **TDVP**：小系统精确态演化保范数（1e-12），保真度与 exp 对比 < 1e-8；虚时（`stepsize = -τ`）收敛到 DMRG1 的 E0。

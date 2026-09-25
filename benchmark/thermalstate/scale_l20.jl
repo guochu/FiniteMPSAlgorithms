@@ -79,7 +79,7 @@ function bench_scale()
     ψ = changebond!(vectorize(infinite_temperature_state(ComplexF64, ds)); D=16, noise=0)
     restore_gauge!(ψ)   # the TDVP sweeps need a canonical gauge
     env = DMRGCache(superoperator(H, :left) + superoperator(H, :right), ψ)
-    alg = TDVP1(stepsize=-im * β / 2 / 10, verbosity=0)
+    alg = TDVP1(stepsize=-β / 2 / 10, verbosity=0)
     Et = Float64[]
     for _ in 1:10
         sweep!(env, alg)

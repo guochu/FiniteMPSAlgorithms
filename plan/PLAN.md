@@ -119,7 +119,7 @@ src/
     ├── derivatives.jl             # ac_prime / c_prime / CentralHeff（局域求解用 KrylovKit）
     ├── dmrg.jl                    # ground_state; 统一接口 leftsweep!/rightsweep!/sweep!
     ├── excited.jl                 # DMRG1 + ProjectedExpectationCache(无独立算法类型)
-    ├── tdvp.jl                    # TDVP1: sweep! = 一个完整时间步(实 dt 即虚时)
+    ├── tdvp.jl                    # TDVP1: sweep! = 一个完整时间步(stepsize 为复时间增量: -τ 虚时 / -im*τ 实时)
     ├── gate.jl                    # AbstractGate / UnitaryGate(检查幺正) / GenerateGate + apply! + swap!
     ├── mult.jl                    # mult 唯一接口(SVDCompression|DMRG1): MPO·MPS / MPO·MPO / MPO·CanonicalMPO
     ├── add.jl                     # add 唯一接口
@@ -147,7 +147,7 @@ src/
   用测试辅助函数转稠密矩阵对比。
 - DMRG1：`E0`、局域磁化、二联体熵与精确值对比（~1e-10）；逐 sweep 损失单调下降并以
   `std(kvals)/mean(kvals) < tol` 收敛。
-- TDVP：与 `exp(-i·H·t)|ψ⟩` 精确振幅逐分量对比；保范数（1e-12）；实 dt 虚时演化收敛到 DMRG1 的 E0。
+- TDVP：与 `exp(-i·H·t)|ψ⟩` 精确振幅逐分量对比；保范数（1e-12）；虚时演化（`stepsize = -τ`）收敛到 DMRG1 的 E0。
 - 门演化（TEBD 构件）：`UnitaryGate` 拒绝非幺正输入；单门作用与精确 U 对比；手动循环施加门 vs TDVP 互验。
 - 压缩：`mult(h, ψ; alg=SVDCompression(...))` 误差 ≤ 截断误差上界；`DMRG1` ALS 收敛测试。
 - 规范形：每键左环境 = I、`s²` 与环境一致、`dot` 规范不变性。
