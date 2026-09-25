@@ -115,14 +115,17 @@ function infinite_temperature_state(::Type{T}, ds::AbstractVector{Int}) where {T
 end
 
 """
-	changebond!(ψ::CanonicalMPS; D=Defaults.D) -> ψ
+	changebond!(ψ::CanonicalMPS; D=Defaults.D, noise=1e-10) -> ψ
 
 Bring the bond profile of `ψ` to `min(D, feasible)`: every bond larger than its target
-is shrunk by slicing the leading bond indices (the first rows/columns of the bond
-space), smaller bonds are grown by zero padding (the state is unchanged); the chain is
-re-canonicalized without truncation. Used to prepare initial guesses of `DMRG1`.
+is shrunk by slicing the leading bond indices (the first rows/columns of the bond space;
+singular values are ignored), smaller bonds are grown with random entries of magnitude
+`noise` (a small perturbation of the represented state). The Schmidt values do not
+survive the resize: they are unset, and the gauge is left as produced by the resize —
+if a specific canonical form is needed, call [`canonicalize!`](@ref) afterwards. Used
+to prepare initial guesses with bond headroom (`DMRG1`, `TDVP1`, ...).
 """
-function changebond!(ψ::CanonicalMPS; D::Int=Defaults.D)
+function changebond!(ψ::CanonicalMPS; D::Int=Defaults.D, noise::Real=1e-10)
 	isempty(ψ.data) && return ψ
 	T = scalartype(ψ)
 	ds = phydims(ψ)
@@ -140,14 +143,14 @@ function changebond!(ψ::CanonicalMPS; D::Int=Defaults.D)
 	for i in 1:L
 		dl = i == 1 ? 1 : b[i]
 		dr = i == L ? 1 : b[i+1]
-		t = zeros(T, dl, ds[i], dr)
+		t = noise * randn(T, dl, ds[i], dr)
 		vr = 1:min(dl, size(ψ[i], 1))
 		vc = 1:min(dr, size(ψ[i], 3))
 		t[vr, :, vc] = ψ[i][vr, :, vc]
 		newdata[i] = t
 	end
 	copy!(ψ.data, newdata)
-	canonicalize!(ψ; alg=Orthogonalize(SVD(), NoTruncation(), false))
+	unset_svectors!(ψ)
 	return ψ
 end
 

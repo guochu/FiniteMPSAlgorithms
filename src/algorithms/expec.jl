@@ -23,9 +23,10 @@ function expectation(ψA::CanonicalMPS, h::AbstractMPO, ψB::CanonicalMPS)
 	(length(ψA) == length(h) == length(ψB)) || throw(ArgumentError("dimension mismatch"))
 	sA = scaling(ψA)
 	sB = scaling(ψB)
+	sh = h isa CanonicalMPO ? scaling(h) : one(sA * sB)
 	hold = l_LL(ψA, h, ψB)
 	for i in 1:length(h)
-		hold = (sA * sB) * _updateleft(hold, ψA[i], h[i], ψB[i])
+		hold = (sA * sB * sh) * _updateleft(hold, ψA[i], h[i], ψB[i])
 	end
 	# contract with the right boundary vector: for block-sparse chains it selects the
 	# closing column (a dense MPO chain has a single column, so this is its scalar too)
@@ -51,13 +52,14 @@ expectation(h::AbstractMPO, ψ::CanonicalMPS) = expectation(ψ, h, ψ)
 function expectation(h::AbstractMPO, ρ::CanonicalMPO)
 	(length(h) == length(ρ)) || throw(ArgumentError("dimension mismatch"))
 	s = scaling(ρ)
+	sh = h isa CanonicalMPO ? scaling(h) : one(s)
 	T = promote_type(scalartype(h), scalartype(ρ))
 	c = ones(T, 1, 1)
 	for i in eachindex(h)
 		Wh = h[i]
 		Wρ = ρ[i]
 		@tensor c2[-1, -2] := c[1, 2] * Wh[1, 3, -1, 5] * Wρ[2, 5, -2, 3]
-		c = s * c2
+		c = sh * s * c2
 	end
 	return scalar(c)
 end
@@ -216,15 +218,18 @@ end
 
 The normalized expectation value: `⟨ψ|h|ψ⟩ / ⟨ψ|ψ⟩` (pure states), `tr(h·ρ) / tr(ρ)`
 (mixed states), or the corresponding term ratios. Computed from raw (scale-free)
-transfer contractions — the external `scaling` factors appear with the same power in
-numerator and denominator and cancel exactly, so `expectationvalue` is stable even when
-the represented `scaling^L` powers would overflow (unlike [`expectation`](@ref)).
+transfer contractions: the external `scaling` factors of the chains `ψ` / `ρ` appear
+with the same power in numerator and denominator and cancel exactly, so
+`expectationvalue` is stable even when the represented `scaling^L` powers would
+overflow (unlike [`expectation`](@ref)); the `scaling^L` of a `CanonicalMPO` operator
+`h` is part of the represented value `h` and is kept.
 """
 function expectationvalue(h::AbstractMPO, ψ::CanonicalMPS)
 	(length(h) == length(ψ)) || throw(ArgumentError("dimension mismatch"))
+	sh = h isa CanonicalMPO ? scaling(h) : 1.0
 	hold = l_LL(ψ, h, ψ)
 	for i in 1:length(h)
-		hold = _updateleft(hold, ψ[i], h[i], ψ[i])
+		hold = sh * _updateleft(hold, ψ[i], h[i], ψ[i])
 	end
 	r = r_RR(ψ, h, ψ)
 	@tensor num = conj(r[a, w, c]) * hold[a, w, c]
@@ -233,13 +238,14 @@ end
 
 function expectationvalue(h::AbstractMPO, ρ::CanonicalMPO)
 	(length(h) == length(ρ)) || throw(ArgumentError("dimension mismatch"))
+	sh = h isa CanonicalMPO ? scaling(h) : 1.0
 	T = promote_type(scalartype(h), scalartype(ρ))
 	c = ones(T, 1, 1)
 	for i in eachindex(h)
 		Wh = h[i]
 		Wρ = ρ[i]
 		@tensor c2[-1, -2] := c[1, 2] * Wh[1, 3, -1, 5] * Wρ[2, 5, -2, 3]
-		c = c2
+		c = sh * c2
 	end
 	return scalar(c) / _trace_raw(ρ)
 end

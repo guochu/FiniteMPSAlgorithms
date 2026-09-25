@@ -78,50 +78,48 @@ end
 	@test superoperator(hH; side=:left) isa MPO
 end
 
-@testset "thermal state via TDVP purification vs ED" begin
-	Random.seed!(42)
-	L = 4
+@testset "MPO kron and transpose" begin
+	Random.seed!(25)
+	L = 3
 	ds = fill(2, L)
-	p = model_params(L)
-	H = mpo_model(p)
-	Hd = dense_model(p)
-	β = 1.0
 
-	# thermal generator 𝒦 = H⊗I + I⊗Hᵀ on the vectorized chain (built from the
-	# left/right superoperators): exp(-τ𝒦)|ρ₀⟩ = e^{-τH}·ρ₀·e^{-τH}, so evolving the
-	# infinite-temperature state I/2^L to τ = β/2 gives the Gibbs state e^{-βH}/Z
-	𝒦 = superoperator(H; side=:left) + superoperator(H; side=:right)
+	# transpose transposes the represented operator matrix
+	h = MPO(randommpo(ComplexF64, ds; D=3).data)
+	@test todense(transpose(h)) ≈ collect(transpose(todense(h))) atol = 1e-10
+	ρ = randommpo(ComplexF64, ds; D=3, normalize=false)
+	setscaling!(ρ, 1.2)
+	@test todense(transpose(ρ)) ≈ collect(transpose(todense(ρ))) atol = 1e-10
+	@test scaling(transpose(ρ)) ≈ 1.2
 
-	ψ = changebond!(vectorize(infinite_temperature_state(ComplexF64, ds)); D=16)
-	env = DMRGCache(𝒦, ψ)
-	alg = TDVP1(stepsize=-im * β / 2 / 80, verbosity=0)
-	for _ in 1:80
-		sweep!(env, alg)
-	end
-	ρ = devectorize(env.ket)
+	# kron of one-site chains is the fused-space Kronecker product: `a` carries the
+	# FAST fused legs (vectorize convention), while Base.kron orders its first factor
+	# slowest — so the dense forms swap the factor roles
+	a1 = MPO([randn(ComplexF64, 1, 3, 1, 3)])
+	b1 = MPO([randn(ComplexF64, 1, 2, 1, 2)])
+	@test todense(kron(a1, b1)) ≈ kron(todense(b1), todense(a1)) atol = 1e-10
+	# bond dimensions multiply; equal chain lengths are required
+	a2 = MPO(randommpo(ComplexF64, ds; D=2).data)
+	b2 = MPO(randommpo(ComplexF64, ds; D=4).data)
+	@test bonddims(kron(a2, b2)) == bonddims(a2) .* bonddims(b2)
+	@test_throws DimensionMismatch kron(h, MPO(randommpo(ComplexF64, fill(2, 2); D=3).data))
 
-	# ED reference: the Gibbs state of the dense Hamiltonian
-	rho_ed = exp(-β * Matrix(Hermitian(Hd)))
-	Z = tr(rho_ed)
-	rho_ed ./= Z
+	# the superoperators are the kron products with the identity chain
+	𝕀 = MPO(Float64, ds)
+	@test superoperator(h, :left).data == kron(h, 𝕀).data
+	@test superoperator(h, :right).data == kron(𝕀, transpose(h)).data
+end
 
-	# trace of the represented state: Z/2^L (the I/2^L initial trace is conserved as
-	# tr(e^{-βH})/2^L by the exact flow)
-	@test real(expectation(identitympo(ComplexF64, ds), ρ)) ≈ Z / 2^L rtol = 1e-3
-
-	# energy of the Gibbs state
-	Hd_mpo = MPO(tompotensors(H))
-	@test real(expectationvalue(Hd_mpo, ρ)) ≈ real(tr(Hd * rho_ed)) rtol = 1e-3
-
-	# local observables
-	I2 = Matrix{ComplexF64}(I, 2, 2)
-	for (s, O) in [(2, _SZ), (3, _SX)]
-		Os = reshape(kron(ntuple(k -> k == s ? O : I2, L)...), 2^L, 2^L)
-		@test real(expectationvalue(term(s => O), ρ)) ≈ real(tr(Os * rho_ed)) atol = 1e-4
-	end
-
-	# the full density matrix
-	ρt = todense(ρ)
-	ρt ./= tr(ρt)
-	@test norm(ρt - rho_ed) / norm(rho_ed) < 1e-3
+@testset "expectation scaling (regression)" begin
+	# `expectation`/`expectationvalue` include `scaling(h)^L` of a scaled CanonicalMPO
+	# operator (its `scaling^L` is part of the represented value)
+	Random.seed!(35)
+	L = 3
+	ds = fill(2, L)
+	ρ = randommpo(ComplexF64, ds; D=2, normalize=false)
+	ρs = deepcopy(ρ)
+	setscaling!(ρs, 1.7)
+	Hd = MPO(randommpo(ComplexF64, ds; D=2).data)
+	Hs = CanonicalMPO(Hd.data; scaling=2.3)
+	@test real(expectationvalue(Hs, ρs)) ≈ 2.3^L * real(expectationvalue(Hd, ρs)) rtol = 1e-8
+	@test real(expectation(Hs, ρs)) ≈ 2.3^L * real(expectation(Hd, ρs)) rtol = 1e-8
 end

@@ -55,30 +55,6 @@ function updateright!(env::DMRGCache, site::Integer)
 	return env
 end
 
-"""
-	recalculate!(env, ψ)
-
-Attach a new state `ψ` and rebuild all environments (right environments precomputed).
-"""
-function recalculate!(env::DMRGCache, ψ::CanonicalMPS)
-	ψ !== env.ket && copy!(env.ket, ψ)
-	fresh = DMRGCache(env.H, env.ket)
-	copy!(env.hstorage, fresh.hstorage)
-	return env
-end
-
-"""
-	changebond!(env; D)
-
-Re-fit the bond profile of the cached state to `D` (see `changebond!(::CanonicalMPS)`),
-then rebuild the environments.
-"""
-function changebond!(env::DMRGCache; D::Int=Defaults.D)
-	changebond!(env.ket; D)
-	recalculate!(env, env.ket)
-	return env
-end
-
 # ---------- DMRG1 sweeps ----------
 
 """

@@ -313,11 +313,6 @@ end
 	@test ec isa ExcitedStateCache
 	@test length(ec.cstorages) == 1
 
-	# recalculate!: copy the new state into the cache's ket and rebuild environments
-	ψnew = randommps(ComplexF64, ds; D=8)
-	recalculate!(env, ψnew)
-	@test env.ket.data == ψnew.data
-
 	# in-place driver entry points (mult! / add! / linsolve!)
 	Hd = dense_model(p)
 	out_m = mult!(svdguess_mult(H, ψ, 8), H, ψ, DMRG1(maxiter=5, tol=1e-10))

@@ -1,5 +1,52 @@
 # Interface changes
 
+## New: `kron(a, b)` / `transpose(h)` for operator chains, `superoperator` built on them
+
+- `Base.kron(a::AbstractMPO, b::AbstractMPO)`: the Kronecker product of two chains of
+  equal length — per site the local Kronecker product on the fused physical space
+  (the legs of `a` the fastest, matching the `vectorize` convention), bond dimensions
+  multiply, `CanonicalMPO` scalings are not folded (data-level convention).
+- `Base.transpose(h::MPO)` / `Base.transpose(h::CanonicalMPO)`: the operator transpose
+  (physical legs of every site tensor exchanged; the canonical `scaling` is kept).
+- `superoperator(h, side)` now takes the side positionally (`superoperator(h, :left)`)
+  beside the previous keyword form and is constructed from the Kronecker products with
+  the identity chain: `superoperator(h, :left) = kron(h, I)`,
+  `superoperator(h, :right) = kron(I, transpose(h))`. The old data-level builder
+  `_superoperator_data` is gone (the observable behavior — bond structure, `scaling`
+  handling, `ArgumentError` on a bad side — is unchanged and pinned by the tests).
+
+## Fixed: `expectation` / `expectationvalue` with a scaled `CanonicalMPO` operator
+
+`expectation(ψA, h, ψB)`, `expectation(h, ρ)` and both `expectationvalue(h, …)` methods
+silently dropped `scaling(h)^L` when `h` was a `CanonicalMPO` (a plain `MPO` carries its
+scale in the data and was unaffected). The factor is now included, matching the
+documented contract; in `expectationvalue` the operator scale is part of the represented
+value, while the `ψ`/`ρ` scalings still cancel between numerator and denominator.
+
+## Restored: `MPOTDVPCache` (MPO-manifold TDVP1)
+
+The MPO-TDVP1 implementation (TDVP1 on the operator manifold: the generator MPO
+multiplies the CanonicalMPO state, with its own two environment stacks) is back. It is
+the same projected flow as the vectorized route — `MPOTDVPCache` with imaginary
+`stepsize = -im·τ` matches the vectorized `TDVP1` on
+`(superoperator(H, :left) + superoperator(H, :right)) / 2` step for step, at matched
+bond dimensions — while touching only half-size local site tensors (physical dim 2 vs
+the fused 4), which makes it ~3× faster per step. The two routes are benchmarked in
+`benchmark/thermalstate/` (`mpo_tdvp`).
+
+## Removed: `recalculate!`
+
+The environment-stack rebuild `recalculate!(env, ψ)` is gone; build a fresh cache
+(`DMRGCache(h, ψ)`) instead.
+
+## `changebond!` only for `CanonicalMPS` / `CanonicalMPO`
+
+The public `changebond!` now dispatches on `CanonicalMPS` and `CanonicalMPO` only (the
+`CanonicalMPO` variant re-canonicalizes without truncation after the bond refit, like
+the MPS variant). All overloads on caches (`changebond!(env::DMRGCache)`) are deleted;
+the raw bond-profile refit survives as the internal `_changebond!` (used by `seq2seq!`
+to prepare plain-MPO initial guesses).
+
 ## Dense conversion: `order` keyword renamed to `:msb` / `:lsb`
 
 `todense`, `tomps` and `tompo` take an `order` keyword selecting the endianness of the

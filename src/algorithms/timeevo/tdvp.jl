@@ -112,7 +112,7 @@ end
 # pairing tr((δρ)† h ρ): the three operator chains (δρ†, h, ρ) multiply SITE-WISE, the
 # physical legs chain pairwise through each site product (conj(W).po ↔ h.po, h.pin ↔
 # W.po, W.pin ↔ conj(W).pin), and the two multiplier terms keep two environment stacks
-# over (bra bond, h bond, ρ bond) resp. (bra bond, ρ bond, h bond):
+# over (bra bond, h bond, ρ bond):
 #
 #   (hρ):  Ẇ[aL,po,aR,pin] = Σ E[aL,xl,wl]·h[xl,po,xr,m]·W[wl,m,wr,pin]·E[xr,wr]
 #   (ρh):  Ẇ[aL,po,aR,pin] = Σ F[aL,wl,xl]·W[wl,po,wr,k]·h[xl,k,xr,pin]·F[aR,wr,xr]
@@ -168,9 +168,9 @@ end
 	MPOTDVPCache{M<:AbstractMPO, V<:CanonicalMPO, T}
 
 Environment stack for the MPO-TDVP1: `H` the generator MPO, `rho` the evolved
-CanonicalMPO, `estorage` the (hρ)-term environments `E[l, x, w]` over (bra bond, H
-bond, ρ bond) and `estorageB` the (ρh)-term environments `F[l, w, x]` over (bra bond,
-ρ bond, H bond) at all bonds (`estorage[1]`/`estorageB[1]` the left boundary,
+CanonicalMPO state, `estorage` the (hρ)-term environments `E[l, x, w]` over (bra bond, H bond, ρ bond)
+and `estorageB` the (ρh)-term environments `F[l, w, x]` over (bra bond, ρ bond, H bond)
+at all bonds (`estorage[1]`/`estorageB[1]` the left boundary,
 `estorage[L+1]`/`estorageB[L+1]` the right boundary, right environments precomputed).
 """
 struct MPOTDVPCache{M<:AbstractMPO, V<:CanonicalMPO, T}

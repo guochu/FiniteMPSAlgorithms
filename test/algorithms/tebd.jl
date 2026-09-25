@@ -1,12 +1,3 @@
-# matrix in the Kronecker convention (i1 i2)',(i1 i2), i1 slowest -> documented gate
-# tensor (i1', i2', i1, i2)
-function gate_tensor(M::AbstractMatrix)
-	d2r, d2c = size(M)
-	dr, dc = isqrt(d2r), isqrt(d2c)
-	(dr^2 == d2r && dc^2 == d2c) || throw(ArgumentError("dimensions must be perfect squares"))
-	return permutedims(reshape(M, dr, dc, dr, dc), (2, 1, 4, 3))
-end
-
 # dense L-site matrix of the documented (i1',...,iN',i1,...,iN) gate tensor on sites (i, i+1)
 function two_site_dense(op4, i, L, d::Int=2)
 	M = reshape(permutedims(op4, (2, 1, 4, 3)), d^2, d^2)   # (i1 i2)',(i1 i2), i1 slowest

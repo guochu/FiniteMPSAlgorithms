@@ -61,54 +61,79 @@ function devectorize(ψ::AbstractMPS)
 end
 
 """
-	superoperator(h::MPO; side=:left) -> MPO
-	superoperator(h::MPOHamiltonian; side=:left) -> MPO
-	superoperator(h::CanonicalMPO; side=:left) -> CanonicalMPO
+	Base.transpose(h::MPO) -> MPO
+	Base.transpose(h::CanonicalMPO) -> CanonicalMPO
 
-The superoperator induced by left/right multiplication with `h`: the map `X ↦ h·X`
-(`side = :left`) or `X ↦ X·h` (`side = :right`) on the vectorized space — a chain on
-the doubled physical space (per-site dimension `d_out·d_in`) with the same bond
-dimensions as `h`. Site tensor layouts (δ the identity on the physical legs):
-
-- `side = :left`:  `𝒲[aL, (po,pi), aR, (q,qi)] = W[aL, po, aR, q] · δ(pi, qi)`
-- `side = :right`: `𝒲[aL, (po,pi), aR, (q,qi)] = δ(po, q) · W[aL, qi, aR, pi]`
-
-Applying it to [`vectorize(X)`](@ref) and devectorizing the result gives the operator
-product (up to the compression of the chosen evaluation route). The represented
-superoperator is linear in the represented `h`: a `CanonicalMPO` input carries its
-`scaling` into the result's `scaling` field, while plain `MPO` / `MPOHamiltonian`
-inputs have no external scale.
+The operator transpose: the physical legs of every site tensor are exchanged
+(`W[aL, po, aR, pin] -> Wᵗ[aL, pin, aR, po]`), which transposes the represented
+operator matrix. A `CanonicalMPO` keeps its `scaling`.
 """
-function superoperator(h::MPO; side::Symbol=:left)
-	return _superoperator_data(h; side)
-end
-superoperator(h::CanonicalMPO; side::Symbol=:left) =
-	CanonicalMPO(_superoperator_data(h; side).data; scaling=scaling(h))
-superoperator(h::MPOHamiltonian; side::Symbol=:left) =
-	_superoperator_data(MPO(tompotensors(h)); side)
+Base.transpose(h::MPO) = MPO([permutedims(W, (1, 4, 3, 2)) for W in h.data])
+Base.transpose(h::CanonicalMPO) =
+	CanonicalMPO([permutedims(W, (1, 4, 3, 2)) for W in h.data]; scaling=scaling(h))
 
-# scaling-free (raw data) superoperator: the `scaling` of a CanonicalMPO operand is NOT
-# included; the exported `superoperator` wrappers attach it
-function _superoperator_data(h::AbstractMPO; side::Symbol=:left)
-	(side === :left || side === :right) ||
-		throw(ArgumentError("side must be :left or :right, got $side"))
-	L = length(h)
-	T = scalartype(h)
+"""
+	Base.kron(a::AbstractMPO, b::AbstractMPO) -> MPO
+
+The Kronecker product of two operator chains of equal length: site `i` of the result
+carries the local Kronecker product of the site operators on the fused physical space —
+from the site tensors `A[aL, po, aR, pin]` and `B[bL, q, bR, qin]` the result tensor is
+
+	S[(aL,bL), (po,q), (aR,bR), (pin,qin)] = A[aL, po, aR, pin] · B[bL, q, bR, qin]
+
+(the legs of `a` are the fastest on every fused index, matching the `vectorize`
+convention); the bond dimensions multiply. The `scaling` of `CanonicalMPO` inputs is
+NOT folded (data-level convention). The two-sided superoperators are the special cases
+
+	superoperator(h, :left)  == kron(h, identitympo(T, iphydims(h)))
+	superoperator(h, :right) == kron(identitympo(T, ophydims(h)), transpose(h))
+"""
+function Base.kron(a::AbstractMPO, b::AbstractMPO)
+	L = length(a)
+	(L == length(b)) || throw(DimensionMismatch("kron requires chains of equal length, "
+		* "got $L and $(length(b))"))
+	T = promote_type(scalartype(a), scalartype(b))
 	data = Vector{Array{T,4}}(undef, L)
 	for i in 1:L
-		W = h[i]
-		dl, d, dr = size(W, 1), phydim(W), size(W, 3)
-		delta = Matrix{T}(I, d, d)
-		if side === :left
-			# S[aL, po, pi, aR, q, qi] = W[aL, po, aR, q] · δ(pi, qi)
-			S = reshape(W, dl, d, 1, dr, d, 1) .* reshape(delta, 1, 1, d, 1, 1, d)
-		else
-			# S[aL, po, pi, aR, q, qi] = δ(po, q) · W[aL, qi, aR, pi]
-			S = reshape(permutedims(W, (1, 4, 3, 2)), dl, 1, d, dr, 1, d) .*
-				reshape(delta, 1, d, 1, 1, d, 1)
-		end
-		# merge (po, pi) and (q, qi) column major (p_out the fastest on both sides)
-		data[i] = reshape(S, dl, d^2, dr, d^2)
+		A, B = a[i], b[i]
+		@tensor S[al, bl, po, q, ar, br, pin, qin] := A[al, po, ar, pin] * B[bl, q, br, qin]
+		# merge (al, bl), (po, q), (ar, br), (pin, qin) column major (a-leg the fastest)
+		data[i] = reshape(S, size(A, 1) * size(B, 1), ophydim(A) * ophydim(B),
+						  size(A, 3) * size(B, 3), iphydim(A) * iphydim(B))
 	end
 	return MPO(data)
 end
+
+"""
+	superoperator(h::MPO, side=:left) -> MPO
+	superoperator(h::MPOHamiltonian, side=:left) -> MPO
+	superoperator(h::CanonicalMPO, side=:left) -> CanonicalMPO
+
+The superoperator induced by left/right multiplication with `h`: the map `X ↦ h·X`
+(`side = :left`) or `X ↦ X·h` (`side = :right`) on the vectorized space, built from the
+MPO Kronecker product with the identity chain,
+
+	superoperator(h, :left)  = kron(h, I)          # h acts on the output (po) legs
+	superoperator(h, :right) = kron(I, transpose(h)) # hᵀ acts on the input (pi) legs
+
+so the result is a chain on the doubled physical space (per-site dimension `d_out·d_in`)
+with the same bond dimensions as `h`. Applying it to [`vectorize(X)`](@ref) and
+devectorizing the result gives the operator product (up to the compression of the
+chosen evaluation route). The represented superoperator is linear in the represented
+`h`: a `CanonicalMPO` input carries its `scaling` into the result's `scaling` field,
+while plain `MPO` / `MPOHamiltonian` inputs have no external scale. The `side` may also
+be given as the keyword `side = :left`.
+"""
+function superoperator(h::MPO, side::Symbol=:left)
+	(side === :left || side === :right) ||
+		throw(ArgumentError("side must be :left or :right, got $side"))
+	if side === :left
+		return kron(h, MPO(scalartype(h), iphydims(h)))
+	end
+	return kron(MPO(scalartype(h), ophydims(h)), transpose(h))
+end
+superoperator(h::CanonicalMPO, side::Symbol=:left) =
+	CanonicalMPO(superoperator(MPO(h), side).data; scaling=scaling(h))
+superoperator(h::MPOHamiltonian, side::Symbol=:left) =
+	superoperator(MPO(tompotensors(h)), side)
+superoperator(h::AbstractMPO; side::Symbol=:left) = superoperator(h, side)

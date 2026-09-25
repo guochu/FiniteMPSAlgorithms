@@ -1,0 +1,51 @@
+# Thermal-state benchmarks.
+#
+# Usage:
+#   julia --project=. benchmark/thermalstate/run.jl          # run everything
+#   julia --project=. benchmark/thermalstate/run.jl ed       # a single benchmark
+#
+# Available benchmarks:
+#   ed_l4      L = 4,  β = 1.0 : TDVP (superoperator) and itebd vs exact diag.
+#   scale_l20  L = 20, β = 0.05: TDVP (superoperator) vs itebd (no ED at this scale)
+#   lowtemp    L = 10, β = 1.0 : itebd and TDVP vs exact diag. (spin-1/2 convention)
+#   pdmrg      L = 4,  β = 1.0 : p-DMRG thermal state vs exact diag.
+#   mpo_tdvp   L = 6/10        : MPO-manifold TDVP (MPOTDVPCache) vs the vectorized
+#                                TDVP — strict per-step equivalence + efficiency
+#
+# Each route evolves the infinite-temperature state I/2^L with its thermal generator to
+# T = β/2, giving ρ(β) = e^{-βH/2}·I·e^{-βH/2}/2^L.
+
+include(joinpath(@__DIR__, "common.jl"))
+include(joinpath(@__DIR__, "ed_l4.jl"))
+include(joinpath(@__DIR__, "scale_l20.jl"))
+include(joinpath(@__DIR__, "lowtemp_l10.jl"))
+include(joinpath(@__DIR__, "pdmrg_l4.jl"))
+include(joinpath(@__DIR__, "mpo_tdvp.jl"))
+
+const BENCHMARKS = Dict(
+    "ed_l4" => bench_ed,
+    "scale_l20" => bench_scale,
+    "lowtemp_l10" => bench_lowtemp,
+    "pdmrg_l4" => bench_pdmrg,
+    "mpo_tdvp" => bench_mpo_tdvp,
+)
+
+function run(which::AbstractString)
+    if which == "all"
+        for (name, f) in BENCHMARKS
+            say("="^70)
+            say("benchmark: $name")
+            say("="^70)
+            f()
+        end
+    else
+        haskey(BENCHMARKS, which) || error("unknown benchmark $which; available: ",
+                                           join(sort(collect(keys(BENCHMARKS))), ", "))
+        BENCHMARKS[which]()
+    end
+    return nothing
+end
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    run(get(ARGS, 1, "all"))
+end

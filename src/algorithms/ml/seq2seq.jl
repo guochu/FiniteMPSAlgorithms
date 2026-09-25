@@ -392,7 +392,7 @@ the per-sweep loss history of `iterative_compute!`.
 function seq2seq!(W::AbstractMPO, xs::Vector{<:CanonicalMPS}, ys::Vector{<:CanonicalMPS},
 				  alg::Seq2Seq = Seq2Seq())
 	_validate_seq2seq(xs, ys)
-	bonddim(W) != alg.D && changebond!(W; D=alg.D)
+	bonddim(W) != alg.D && _changebond!(W; D=alg.D)
 	xsf = [_fold_scaling_sites(x) for x in xs]
 	ysf = [_fold_scaling_sites(y) for y in ys]
 	m = Seq2SeqCache(W, xsf, ysf)

@@ -57,6 +57,15 @@ function mpo_model(p)
         return MPOHamiltonian(terms)
 end
 
+# matrix in the Kronecker convention (i1 i2)',(i1 i2), i1 slowest -> documented gate
+# tensor (i1', i2', i1, i2)
+function gate_tensor(M::AbstractMatrix)
+        d2r, d2c = size(M)
+        dr, dc = isqrt(d2r), isqrt(d2c)
+        (dr^2 == d2r && dc^2 == d2c) || throw(ArgumentError("dimensions must be perfect squares"))
+        return permutedims(reshape(M, dr, dc, dr, dc), (2, 1, 4, 3))
+end
+
 # the same model assembled from product MPOs and the exact `+` (prodmpo route)
 function mpo_model_prod(p)
         L = length(p.hs)

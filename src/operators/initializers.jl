@@ -37,15 +37,25 @@ prodmpo(::Type{T}, ds::AbstractVector{Int}, position::Integer, op::AbstractMatri
 	prodmpo(T, ds, [position], [op])
 
 """
-	changebond!(h::AbstractMPO; D=Defaults.D) -> h
+	changebond!(h::CanonicalMPO; D=Defaults.D, noise=1e-10) -> h
 
 Bring the bond profile of `h` to `min(D, feasible)`: bonds larger than their target are
-shrunk by slicing the leading bond indices (the first rows/columns of the bond space),
-smaller bonds are grown by zero padding (the operator itself is unchanged; a plain
-`MPO` is never re-gauged in place). Used to prepare initial guesses of the ALS
-operator products.
+shrunk by slicing the leading bond indices (the first rows/columns of the bond space;
+singular values are ignored), smaller bonds are grown with random entries of magnitude
+`noise` (a small perturbation of the represented operator). The Schmidt values do not
+survive the resize: they are unset, and the gauge is left as produced by the resize —
+if a specific canonical form is needed, call [`canonicalize!`](@ref) afterwards. Used
+to prepare initial guesses of the ALS operator products.
 """
-function changebond!(h::AbstractMPO; D::Int=Defaults.D)
+function changebond!(h::CanonicalMPO; D::Int=Defaults.D, noise::Real=1e-10)
+	_changebond!(h; D, noise)
+	unset_svectors!(h)
+	return h
+end
+
+# raw bond-profile refit of the chain data (shared with the ALS guess preparation, e.g.
+# `seq2seq!`): slicing/noise padding never re-gauges, plain MPO data stays untouched
+function _changebond!(h::AbstractMPO; D::Int=Defaults.D, noise::Real=1e-10)
 	isempty(h.data) && return h
 	T = scalartype(h)
 	L = length(h)
@@ -64,7 +74,7 @@ function changebond!(h::AbstractMPO; D::Int=Defaults.D)
 	for i in 1:L
 		dl = i == 1 ? 1 : b[i]
 		dr = i == L ? 1 : b[i+1]
-		t = zeros(T, dl, ds_out[i], dr, ds_in[i])
+		t = noise * randn(T, dl, ds_out[i], dr, ds_in[i])
 		vr = 1:min(dl, size(h[i], 1))
 		vc = 1:min(dr, size(h[i], 3))
 		t[vr, :, vc, :] = h[i][vr, :, vc, :]

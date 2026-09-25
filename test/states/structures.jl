@@ -213,21 +213,28 @@ end
     @test length(Wrand) == L
     @test bonddim(Wrand) <= 4
 
-    # changebond! on MPS: grow and shrink to the same cap
+    # changebond! on MPS: shrink with noise = 0 is the exact resize; growing pads with
+    # `noise`-level random entries and unsets the Schmidt values
     ψsmall = randommps(Float64, ds; D=2)
-    changebond!(ψsmall; D=8)
-    @test 2 <= bonddim(ψsmall) <= 8
-    @test iscanonical(ψsmall; atol=1e-8)
-    changebond!(ψsmall; D=3)
+    ψref = todense(ψsmall)
+    changebond!(ψsmall; D=3, noise=0)
     @test bonddim(ψsmall) <= 3
-    @test iscanonical(ψsmall; atol=1e-8)
+    @test todense(ψsmall) ≈ ψref atol = 1e-12
+    changebond!(ψsmall; D=8)
+    @test 3 <= bonddim(ψsmall) <= 8
+    @test svectors_uninitialized(ψsmall)
+    @test norm(todense(ψsmall) - ψref) / norm(ψref) < 1e-8
 
     # changebond! on MPO
     Wsmall = randommpo(Float64, ds; D=2)
-    changebond!(Wsmall; D=8)
-    @test 2 <= bonddim(Wsmall) <= 8
-    changebond!(Wsmall; D=3)
+    Wref = todense(Wsmall)
+    changebond!(Wsmall; D=3, noise=0)
     @test bonddim(Wsmall) <= 3
+    @test todense(Wsmall) ≈ Wref atol = 1e-12
+    changebond!(Wsmall; D=8)
+    @test 3 <= bonddim(Wsmall) <= 8
+    @test svectors_uninitialized(Wsmall)
+    @test norm(todense(Wsmall) - Wref) / norm(Wref) < 1e-8
 
     # truncate! on MPS (truncate! is exported in both tensorops and structures)
     ψtr = randommps(Float64, ds; D=8)

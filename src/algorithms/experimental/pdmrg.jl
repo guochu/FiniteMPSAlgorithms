@@ -374,7 +374,7 @@ function freeenergy(h::AbstractMPO, rho::PositiveMPA, β::Real)
 		y = ac_prime(x, env.H[s], env.hstorage[s], env.hstorage[s+1])
 		E += real(dot(x, y))
 	end
-	rholoc = zeros(Float64, s1 * s2 * s3, s1 * s2 * s3)
+	rholoc = zeros(real(eltype(M)), s1 * s2 * s3, s1 * s2 * s3)
 	for τ in 1:R
 		vv = vec(M[:, :, :, τ])
 		rholoc .+= vv .* vv'

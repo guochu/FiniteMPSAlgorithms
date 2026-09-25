@@ -53,7 +53,7 @@ export mult, add, compress, compress!,
 	MPOTDVPCache,
 	WI, WII, ComplexStepper, complex_stepper, timeevompo, timeevolve!,
 	linsolve, seq2seq, seq2seq!, sample, amplitude,
-	DMRGCache, ExcitedStateCache, OverlapCache, recalculate!,
+	DMRGCache, ExcitedStateCache, OverlapCache,
 	TraceCache,
 	# experimental
         PDMRG, CADMRG, PositiveMPA, ThermalDMRGCache,

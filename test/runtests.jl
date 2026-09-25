@@ -1,5 +1,6 @@
 using Test
 using LinearAlgebra
+using Logging
 using Random
 using TensorOperations
 using FiniteMPSAlgorithms

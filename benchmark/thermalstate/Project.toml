@@ -1,0 +1,7 @@
+name = "thermalstate-benchmark"
+
+[deps]
+FiniteMPSAlgorithms = "b7c1d2a3-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
