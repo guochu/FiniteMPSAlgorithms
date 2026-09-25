@@ -1,5 +1,35 @@
 # Interface changes
 
+## New: `TDVP2`, the two-site time-dependent variational principle
+
+`TDVP2(; stepsize, trunc=DefaultTruncation, ishermitian=true, verbosity)` joins `TDVP1`
+in `algorithms/timeevo/tdvp.jl` and drives the same `sweep!(env, alg)` interface through
+`DMRGCache` (a `CanonicalMPS` state) and `TDVPCache` (a `CanonicalMPO` state). Where
+`TDVP1` freezes the bond profile of the guess, `TDVP2` updates each neighbouring pair of
+site tensors against the two-site effective generator, re-splits it with a *truncating*
+SVD under `alg.trunc` (singular values absorbed into the sweep direction, so the
+orthogonality center moves with them) and — except at the far edge of a sweep — applies
+the single-site backward half-step on the fresh center, exactly as MPSKit's `TDVP2` does.
+The bond profile therefore needs no preparation: a bond-dimension-1 guess grows its bonds
+as the entanglement builds, up to the cap `trunc` carries (`truncdim(D)`), and is trimmed
+where the spectrum allows. `alg.stepsize` follows the `TDVP1` convention (the complex time
+increment itself, `-τ` for cooling and `-im*τ` for real time).
+
+Like every `sweep!` of the package the guess must be *canonical* (`iscanonical`): the
+environments and the local generators are those of an isometric chain. This is now stated
+in the `TDVP1`/`TDVP2` docstrings, together with the concrete trap —
+`vectorize(infinite_temperature_state(...))` represents the identity exactly but its site
+tensors are the plain identities, so it is not canonical and must be regauged with
+`rightorth!` (SVD, `NoTruncation`, no bond resizing) before the first sweep.
+
+`benchmark/thermalstate/tdvp2_l10.jl` (registered as `tdvp2_l10` in the benchmark runner)
+cools the L = 10, β = 1 model from the bond-dimension-1 infinite-temperature state and
+reports the density-matrix error against exact diagonalization at D = 8/16/32 beside the
+values of MPSKit's `TDVP2(trscheme = truncrank(D))` for the same problem; the two agree to
+the four significant digits shown.
+`benchmark/thermalstate/mpskit_tdvp2.jl` reproduces those MPSKit reference values (run it
+in an environment that has MPSKit; it is not a dependency of the benchmark project).
+
 ## `changebond!` returns a right-canonical chain
 
 The resize itself pads or slices the site tensors without regard to the gauge, which left

@@ -295,3 +295,99 @@ end
 	@test todense(ev1.state) ≈ todense(ev2.ket)
 	@test all(ev1.estorage[i] ≈ ev2.hstorage[i] for i in eachindex(ev1.estorage))
 end
+
+@testset "timeevo (TDVP2, two-site)" begin
+	Random.seed!(171)
+	L = 4
+	ds = fill(2, L)
+	p = model_params(L)
+	H = MPO(mpo_model(p))
+	Hd = dense_model(p)
+	τ = 0.05
+
+	# --- alg.trunc caps the bond profile: the pair SVD never exceeds it ---
+	ψc = randommps(ComplexF64, ds; D=16)
+	envc = DMRGCache(H, ψc)
+	sweep!(envc, TDVP2(stepsize=-τ, trunc=truncdim(2), verbosity=0))
+	@test all(<=(2), bonddims(envc.ket))
+
+	# --- full manifold: every pair manifold is the full two-site space and every
+	#     backward step acts on a full-rank center, so the pair updates and their
+	#     re-splittings reproduce the exact propagator e^{-τ·H} ---
+	ψ0 = randommps(ComplexF64, ds; D=16)
+	ψ0d = todense(ψ0)
+	env0 = DMRGCache(H, ψ0)
+	sweep!(env0, TDVP2(stepsize=-τ, trunc=NoTruncation(), verbosity=0))
+	@test norm(todense(env0.ket) - exp(-τ * Hd) * ψ0d) / norm(ψ0d) < 1e-10
+
+	# --- bond growth: a bond-dimension-1 product state has no bond to vary, so the
+	#     bonds have to be created by the pair updates themselves ---
+	ψp = prodmps(ComplexF64, ds, fill(1, L))
+	@test all(==(1), bonddims(ψp))
+	ψpd = todense(ψp)                              # the sweeps mutate ψp in place
+	dt = 0.05
+	nrt = 10
+	envp = DMRGCache(H, ψp)
+	for _ in 1:nrt
+		sweep!(envp, TDVP2(stepsize=-im * dt, trunc=truncdim(4), verbosity=0))
+	end
+	@test bonddims(envp.ket) == [2, 4, 2]          # grown to the full profile
+	vψ = todense(envp.ket)
+	ψex = exp(Matrix(-im * Hd * (dt * nrt))) * ψpd
+	@test abs(dot(vψ, ψex))^2 / (norm(vψ) * norm(ψex)) > 1 - 1e-4
+
+	# --- imaginary-time cooling from the bond-dimension-1 infinite-temperature state
+	#     (the benchmark's small-scale version): no `changebond!` padding, the two-sided
+	#     vectorized route grows the bonds and cools towards the Gibbs state. The first
+	#     sweep still runs while the bonds grow, and its projectors are not yet the full
+	#     tangent space, so a fixed O(dτ) term remains — the same one MPSKit's TDVP2
+	#     shows on this model (2.2721e-3 / 1.1356e-3 / 5.6774e-4 at nst = 20/40/80), so
+	#     the bounds below are that term, not the roundoff level ---
+	β = 1.0
+	ψI = vectorize(infinite_temperature_state(ComplexF64, ds))
+	@test all(==(1), bonddims(ψI))
+	@test !iscanonical(ψI)                # the identity's site tensors are not isometries
+	rightorth!(ψI)                        # gauge reset only: state and profile are kept
+	@test iscanonical(ψI)
+	@test all(==(1), bonddims(ψI))
+	@test norm(todense(devectorize(ψI)) - I(2^L) / 2^L) < 1e-12
+	G = superoperator(H, :left) + superoperator(H, :right)
+	ex = exp(Matrix(-β * Hermitian(Hd)))
+	ρed = ex / tr(ex)
+	errs = Float64[]
+	for nst in (20, 40)
+		envI = DMRGCache(G, copy(ψI))
+		for _ in 1:nst
+			sweep!(envI, TDVP2(stepsize=-β / 2 / nst, trunc=truncdim(16), verbosity=0))
+		end
+		@test bonddims(envI.ket) == [4, 16, 4]
+		ρ = todense(devectorize(envI.ket))
+		ρ ./= tr(ρ)
+		push!(errs, norm(ρ - ρed) / norm(ρed))
+	end
+	@test errs[1] < 5e-3
+	@test errs[2] < errs[1] / 1.8          # the growth-phase error is O(dτ)
+
+	# --- the density-operator manifold (TDVPCache with a CanonicalMPO state) grows its
+	#     bonds the same way, from the unnormalized bond-dimension-1 identity ---
+	L3 = 3
+	ds3 = fill(2, L3)
+	p3 = model_params(L3)
+	h3 = MPOHamiltonian(mpo_model(p3))
+	Hd3 = dense_model(p3)
+	ρg = tompo(Matrix{ComplexF64}(I, 2^L3, 2^L3), ds3)
+	@test all(==(1), bonddims(ρg))
+	rightorth!(ρg)
+	@test iscanonical(ρg)
+	envg = TDVPCache(h3, ρg)
+	nst3 = 6
+	for _ in 1:nst3
+		sweep!(envg, TDVP2(stepsize=-β / nst3, trunc=truncdim(4), verbosity=0))
+	end
+	@test maximum(bonddims(envg.state)) > 1
+	ρ3 = todense(envg.state)
+	ρ3 ./= tr(ρ3)
+	ex3 = exp(Matrix(-β * Hermitian(Hd3)))
+	ρed3 = ex3 / tr(ex3)
+	@test norm(ρ3 - ρed3) / norm(ρed3) < 1e-4
+end

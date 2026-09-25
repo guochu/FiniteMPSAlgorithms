@@ -5,7 +5,7 @@
 - **截断算法**全部在 `src/algorithms/`，**只 export 唯一接口** `mult` / `add` / `compress`，
   以算法类型分派：`SVDCompression`（SVD 扫描路线）与 `DMRG1`（ALS 变分路线，定义参照 TEMPO）；
   `svd_*` / `iterative_*` 等内部实现不导出；无 stable_* 变体；
-- **只实现 single-site**；局域本征求解直接用 **KrylovKit**（不自写 Lanczos）；
+- **DMRG 只实现 single-site**（TDVP 另有 2-site 变体 `TDVP2`，见 §3.10）；局域本征求解直接用 **KrylovKit**（不自写 Lanczos）；
 - DMRG / TDVP 统一暴露 `leftsweep!` / `rightsweep!` / `sweep!` 三个接口。
 
 ## 3.1 算法配置（`src/algorithms/algdefs.jl`，参照 TEMPO `src/algorithms.jl`）
@@ -201,6 +201,30 @@ sweep!(env, alg::TDVP1)        # = 一个完整时间步 alg.stepsize(左扫+右
 #   stepsize=-τ(负实)即虚时演化 e^{-H·τ} —— 基态求解器备选(与 DMRG1 互验);
 #   stepsize=-im*τ 即实时演化 e^{-i·H·τ};
 #   时间循环由调用方重复 sweep!(env, alg) 完成(不提供 timeevo! 封装)
+```
+
+## 3.10 TDVP2（同一文件，2-site，复用 sweep! 接口）
+
+与 TDVP1 共用缓存（`DMRGCache`＋`CanonicalMPS` / `TDVPCache`＋`CanonicalMPO`）与
+`leftsweep!` / `rightsweep!` / `sweep!` 三接口，只有局域更新不同：
+
+```julia
+@kwdef struct TDVP2{S<:Number, TR<:TruncationScheme} <: MPSAlgorithm
+    stepsize::S                       # 同 TDVP1: -τ 虚时; -im*τ 实时
+    trunc::TR = DefaultTruncation     # 两点 SVD 的键维上限(truncdim(D) 即 D)
+    ishermitian::Bool = true
+    verbosity::Int = Defaults.verbosity
+end
+
+# 左扫每对 (s,s+1): Θ = st[s]·st[s+1] → exp(+dt/2·ac2_prime/TwoSiteHeff)
+#   → 截断 SVD(_split_two_site, 奇异值吸收进右格点, 正交中心随之右移) → updateleft!
+#   → (非末端对) 新中心格点回步 exp(-dt/2·ac_prime); 右扫镜像(奇异值进左格点)
+# 键维由 pair 更新动态增长: bonddim=1 的初态即可, 无需 changebond!; 上限由 trunc 控制
+# 生成元随当前态更新(环境不可冻结: pair 更新可能改变键维)
+# 初态必须规范(iscanonical): 环境与局域生成元都按等距链构造;
+#   vectorize(infinite_temperature_state(...)) 的位点张量是纯恒等(非等距), 需先 rightorth!
+# 精度: 流形完备时一步 = 精确 propagator; 键维增长的首扫投影不完全, 留下 O(dτ) 项
+#   (与 MPSKit TDVP2 逐位一致, 见 benchmark/thermalstate/{tdvp2_l10,mpskit_tdvp2}.jl)
 ```
 
 ## 实现顺序建议

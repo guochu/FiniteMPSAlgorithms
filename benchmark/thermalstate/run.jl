@@ -9,6 +9,9 @@
 #   scale_l20  L = 20, β = 0.05: TDVP (superoperator) vs itebd (no ED at this scale)
 #   lowtemp    L = 10, β = 1.0 : iTEBD vs TDVP at the same bond dimension, both against
 #                                exact diag. (spin-1/2 convention)
+#   tdvp2_l10  L = 10, β = 1.0 : two-site TDVP from the bond-dimension-1 infinite-
+#                                temperature guess (bonds grow dynamically, no
+#                                `changebond!`) vs exact diag. and MPSKit's TDVP2
 #   pdmrg_l10  L = 10, β = 10  : p-DMRG thermal state in its low-temperature regime vs
 #                                exact diag. (ρ(β) = e^{-βH}/Z)
 #   mpo_tdvp   L = 6/10        : density-operator TDVP (TDVPCache, left multiplication
@@ -23,6 +26,7 @@ include(joinpath(@__DIR__, "common.jl"))
 include(joinpath(@__DIR__, "ed_l4.jl"))
 include(joinpath(@__DIR__, "scale_l20.jl"))
 include(joinpath(@__DIR__, "lowtemp_l10.jl"))
+include(joinpath(@__DIR__, "tdvp2_l10.jl"))
 include(joinpath(@__DIR__, "pdmrg_l10.jl"))
 include(joinpath(@__DIR__, "mpo_tdvp.jl"))
 
@@ -30,6 +34,7 @@ const BENCHMARKS = Dict(
     "ed_l4" => bench_ed,
     "scale_l20" => bench_scale,
     "lowtemp_l10" => bench_lowtemp,
+    "tdvp2_l10" => bench_tdvp2_l10,
     "pdmrg_l10" => bench_pdmrg_l10,
     "mpo_tdvp" => bench_mpo_tdvp,
 )
