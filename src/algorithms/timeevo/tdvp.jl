@@ -33,6 +33,23 @@ Configuration of single-site TDVP. `stepsize` is the complex time increment itse
 
 `ishermitian` selects the KrylovKit exponentiate driver (Lanczos for hermitian, Arnoldi
 otherwise).
+
+# Accuracy, and initial states of too low rank
+
+The sweep is not invariant under a bond-gauge transformation of the state: it integrates
+the same projected flow only while the guess carries a canonically determined gauge. If
+the initial state is *rank deficient* on some bond — a product state whose bond profile
+was grown with `changebond!(...; noise=0)`, which pads the new bond directions with exact
+zeros, is the typical case — the canonicalization does not single out a gauge (the
+completion of the null directions of the factorization is arbitrary) and the trajectory
+becomes representation dependent: rotating one bond of the (bitwise unchanged) state can
+shift a single sweep by `~1e-7`, and two equivalent representations of the same guess (the
+density-operator and the vectorized routes) can drift apart by `~1e-2` in the represented
+density operator. A full-rank guess has a unique gauge and the results agree to roundoff.
+Padding with a small `noise` (the `changebond!` default of `1e-10`) removes the
+degeneracy and restores gauge independence; recipes that must resize exactly (e.g.
+thermal-state preparation, where noise would be amplified by the cooling flow) should be
+aware of this limitation.
 """
 @kwdef struct TDVP1{S<:Number} <: MPSAlgorithm
 	stepsize::S

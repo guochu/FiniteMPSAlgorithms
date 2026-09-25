@@ -214,15 +214,19 @@ end
     @test bonddim(Wrand) <= 4
 
     # changebond! on MPS: shrink with noise = 0 is the exact resize; growing pads with
-    # `noise`-level random entries and unsets the Schmidt values
+    # `noise`-level random entries. Either way the chain comes back right-canonical
+    # (orthogonality center at site 1, internal Schmidt values initialized)
     ψsmall = randommps(Float64, ds; D=2)
     ψref = todense(ψsmall)
     changebond!(ψsmall; D=3, noise=0)
     @test bonddim(ψsmall) <= 3
     @test todense(ψsmall) ≈ ψref atol = 1e-12
+    @test !svectors_uninitialized(ψsmall)
+    @test all(isrightcanonical(ψsmall[i]) for i in 2:length(ψsmall))
     changebond!(ψsmall; D=8)
     @test 3 <= bonddim(ψsmall) <= 8
-    @test svectors_uninitialized(ψsmall)
+    @test !svectors_uninitialized(ψsmall)
+    @test all(isrightcanonical(ψsmall[i]) for i in 2:length(ψsmall))
     @test norm(todense(ψsmall) - ψref) / norm(ψref) < 1e-8
 
     # changebond! on MPO
@@ -231,9 +235,12 @@ end
     changebond!(Wsmall; D=3, noise=0)
     @test bonddim(Wsmall) <= 3
     @test todense(Wsmall) ≈ Wref atol = 1e-12
+    @test !svectors_uninitialized(Wsmall)
+    @test all(isrightcanonical(Wsmall[i]) for i in 2:length(Wsmall))
     changebond!(Wsmall; D=8)
     @test 3 <= bonddim(Wsmall) <= 8
-    @test svectors_uninitialized(Wsmall)
+    @test !svectors_uninitialized(Wsmall)
+    @test all(isrightcanonical(Wsmall[i]) for i in 2:length(Wsmall))
     @test norm(todense(Wsmall) - Wref) / norm(Wref) < 1e-8
 
     # truncate! on MPS (truncate! is exported in both tensorops and structures)

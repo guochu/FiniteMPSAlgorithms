@@ -77,7 +77,6 @@ function bench_scale()
     #     the small-padding regime where the default noise is harmless).
     t = time()
     ψ = changebond!(vectorize(infinite_temperature_state(ComplexF64, ds)); D=16, noise=0)
-    restore_gauge!(ψ)   # the TDVP sweeps need a canonical gauge
     env = DMRGCache(superoperator(H, :left) + superoperator(H, :right), ψ)
     alg = TDVP1(stepsize=-β / 2 / 10, verbosity=0)
     Et = Float64[]

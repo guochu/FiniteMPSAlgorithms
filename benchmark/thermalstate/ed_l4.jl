@@ -15,11 +15,9 @@ function bench_ed()
     # --- TDVP route ---
     # (`noise = 0`: for thermal-state preparation the padding must be exact — noise
     # injected here sits in the exponentially amplified low-temperature sector.
-    # `changebond!` leaves the gauge as produced by the resize: restore the canonical
-    # form externally for the TDVP sweeps.)
+    # `changebond!` returns the chain right-canonical, the gauge the sweeps expect.)
     t = time()
     ψ = changebond!(vectorize(infinite_temperature_state(ComplexF64, ds)); D=16, noise=0)
-    restore_gauge!(ψ)
     env = DMRGCache(𝒦, ψ)
     alg = TDVP1(stepsize=-β / 2 / 80, verbosity=0)
     for _ in 1:80

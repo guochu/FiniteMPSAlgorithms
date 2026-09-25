@@ -1,5 +1,19 @@
 # Interface changes
 
+## `changebond!` returns a right-canonical chain
+
+The resize itself pads or slices the site tensors without regard to the gauge, which left
+the chain non-canonical: the padded blocks of the site tensors are not isometries, so the
+environments that the iterative algorithms build (from a right-canonical guess) were
+inconsistent and the results degraded — e.g. a TDVP1 run from a zero-padded product state
+came out at `1e-5` accuracy instead of machine precision. Both variants (`CanonicalMPS`
+and `CanonicalMPO`) now end with an exact right re-orthogonalization (`rightorth!` with
+`NoTruncation`), so the result is right-canonical with the orthogonality center at site 1:
+every site but the first is right-isometric and all internal Schmidt values are
+initialized, with the overall norm carried by `scaling` (the first site cannot be made
+right-isometric in this convention). Callers no longer need a separate `canonicalize!`
+(or the benchmarks' `restore_gauge!`) after resizing.
+
 ## New: `kron(a, b)` / `transpose(h)` for operator chains, `superoperator` built on them
 
 - `Base.kron(a::AbstractMPO, b::AbstractMPO)`: the Kronecker product of two chains of

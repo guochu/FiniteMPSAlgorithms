@@ -121,9 +121,16 @@ Bring the bond profile of `ψ` to `min(D, feasible)`: every bond larger than its
 is shrunk by slicing the leading bond indices (the first rows/columns of the bond space;
 singular values are ignored), smaller bonds are grown with random entries of magnitude
 `noise` (a small perturbation of the represented state). The Schmidt values do not
-survive the resize: they are unset, and the gauge is left as produced by the resize —
-if a specific canonical form is needed, call [`canonicalize!`](@ref) afterwards. Used
-to prepare initial guesses with bond headroom (`DMRG1`, `TDVP1`, ...).
+survive the resize.
+
+The padded blocks of the resized site tensors are not isometries, so the resize breaks the
+canonical gauge; the function ends with an exact right re-orthogonalization (`rightorth!`
+with `NoTruncation`) and returns the chain in **right-canonical form**, with the
+orthogonality center at site 1: every site but the first is right-isometric and all
+internal Schmidt values are initialized, the overall norm being carried by `scaling` (the
+first site cannot be made right-isometric in this convention). This is the gauge the
+iterative algorithms (`DMRG1`, `TDVP1`, ...) expect from an initial guess. Used to prepare
+initial guesses with bond headroom.
 """
 function changebond!(ψ::CanonicalMPS; D::Int=Defaults.D, noise::Real=1e-10)
 	isempty(ψ.data) && return ψ
@@ -150,7 +157,9 @@ function changebond!(ψ::CanonicalMPS; D::Int=Defaults.D, noise::Real=1e-10)
 		newdata[i] = t
 	end
 	copy!(ψ.data, newdata)
-	unset_svectors!(ψ)
+	# the padded blocks are not isometries, so the resize breaks the canonical gauge the
+	# sweeps expect: re-impose the right-canonical form with an exact right sweep
+	rightorth!(ψ; alg=Orthogonalize(SVD(), NoTruncation(), false))
 	return ψ
 end
 

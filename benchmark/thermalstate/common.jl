@@ -1,6 +1,7 @@
 # shared environment for the thermal-state benchmarks
 using LinearAlgebra
 using Logging
+using Printf
 using Random
 using TensorOperations
 using FiniteMPSAlgorithms
@@ -13,7 +14,3 @@ function say(args...)
     println(args...)
     flush(stdout)
 end
-
-# `changebond!` leaves the chain in whatever gauge the resize produced; the TDVP/DMRG
-# sweeps need a canonical one (no truncation, normalize = false)
-restore_gauge!(x) = canonicalize!(x; alg=Orthogonalize(SVD(), NoTruncation(), false))

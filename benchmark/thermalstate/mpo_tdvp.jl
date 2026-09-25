@@ -40,9 +40,9 @@ function bench_mpo_tdvp()
     # pad BOTH initial states to the same bond profile: otherwise the two routes
     # evolve on different manifolds (bond 2^k vs the padded D) and legitimately
     # produce different TDVP trajectories. `noise = 0` keeps the per-step
-    # equivalence at the roundoff level.
+    # equivalence at the roundoff level. `changebond!` returns both in right-canonical
+    # form, i.e. the same gauge.
     ρ0 = changebond!(randommpo(ComplexF64, ds; D=D); D=D, noise=0)
-    restore_gauge!(ρ0)   # both routes start from the same canonical gauge
     envA = TDVPCache(HH, ρ0)
     ψ0 = changebond!(vectorize(ρ0); D=D)
     envB = DMRGCache(superoperator(HH, :left), ψ0)
@@ -100,7 +100,6 @@ function bench_mpo_tdvp()
 
     # --- route A: density-operator cooling (CanonicalMPO state, left multiplication) ---
     ρ0 = changebond!(tompo(Matrix{ComplexF64}(I, 2^L, 2^L), ds); D=D, noise=0)
-    restore_gauge!(ρ0)   # the sweeps need a canonical gauge
     envA = TDVPCache(HH, ρ0)
     algA = TDVP1(stepsize=-τ, verbosity=0)
     t = time()
@@ -115,7 +114,6 @@ function bench_mpo_tdvp()
 
     # --- route B: vectorized cooling (CanonicalMPS state, left superoperator) ---
     ψ = changebond!(vectorize(infinite_temperature_state(ComplexF64, ds)); D=D, noise=0)
-    restore_gauge!(ψ)   # the sweeps need a canonical gauge
     envB = DMRGCache(superoperator(HH, :left), ψ)
     algB = TDVP1(stepsize=-τ, verbosity=0)
     t = time()

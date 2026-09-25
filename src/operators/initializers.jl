@@ -43,13 +43,20 @@ Bring the bond profile of `h` to `min(D, feasible)`: bonds larger than their tar
 shrunk by slicing the leading bond indices (the first rows/columns of the bond space;
 singular values are ignored), smaller bonds are grown with random entries of magnitude
 `noise` (a small perturbation of the represented operator). The Schmidt values do not
-survive the resize: they are unset, and the gauge is left as produced by the resize —
-if a specific canonical form is needed, call [`canonicalize!`](@ref) afterwards. Used
-to prepare initial guesses of the ALS operator products.
+survive the resize.
+
+As for the MPS variant, the resize breaks the canonical gauge (the padded blocks are not
+isometries), so the function ends with an exact right re-orthogonalization (`rightorth!`
+with `NoTruncation`) and returns the chain in **right-canonical form**: every site but the
+first is right-isometric and all internal Schmidt values are initialized, the overall norm
+being carried by `scaling`. This is the gauge the sweeps expect from an initial guess.
+Used to prepare initial guesses of the ALS operator products.
 """
 function changebond!(h::CanonicalMPO; D::Int=Defaults.D, noise::Real=1e-10)
 	_changebond!(h; D, noise)
-	unset_svectors!(h)
+	# the padded blocks are not isometries, so the resize breaks the canonical gauge the
+	# sweeps expect: re-impose the right-canonical form with an exact right sweep
+	rightorth!(h; alg=Orthogonalize(SVD(), NoTruncation(), false))
 	return h
 end
 
