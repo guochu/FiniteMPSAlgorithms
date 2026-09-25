@@ -190,11 +190,18 @@ function _thermalize_dense(W, hl, hr, dims::NTuple{3,Int}, β::Real, alg::PDMRG)
 	return M, _local_free_energy(W, hl, hr, M, kept, β)
 end
 
-# Krylov path: at low β the thermal state is dominated by the lowest eigenstates of H_eff
+# Krylov path: at low temperature the thermal state is dominated by the lowest eigenstates
+# of H_eff, so only the alg.R lowest ones are needed
 function _thermalize_krylov(W, hl, hr, dims::NTuple{3,Int}, β::Real, alg::PDMRG, x0)
 	L = prod(dims)
 	n = min(alg.R, L)
-	vals, vecs, info = eigsolve(y -> ac_prime(y, W, hl, hr), x0, n, :SR;
+	# The start vector is the current center, which once the sweeps start converging is an
+	# (almost exact) eigenvector of H_eff. Lanczos from such a vector finds the Krylov space
+	# already invariant, stops after a single step and reports one converged eigenpair while
+	# still returning `n` (unconverged) ones — which silently corrupts the rank-`alg.R`
+	# center. Mix in a small random component to keep the Krylov space non-degenerate.
+	y0 = x0 .+ (1e-2 * norm(x0)) .* randn(eltype(x0), size(x0))
+	vals, vecs, info = eigsolve(y -> ac_prime(y, W, hl, hr), y0, n, :SR;
 								ishermitian=true, tol=1e-10, krylovdim=2n+2)
 	# Boltzmann weights of the kept lowest eigenstates
 	eigvals = exp.(-β .* real(vals))
