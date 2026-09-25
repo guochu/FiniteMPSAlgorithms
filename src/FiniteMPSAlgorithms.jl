@@ -38,6 +38,9 @@ export AbstractMPS, AbstractMPO, MPSTensor, MPOTensor, CanonicalMPS, CanonicalMP
 	changebond!, truncate!, identitympo, prodmpo, randommpo, hadamard, ⊙,
 	copyphydims,
 	tomps, tompo
+# models
+export σx, σy, σz, Sx, Sy, Sz,
+	heisenberg_hamiltonian, tfim_hamiltonian, fermi_hubbard
 # algorithms
 export mult, add, compress, compress!,
 	svdguess_mult, svdguess_add, svdguess_compress, svdguess_hadamard,
@@ -68,6 +71,7 @@ include("defaults.jl")
 include("abstractdefs.jl")
 include("states/states.jl")
 include("operators/operators.jl")
+include("models.jl")
 include("algorithms/algorithms.jl")
 
 end # module

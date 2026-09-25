@@ -1,5 +1,27 @@
 # Interface changes
 
+## New: standard finite-chain models (`src/models.jl`)
+
+`src/models.jl` collects the common one-dimensional Hamiltonians as `MPOHamiltonian`s on a
+finite **open** chain, mirroring InfiniteMPSAlgorithms' `models.jl` (which builds the same
+models on an infinite chain, with the same sign conventions):
+
+- `σx/σy/σz`, `Sx/Sy/Sz`: Pauli and spin-1/2 matrices with element type `T` (default
+  `ComplexF64`; `σy`/`Sy` promote to complex);
+- `heisenberg_hamiltonian(L; J=1, Δ=1, h=0, T)`: XXZ chain with a longitudinal field,
+  `H = J Σ (SˣSˣ + SʸSʸ + Δ SᶻSᶻ) − h Σ Sᶻ` (`Δ = 1` XXX, `Δ = 0` XX);
+- `tfim_hamiltonian(L; J=1, h=1, T)`: transverse-field Ising chain, `H = −J Σ σˣσˣ − h Σ σᶻ`;
+- `fermi_hubbard(L; t=1, U=0, μ=0, T)`: Hubbard chain on the 4-dimensional local space
+  `(|0⟩,|↑⟩,|↓⟩,|↑↓⟩)`, Jordan-Wigner transformed with the modes ordered `↑` before `↓` per
+  site; the parity strings fold into the nearest-neighbour bond terms (the dressed hopping
+  creators are `σ⁺↑⊗σᶻ↓` and `I⊗σ⁺↓`), and no boundary string is needed on an open chain.
+  The tests check the full hopping + `n↑n↓` + `−μn` model against an explicit
+  string construction, and verify the canonical anticommutation relations.
+
+All builders return the sparse Schur form (use `MPO(h)` / `todense(h)` for the dense
+routes); periodic boundaries and longer-range or disordered couplings are assembled by the
+caller from an `OpSum`.
+
 ## New: `TDVP2`, the two-site time-dependent variational principle
 
 `TDVP2(; stepsize, trunc=DefaultTruncation, ishermitian=true, verbosity)` joins `TDVP1`
