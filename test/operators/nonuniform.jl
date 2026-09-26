@@ -109,6 +109,27 @@
 	@test norm(todense(hds) - Hd) / norm(Hd) < 1e-12
 	@test_throws DimensionMismatch MPOHamiltonian(ds, OpTerm(1.0, 1 => randn(ComplexF64, 3, 3)))
 	@test_throws DimensionMismatch OpTerm(1.0, 1 => randn(ComplexF64, 2, 3))
-	# an all-scalar block matrix (here: a site with no operator support) is rejected
-	@test_throws ArgumentError MPOHamiltonian(4, OpTerm(1.0, 1 => X), OpTerm(0.5, 2 => X, 3 => X))
+
+	# a site with no operator support at all is a valid idle-identity site: the construction
+	# knows every site's dimension, so its all-scalar block matrix is admitted
+	h4 = MPOHamiltonian(4, OpTerm(1.0, 1 => X), OpTerm(0.5, 2 => X, 3 => X))
+	op4_at(op, i) = reshape(kron([k == i ? op : Matrix{ComplexF64}(I, 2, 2) for k in 1:4]...),
+							16, 16)
+	Hd4 = op4_at(X, 1) + 0.5 .* op4_at(X, 2) * op4_at(X, 3)
+	@test ophydims(h4) == fill(2, 4)
+	@test norm(todense(h4) - Hd4) / norm(Hd4) < 1e-12
+	# the same on the non-uniform lattice: site 4 is unsupported (and 3×3/2×2 elsewhere)
+	hd2 = MPOHamiltonian(ds, OpTerm(1.0, 1 => ops[1][1]),
+						 OpTerm(0.5, 2 => ops[2][1], 3 => ops[3][1]))
+	Hd2 = op_at(ops[1][1], 1) + 0.5 .* op_at(ops[2][1], 2) * op_at(ops[3][1], 3)
+	@test ophydims(hd2) == ds
+	@test norm(todense(hd2) - Hd2) / norm(Hd2) < 1e-12
+	# two on-site terms on the same site accumulate into the same corner block
+	hacc = MPOHamiltonian(3, OpTerm(1.0, 1 => X), OpTerm(0.5, 1 => X))
+	opa_at(op, i) = reshape(kron([k == i ? op : Matrix{ComplexF64}(I, 2, 2) for k in 1:3]...),
+							8, 8)
+	@test norm(todense(hacc) - 1.5 .* opa_at(X, 1)) / norm(1.5 .* opa_at(X, 1)) < 1e-12
+	# without a lattice dimension, direct construction from an all-scalar matrix still
+	# raises the explicit inference error
+	@test_throws ArgumentError FiniteMPSAlgorithms.SchurMPOTensor{ComplexF64}([1.0 2.0; 3.0 4.0])
 end

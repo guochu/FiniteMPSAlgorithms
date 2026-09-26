@@ -247,12 +247,12 @@ function _mpohamiltonian_from_terms(ds::AbstractVector{Int}, terms::AbstractVect
 	                        Os[r+1, c+1] = _add_block(Os[r+1, c+1], asM(t.operators[j]))
 	                end
 	        end
-	        tensors[s] = SchurMPOTensor{T}(Os)
-	        end
+	        tensors[s] = SchurMPOTensor{T}(Os, ds[s])
+        end
 	        return MPOHamiltonian(tensors)
 end
 
-_add_block(old, v) = (old == 0) ? v : (isa(old, Number) ? old * isometry(scalartype(v), size(v, 1)) : old) + v
+_add_block(old, v) = (isa(old, Number) ? old * isometry(scalartype(v), size(v, 1)) : old) + v
 
 # backward-compatible alias (block-sparse MPO is the only MPO Hamiltonian form)
 const SparseMPOHamiltonian = MPOHamiltonian

@@ -18,8 +18,14 @@ inserts on the gap sites of a long-range term). Both are gone:
   `MPOHamiltonian(::OpSum)` is the varying-dimension entry point. The term-based
   counterpart of the `ds` form is `MPOHamiltonian(ds, terms...)`, which validates every
   operator against its own `ds[pos]`;
-- an all-scalar block matrix — e.g. a site with no operator support at all — keeps raising
-  the explicit `ArgumentError` ("cannot infer phydim"), with a message that says so.
+- a site with **no operator support at all** is now a valid idle-identity site: the site's
+  dimension comes from the lattice (`SchurMPOTensor{T}(data, d)`), and since the two
+  identity corners of the Schur form are implicit, its all-scalar block matrix is exact;
+  the "cannot infer phydim" `ArgumentError` only remains for direct sparse-tensor
+  construction without a dimension;
+- fixed the accumulation of two terms into the same block (e.g. two on-site terms on one
+  site): `_add_block` compared a matrix against a scalar (`old == 0`, a `BitMatrix` in a
+  boolean context) and threw a `TypeError`; the scalar case now expands directly.
 
 Verified end-to-end on a mixed spin-1/2 / spin-1 chain (`ds = [2, 3, 2, 3]`, on-site +
 nearest-neighbour + long-range terms): `todense` against an independent `kron` construction

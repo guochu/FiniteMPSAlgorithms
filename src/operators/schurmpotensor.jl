@@ -82,12 +82,15 @@ end
 # validate a matrix of local operators, compress proportional-to-identity blocks to
 # scalars and return the homogeneous element matrix plus the physical dimension
 # the same row should have the same left space; the same column the same right space
-function compute_mpotensor_data(::Type{T}, data::AbstractMatrix) where {T<:Number}
+# an explicit `d` (e.g. the site's dimension in a lattice-aware constructor) replaces the
+# inference from the stored operators, so a site whose block matrix is all-scalar — no
+# operator support at all — is admitted as well; matrix entries are still checked vs `d`
+function compute_mpotensor_data(::Type{T}, data::AbstractMatrix,
+								d::Union{Nothing, Int} = nothing) where {T<:Number}
 	@assert !isempty(data)
 	m, n = size(data)
 	new_data = Array{Union{Matrix{T}, T}, 2}(undef, m, n)
 
-	d::Union{Nothing, Int} = nothing
 	for i in 1:m, j in 1:n
 		sj = data[i, j]
 		if isa(sj, AbstractMatrix)
@@ -101,8 +104,8 @@ function compute_mpotensor_data(::Type{T}, data::AbstractMatrix) where {T<:Numbe
 		end
 	end
 	isnothing(d) && throw(ArgumentError("cannot infer phydim: the logical matrix contains no operator " *
-										"(all-scalar input; a site tensor needs at least one d×d block, " *
-										"e.g. a site with no operator support has an all-scalar block matrix)"))
+										"(all-scalar input; pass the site's physical dimension explicitly " *
+										"when a site has no operator support)"))
 	for i in 1:m, j in 1:n
 		sj = data[i, j]
 		if isa(sj, AbstractMatrix)
@@ -219,6 +222,12 @@ Base.size(W::SchurMPOTensor, i::Int) = size(W.A, i) + 2
 # `size(data)` — the constructors never take it explicitly)
 function SchurMPOTensor{T}(data::AbstractMatrix) where {T<:Number}
 	Os, d = compute_mpotensor_data(T, data)
+	return _schur_from_logical(Os, d)
+end
+# lattice-aware variant: the site's physical dimension comes from the lattice, so a site
+# with no operator support (all-scalar block matrix) is a valid idle-identity tensor
+function SchurMPOTensor{T}(data::AbstractMatrix, d::Int) where {T<:Number}
+	Os, d = compute_mpotensor_data(T, data, d)
 	return _schur_from_logical(Os, d)
 end
 """
