@@ -266,6 +266,18 @@ _tdvp_state(env::TDVPCache) = env.state
 _tdvp_storage(env::DMRGCache) = env.hstorage
 _tdvp_storage(env::TDVPCache) = env.estorage
 
+# The flow must be driven by the generator's *represented value* (`value =
+# scaling^L · ∏tensors`), but the environments contract its site tensors only. Canonical
+# chains carry a `scaling` field — `canonicalize!` moves the norm there, so a generator
+# built by `tomps` (or any canonicalized chain) has `scaling ≠ 1` — and plain MPOs are
+# never normalized. Left unhandled, `exp(stepsize·H)` would be realized as
+# `exp(stepsize·H/scaling^L)`. The equivalent of the `_absorb_scaling!` of TEMPO's `tdvpif`
+# is to put the factor on the local generators, leaving the caller's chain alone; the
+# state's own `scaling` is bookkeeping and does not enter the flow.
+_generator_scaling(h::Union{CanonicalMPS,CanonicalMPO}) = scaling(h)
+_generator_scaling(h) = 1.0
+_tdvp_scale(env) = _generator_scaling(env.H)^length(_tdvp_state(env))
+
 # environment transfer across one site, for an MPS or a density-operator site tensor
 _tdvp_env_left(E, A::MPSTensor, W) = _updateleft(E, A, W, A)
 _tdvp_env_left(E, A::MPOTensor, W) = _flow_updateleft(E, A, W)
@@ -282,13 +294,15 @@ function updateright!(env::TDVPCache, site::Integer)
 	return env
 end
 
-# local single-site generator `y ↦ H_eff·y`
+# local single-site generator `y ↦ H_eff·y` (times the generator's `scaling^L` factor)
 function _tdvp_site_map(env::Union{DMRGCache,TDVPCache{<:Any,<:CanonicalMPS}}, s::Int)
 	es = _tdvp_storage(env)
-	return y -> ac_prime(y, Heff(env.H[s], es[s], es[s+1]))
+	c = _tdvp_scale(env)
+	return y -> c .* ac_prime(y, Heff(env.H[s], es[s], es[s+1]))
 end
 function _tdvp_site_map(env::TDVPCache{<:Any,<:CanonicalMPO}, s::Int)
-	return y -> _flow_site_left(y, env.H[s], env.estorage[s], env.estorage[s+1])
+	c = _tdvp_scale(env)
+	return y -> c .* _flow_site_left(y, env.H[s], env.estorage[s], env.estorage[s+1])
 end
 
 # complement-space generator on the bond of the left sweep: both environments anchored at
@@ -296,16 +310,18 @@ end
 function _tdvp_bond_map_left(env, s::Int)
 	es = _tdvp_storage(env)
 	st = _tdvp_state(env)
+	c = _tdvp_scale(env)
 	hright = _tdvp_env_right(es[s+2], st[s+1], env.H[s+1])
-	return y -> c_prime(y, es[s+1], hright)
+	return y -> c .* c_prime(y, es[s+1], hright)
 end
 
 # ... and on the bond of the right sweep (bond `s-1`, the left one folding in site `s-1`)
 function _tdvp_bond_map_right(env, s::Int)
 	es = _tdvp_storage(env)
 	st = _tdvp_state(env)
+	c = _tdvp_scale(env)
 	hleft = _tdvp_env_left(es[s-1], st[s-1], env.H[s-1])
-	return y -> c_prime(y, hleft, es[s])
+	return y -> c .* c_prime(y, hleft, es[s])
 end
 
 # one Krylov exponential of a local generator (TDVP1 single-site or TDVP2 pair)
@@ -447,16 +463,20 @@ end
 # refresh them as they go (`updateleft!`/`updateright!`), exactly as MPSKit's lazily
 # recalculated environments do.
 
-# MPS: the two-site effective Hamiltonian of the DMRG2 engine
+# MPS: the two-site effective Hamiltonian of the DMRG2 engine (times the generator's
+# `scaling^L` factor; the environments cover all but the two pair sites, so the exponent is
+# still the chain length `L`)
 function _tdvp_site2_map(env::Union{DMRGCache,TDVPCache{<:Any,<:CanonicalMPS}}, s::Int)
 	es = _tdvp_storage(env)
-	return y -> ac2_prime(y, TwoSiteHeff(env.H[s], env.H[s+1], es[s], es[s+2]))
+	c = _tdvp_scale(env)
+	return y -> c .* ac2_prime(y, TwoSiteHeff(env.H[s], env.H[s+1], es[s], es[s+2]))
 end
 
 # density operator: the two-site left action `H·ρ`, the pair version of `_flow_site_left`
 function _tdvp_site2_map(env::TDVPCache{<:Any,<:CanonicalMPO}, s::Int)
 	es = env.estorage
-	return y -> _flow_site2_left(y, env.H[s], env.H[s+1], es[s], es[s+2])
+	c = _tdvp_scale(env)
+	return y -> c .* _flow_site2_left(y, env.H[s], env.H[s+1], es[s], es[s+2])
 end
 
 function _flow_site2_left(Θ::AbstractArray{T,6}, K1::MPOTensor, K2::MPOTensor,

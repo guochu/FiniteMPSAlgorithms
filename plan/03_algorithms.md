@@ -227,6 +227,56 @@ end
 #   (与 MPSKit TDVP2 逐位一致, 见 benchmark/thermalstate/{tdvp2_l10,mpskit_tdvp2}.jl)
 ```
 
+```julia
+# ======================================================================================
+## 3.11 HadamardTDVP（`src/algorithms/timeevo/hadamardtdvp.jl`，生成元与态都是 MPS）
+# ======================================================================================
+# 演化方程: dz/dτ = H ∘ z —— H 与 z 都是 MPS, 乘积是逐点(Hadamard)乘积;
+#   一次 sweep!(env, alg) 实现逐元素 exp(stepsize·H) .* z
+#   (stepsize 约定同 TDVP1/2: -τ 虚时, -im*τ 实时)
+# 参考实现: TEMPO 的 tdvpif (src/influencefunctional/tdvpif/tdvpif.jl),
+#   那里 H = influence operator, z(0) = 恒等影响泛函, τ: 0→1 给出 IF = e^H
+#
+# HadamardTDVPCache(H::CanonicalMPS, ψ::CanonicalMPS):
+#   三条链环境 ⟨ψ|H|ψ⟩, 腿序 (bra bond, H bond, ket bond) —— 与 TDVPCache 的 MPO 环境同构;
+#   bra 是共轭的态, 故复用 hadamard.jl 的 _updateleft/_updateright(与 ALS ⊙ 问题同一套)
+# 局域生成元:
+#   格点: _reduce_hadamard_site(env.H[s], y, hL, hR) —— H[s] 与 y 共享物理指标(广播, 不收缩)
+#   键(补空间): c_prime(y, hL, hR) —— 生成元的键直穿, 与 MPO 情形同一个公式
+# 扫描骨架与 TDVP1 完全一致(_gauge_left/_contract_first 等), 单点不做键维截断/增长:
+#   流形 = 初态的键维剖面; 要让它长起来, 按 tdvpif 的做法先零填充:
+#   changebond!(ψ; D=D, noise=0)（补零 + SVD/NoTruncation 规范 → 填充方向正交归位）,
+#   演化结束后再 canonicalize!(ψ; alg=Orthogonalize(SVD(), trunc, false)) 截断
+#
+# 两个易错约定（都来自 tdvpif）:
+#   (1) 只有 bra 侧共轭 → 投影后的生成元一般不厄米, Krylov 驱动默认 Arnoldi
+#       (HadamardTDVP(; ishermitian=false))
+#   (2) 环境只收缩生成元的位点张量, 而流动应由它的"表示值"(value = scaling^L·∏tensors)驱动:
+#       故局域生成元统一乘因子 scaling(H)^L（等价于 tdvpif 的 _absorb_scaling!(H)）;
+#       态自身的 scaling 只是记账, 不进入流动。否则 tomps 造出的生成元会被当成 H/scaling^L
+# 精度: 流形能容纳逐点乘积时(短链全空间 / 零填充+规范的直积态)一步 = 逐元素 exp 到舍入;
+#   受限流形上实现的是投影流, 余项 O(stepsize)(stepsize 减半则减半);
+#   与"对角 MPO 路线"(TDVP1 + copyphydims(H))逐位一致(1e-16)
+#
+# HadamardTDVP2（两站点版本, 同一文件）:
+#   与 TDVP2 对应: 相邻两格点联合演化 exp(+dt/2·H_pair) → 截断 SVD(trunc 控键维上限)
+#   → updateleft!/updateright! → (非末端) 新中心格点回步 exp(-dt/2·H_site)
+#   两站点局域目标 _reduce_hadamard_site2: 生成元的 pair(中键缩并)与态的 pair 融并,
+#     物理指标共享, 再与两端的同构三链环境缩并
+#   键维由 pair 更新自行增长: bonddim=1 的直积态即可, 无需 changebond!;
+#     一次 sweep 即可长到 Schmidt 界剖面, 之后流形完备 → 流精确到 1e-15
+#     (增长的那一扫自身仍有 O(stepsize) 投影余项)
+#   与"对角 MPO 路线"(TDVP2 + copyphydims(H))逐位一致(1e-15)
+#
+# 附: TDVP1/TDVP2 的生成元 scaling 修复（本小节同批改动）
+#   环境只收缩生成元的位点张量, 而 canonicalize!/tomps 会把范数搬进 scaling 字段
+#   (value = scaling^L·∏tensors), 于是 exp(stepsize·H) 被静默地实现成
+#   exp(stepsize·H/scaling^L)。现对所有局域生成元(单点/键/pair, MPS 与密度算符两条流形)
+#   乘因子 scaling(H)^L（与 tdvpif 的 _absorb_scaling!(H) 等价）;
+#   普通 MPO/MPOHamiltonian 没有 scaling 字段, 因子为 1, 行为不变;
+#   态自身的 scaling 只是记账, 不进入流动
+```
+
 ## 实现顺序建议
 
 1. `SVDCompression` 路线（svd_mult/svdcompress）——QR+tsvd 扫描，覆盖 80% 用途。

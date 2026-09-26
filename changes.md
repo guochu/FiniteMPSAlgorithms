@@ -1,5 +1,60 @@
 # Interface changes
 
+## New: `HadamardTDVP`/`HadamardTDVP2`, the TDVP flow of the pointwise product of two MPS
+
+`src/algorithms/timeevo/hadamardtdvp.jl` adds time evolution for the Hadamard (pointwise)
+product of two MPS chains — the operation TEMPO's `tdvpif` performs when it builds the
+influence functional as the flow `IF = e^H` of the influence operator:
+
+- `HadamardTDVP(; stepsize, ishermitian=false, verbosity)`: one `sweep!` applies the
+  elementwise `z ↦ exp(stepsize·H).*z` of the flow `dz/dτ = H ∘ z`, with the same step-size
+  convention as `TDVP1`/`TDVP2` (`-τ` cools by τ, `-im*τ` evolves real time);
+- `HadamardTDVP2(; stepsize, trunc=DefaultTruncation, ishermitian=false, verbosity)`: the
+  two-site variant. The site pair evolves against the projected *two-site* pointwise
+  generator and is re-split by a truncating SVD, so the bond dimensions are adapted by the
+  update itself — a product / bond-dimension-1 guess grows to the profile the pointwise
+  product needs under the cap `trunc` carries, with no `changebond!` preparation — exactly
+  the `TDVP1`/`TDVP2` pair;
+- `HadamardTDVPCache(H::CanonicalMPS, ψ::CanonicalMPS)`: the three-chain environments
+  `⟨ψ|H|ψ⟩` of the pointwise product (`_updateleft`/`_updateright` of the ALS hadamard
+  machinery; the bra chain is the conjugated state), with `sweep!`/`leftsweep!`/
+  `rightsweep!`/`updateleft!`/`updateright!` like the other caches;
+- the single-site sweeps freeze the bond profile of the guess (`tdvpif`'s preparation
+  applies: zero-pad with `changebond!(ψ; D=D, noise=0)`, whose SVD/`NoTruncation` gauge
+  makes the padded directions orthonormal, and truncate at the end with `canonicalize!`);
+  the two-site sweeps grow it instead and need no preparation.
+
+Two conventions the implementation has to get right, both taken from `tdvpif`:
+
+- only the bra side of the environments is conjugated (the generator's physical index is
+  *shared* with the state's — a broadcast, not a contraction), so the projected generator is
+  generally **not hermitian** and the Krylov driver defaults to Arnoldi;
+- the flow is driven by the generator's *represented value* (`scaling^L·∏tensors`), while
+  the environments contract its site tensors, so a non-unit `scaling(H)` is folded into the
+  local generators as the factor `scaling(H)^L` (what `tdvpif`'s `_absorb_scaling!` does by
+  absorbing it into the tensors); the state's own `scaling` is bookkeeping and flows through
+  untouched.
+
+Accuracy, verified in `test/algorithms/timeevo.jl`: on a manifold that holds the pointwise
+product (the full space of a short chain, or a zero-padded product state) one sweep
+reproduces the elementwise exponential to roundoff, for imaginary, real and complex steps;
+after a two-site sweep has grown the profile the flow is exact to 1e-15, while the growing
+sweep itself leaves the usual O(stepsize) projection remainder; on a restricted manifold
+the sweep realizes the projected flow. Both variants are cross-checked against the MPO
+routes with the diagonal operator `copyphydims(H)` (`TDVP1`/`TDVP2`, agreement to 1e-15).
+
+## Fixed: `TDVP1`/`TDVP2` now fold in the generator's `scaling`
+
+`TDVP1` and `TDVP2` contracted the generator's site tensors only, so a generator carrying
+its norm in `scaling` — anything canonicalized, e.g. a `tomps`-built or `copyphydims`-built
+chain, where `scaling ≠ 1` — was silently evolved as `exp(stepsize·H/scaling^L)`. The
+local generators (single-site, bond and pair maps, for both the MPS and the
+density-operator manifolds) are now multiplied by `scaling(H)^L` whenever the generator
+carries a scaling; plain `MPO`/`MPOHamiltonian` generators have none and are unaffected.
+The state's own `scaling` was already bookkeeping only. The tests check the flow of a
+canonicalized generator against the dense elementwise exponential and against the same
+generator with its scaling absorbed into the tensors.
+
 ## New: standard finite-chain models (`src/models.jl`)
 
 `src/models.jl` collects the common one-dimensional Hamiltonians as `MPOHamiltonian`s on a
