@@ -86,9 +86,29 @@
 
 	# ---- the uniform API is unchanged ----
 	X = randn(ComplexF64, 2, 2)
-	@test MPOHamiltonian(4, OpTerm(1.0, 1 => X), OpTerm(0.5, 2 => X, 3 => X),
-						 OpTerm(0.5, 3 => X, 4 => X)) isa MPOHamiltonian
+	h0 = MPOHamiltonian(4, OpTerm(1.0, 1 => X), OpTerm(0.5, 2 => X, 3 => X),
+						OpTerm(0.5, 3 => X, 4 => X))
+	@test h0 isa MPOHamiltonian
+	@test ophydims(h0) == fill(2, 4)
+	# the `L` form requires one common local dimension
 	@test_throws DimensionMismatch MPOHamiltonian(4, OpTerm(1.0, 1 => X),
 												  OpTerm(0.5, 2 => randn(ComplexF64, 3, 3)))
+	# ... and the `ds` form is its non-uniform counterpart (same terms, given individually)
+	tlist = OpTerm[]
+	for i in 1:L
+		push!(tlist, OpTerm(-hfield, i => ops[i][1]))
+	end
+	for i in 1:L-1
+		push!(tlist, OpTerm(Jz, i => ops[i][1], i + 1 => ops[i + 1][1]))
+		push!(tlist, OpTerm(Jxy / 2, i => ops[i][2], i + 1 => ops[i + 1][3]))
+		push!(tlist, OpTerm(Jxy / 2, i => ops[i][3], i + 1 => ops[i + 1][2]))
+	end
+	push!(tlist, OpTerm(0.2, 1 => ops[1][1], L => ops[L][1]))
+	hds = MPOHamiltonian(ds, tlist...)
+	@test ophydims(hds) == ds
+	@test norm(todense(hds) - Hd) / norm(Hd) < 1e-12
+	@test_throws DimensionMismatch MPOHamiltonian(ds, OpTerm(1.0, 1 => randn(ComplexF64, 3, 3)))
 	@test_throws DimensionMismatch OpTerm(1.0, 1 => randn(ComplexF64, 2, 3))
+	# an all-scalar block matrix (here: a site with no operator support) is rejected
+	@test_throws ArgumentError MPOHamiltonian(4, OpTerm(1.0, 1 => X), OpTerm(0.5, 2 => X, 3 => X))
 end

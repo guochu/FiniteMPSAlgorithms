@@ -100,7 +100,9 @@ function compute_mpotensor_data(::Type{T}, data::AbstractMatrix) where {T<:Numbe
 			end
 		end
 	end
-	isnothing(d) && throw(ArgumentError("cannot infer phydim: the logical matrix contains no operator (all-scalar input)"))
+	isnothing(d) && throw(ArgumentError("cannot infer phydim: the logical matrix contains no operator " *
+										"(all-scalar input; a site tensor needs at least one d×d block, " *
+										"e.g. a site with no operator support has an all-scalar block matrix)"))
 	for i in 1:m, j in 1:n
 		sj = data[i, j]
 		if isa(sj, AbstractMatrix)

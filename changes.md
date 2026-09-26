@@ -15,7 +15,11 @@ inserts on the gap sites of a long-range term). Both are gone:
   term connecting sites of different dimensions across a heterogeneous gap works;
 - `MPOHamiltonian(L, terms...)` carries no lattice and therefore still requires one common
   dimension (it throws a `DimensionMismatch` pointing at `OpSum(ds)` otherwise), and
-  `MPOHamiltonian(::OpSum)` is the varying-dimension entry point.
+  `MPOHamiltonian(::OpSum)` is the varying-dimension entry point. The term-based
+  counterpart of the `ds` form is `MPOHamiltonian(ds, terms...)`, which validates every
+  operator against its own `ds[pos]`;
+- an all-scalar block matrix — e.g. a site with no operator support at all — keeps raising
+  the explicit `ArgumentError` ("cannot infer phydim"), with a message that says so.
 
 Verified end-to-end on a mixed spin-1/2 / spin-1 chain (`ds = [2, 3, 2, 3]`, on-site +
 nearest-neighbour + long-range terms): `todense` against an independent `kron` construction

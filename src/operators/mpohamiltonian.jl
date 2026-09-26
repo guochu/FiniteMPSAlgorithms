@@ -141,22 +141,31 @@ end
 
 """
 	MPOHamiltonian(L::Int, terms::OpTerm...)
+	MPOHamiltonian(ds::AbstractVector{<:Integer}, terms::OpTerm...)
 	MPOHamiltonian(terms::OpSum)
 
 Assemble the Schur-form (Jordan upper-triangular) MPO Hamiltonian from the product
-terms `terms` (given individually for `L` sites, or as a validated
-[`OpSum`](@ref)). Each multi-site term gets its own private chain of channels (one
-per partially-completed operator string): logical channel 1 is the vacuum identity and
-the last channel the closing identity; on-site terms accumulate in the `D` corner block.
-Site tensors are built directly in the `A`/`B`/`C`/`D` block storage: interior sites
-are square `n×n` Jordan blocks, the first site keeps the vacuum row (`1×n`) and the
-last site the closing column (`n×1`).
+terms `terms` (given individually on `L` sites, on a lattice `ds` with possibly differing
+per-site dimensions, or as a validated [`OpSum`](@ref)). Each multi-site term gets its own
+private chain of channels (one per partially-completed operator string): logical channel 1
+is the vacuum identity and the last channel the closing identity; on-site terms accumulate
+in the `D` corner block. Site tensors are built directly in the `A`/`B`/`C`/`D` block
+storage: interior sites are square `n×n` Jordan blocks, the first site keeps the vacuum row
+(`1×n`) and the last site the closing column (`n×1`).
+
+The `L` form carries no lattice and therefore requires a **uniform** local dimension: every
+operator of every term must share one `d` (otherwise it throws a `DimensionMismatch`). Use
+`MPOHamiltonian(ds, terms...)` or `MPOHamiltonian(OpSum(ds))` for a lattice with differing
+per-site dimensions, where every operator is validated against its own `ds[pos]`.
 """
 MPOHamiltonian(terms::OpSum) = _mpohamiltonian_from_terms(terms.ds, terms.data)
 MPOHamiltonian(L::Int, terms::OpTerm...) = _mpohamiltonian_from_terms(L, collect(terms))
+MPOHamiltonian(ds::AbstractVector{<:Integer}, terms::OpTerm...) =
+	_mpohamiltonian_from_terms(collect(Int, ds), collect(terms))
 
 # `MPOHamiltonian(L, terms...)` carries no lattice: every operator must then share one
-# dimension (use `OpSum(ds, terms)` for a lattice with differing per-site dimensions)
+# dimension (use `MPOHamiltonian(ds, terms...)` or `OpSum(ds)` for a lattice with
+# differing per-site dimensions)
 function _mpohamiltonian_from_terms(L::Int, terms::AbstractVector{<:OpTerm})
 	isempty(terms) && throw(ArgumentError("no terms given"))
 	d = size(terms[1].operators[1], 1)
