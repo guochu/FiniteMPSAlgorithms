@@ -24,6 +24,7 @@ include("helpers.jl")
 		include("operators/sparsempo.jl")
 		include("operators/vectorize.jl")
 		include("operators/models.jl")
+		include("operators/nonuniform.jl")
 	end
 	@testset "algorithms" begin
 		include("algorithms/arithmetics.jl")

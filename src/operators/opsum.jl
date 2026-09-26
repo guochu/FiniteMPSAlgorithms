@@ -6,20 +6,23 @@
 	OpTerm(coeff, i₁ => O₁, i₂ => O₂, ...)
 
 A product operator term `coeff * O₁ ⊗ O₂ ⋯` acting on the strictly increasing site
-positions `positions`.
+positions `positions`. The operators only have to be *square*: the local dimension may
+differ from site to site, and [`OpSum`](@ref) checks every operator against its own
+`ds[pos]`.
 """
 struct OpTerm{N,O<:AbstractMatrix,T<:Number}
 	coeff::T
 	positions::NTuple{N,Int}
 	operators::NTuple{N,O}
-	function OpTerm(coeff::Number, positions::NTuple{N,Int}, operators::NTuple{N,<:AbstractMatrix}) where {N}
+	function OpTerm(coeff::Number, positions::NTuple{N,Int},
+					operators::Tuple{Vararg{AbstractMatrix,N}}) where {N}
 		(N > 0) || throw(ArgumentError("term must act on at least one site"))
 		for i in 2:N
 			(positions[i] > positions[i-1]) || throw(ArgumentError("positions must be strictly increasing"))
 		end
-		d = size(operators[1], 1)
 		for op in operators
-			(size(op, 1) == size(op, 2) == d) || throw(DimensionMismatch("all operators of a term must share the physical dimension"))
+			(size(op, 1) == size(op, 2)) ||
+				throw(DimensionMismatch("every operator of a term must be a square matrix, got $(size(op))"))
 		end
 		T = promote_type(typeof(coeff), scalartype(operators[1]))
 		for op in operators

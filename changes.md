@@ -1,5 +1,28 @@
 # Interface changes
 
+## New: lattices with non-uniform per-site dimensions in the sparse MPO route
+
+`OpSum`/`OpTerm`/`MPOHamiltonian` used to require one common local dimension per term and
+per chain: `OpTerm` demanded that all operators of a term be `d×d` with the *same* `d`, and
+`_mpohamiltonian_from_terms` used a single `d` (including for the identity blocks it
+inserts on the gap sites of a long-range term). Both are gone:
+
+- `OpTerm` only requires *square* operators (and accepts heterogeneous tuple element types),
+  so a term may couple sites of different dimensions; the operator/dimension matching is
+  done by `OpSum`, which already validates every operator against its own `ds[pos]`;
+- `_mpohamiltonian_from_terms` now takes the lattice `ds` and builds each `SchurMPOTensor`
+  with the *site's* dimension — including the gap identities of a long-range term, so a
+  term connecting sites of different dimensions across a heterogeneous gap works;
+- `MPOHamiltonian(L, terms...)` carries no lattice and therefore still requires one common
+  dimension (it throws a `DimensionMismatch` pointing at `OpSum(ds)` otherwise), and
+  `MPOHamiltonian(::OpSum)` is the varying-dimension entry point.
+
+Verified end-to-end on a mixed spin-1/2 / spin-1 chain (`ds = [2, 3, 2, 3]`, on-site +
+nearest-neighbour + long-range terms): `todense` against an independent `kron` construction
+(1e-12), `MPO(h)`/`tompotensors` round trip, `expectation`, DMRG1/DMRG2 against exact
+diagonalization, TDVP1/TDVP2 one sweep `= exp(-stepsize·H)` on the whole space, and the
+`changebond!`-padded two-site growth — see `test/operators/nonuniform.jl`.
+
 ## New: `HadamardTDVP`/`HadamardTDVP2`, the TDVP flow of the pointwise product of two MPS
 
 `src/algorithms/timeevo/hadamardtdvp.jl` adds time evolution for the Hadamard (pointwise)

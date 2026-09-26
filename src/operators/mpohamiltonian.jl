@@ -13,6 +13,12 @@ An MPO representation of a Hamiltonian whose site tensors are matrices of local 
 operators (sparse matrix-of-matrices form). The first site tensor is the first row of
 the chain, the last site the last column; the interior encodes started operator strings.
 
+Each site tensor carries **its own local dimension** (`phydim(m::AbstractSparseMPOTensor)
+= m.d`), so a lattice with differing per-site dimensions is supported: build the terms on
+an [`OpSum(ds)`](@ref) carrying the per-site dimensions, and every operator is validated
+against its own `ds[pos]` (an [`OpTerm`](@ref) itself only requires square operators).
+`MPOHamiltonian(L, terms...)` carries no lattice and therefore needs one common dimension.
+
 Assemble from product terms with [`OpTerm`](@ref), from a dense 4-index chain
 ([`MPO`](@ref), wrapped site-wise), or convert back with `MPO(h)` / [`tompotensors`](@ref).
 This is the standard operator input of `ground_state`, `excited_state` and TDVP1.
@@ -146,16 +152,33 @@ Site tensors are built directly in the `A`/`B`/`C`/`D` block storage: interior s
 are square `n×n` Jordan blocks, the first site keeps the vacuum row (`1×n`) and the
 last site the closing column (`n×1`).
 """
-MPOHamiltonian(terms::OpSum) = _mpohamiltonian_from_terms(length(terms.ds), terms.data)
+MPOHamiltonian(terms::OpSum) = _mpohamiltonian_from_terms(terms.ds, terms.data)
 MPOHamiltonian(L::Int, terms::OpTerm...) = _mpohamiltonian_from_terms(L, collect(terms))
+
+# `MPOHamiltonian(L, terms...)` carries no lattice: every operator must then share one
+# dimension (use `OpSum(ds, terms)` for a lattice with differing per-site dimensions)
 function _mpohamiltonian_from_terms(L::Int, terms::AbstractVector{<:OpTerm})
+	isempty(terms) && throw(ArgumentError("no terms given"))
+	d = size(terms[1].operators[1], 1)
+	for t in terms, op in t.operators
+		(size(op, 1) == d) ||
+			throw(DimensionMismatch("MPOHamiltonian(L, terms...) requires one local dimension; " *
+									"build an OpSum(ds) instead for a lattice with differing " *
+									"per-site dimensions"))
+	end
+	return _mpohamiltonian_from_terms(fill(d, L), terms)
+end
+
+function _mpohamiltonian_from_terms(ds::AbstractVector{Int}, terms::AbstractVector{<:OpTerm})
+	L = length(ds)
 	isempty(terms) && throw(ArgumentError("no terms given"))
 	for t in terms
 		all(1 .<= t.positions .<= L) || throw(ArgumentError("term positions out of range"))
-	end
-	d = size(terms[1].operators[1], 1)
-	for t in terms
-		(size(t.operators[1], 1) == d) || throw(DimensionMismatch("inconsistent physical dimensions"))
+		for (pos, op) in zip(t.positions, t.operators)
+			(size(op, 1) == ds[pos]) ||
+				throw(DimensionMismatch("operator dimension $(size(op, 1)) does not match the " *
+										"lattice dimension ds[$pos] = $(ds[pos])"))
+		end
 	end
 	# a single scalar type across all sites (terms may mix real and complex operators)
 	T = Float64
@@ -194,7 +217,7 @@ function _mpohamiltonian_from_terms(L::Int, terms::AbstractVector{<:OpTerm})
 	                        for k in 1:nt-1
 	                                if t.positions[k] < s < t.positions[k+1]
 	                                        li = bases[a] + k - 2
-	                                        Os[li+1, li+1] = _add_block(Os[li+1, li+1], isometry(T, d))
+	                                        Os[li+1, li+1] = _add_block(Os[li+1, li+1], isometry(T, ds[s]))
 	                                end
 	                end
 	                elseif nt == 1
