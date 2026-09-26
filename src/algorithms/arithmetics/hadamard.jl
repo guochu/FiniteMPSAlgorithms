@@ -42,7 +42,10 @@ end
 function _reduce_hadamard_site(A::MPSTensor, B::MPSTensor,
 							   cleft::AbstractArray{T,3}, cright::AbstractArray{T,3}) where {T}
 	KB = _fused_pair(A, B)
-	@tensor mpsj[-1, -2, -3] := cleft[-1, 1, 2] * KB[1, 2, -2, 3, 4] * cright[-3, 3, 4]
+	# two explicit steps: fold the right environment into the fused pair first, then the
+	# left one (both BLAS-shaped; see `c_prime` for the nary-contraction pathology)
+	@tensor tmp[kl, yl, p, or] := KB[kl, yl, p, kr, yr] * cright[or, kr, yr]
+	@tensor mpsj[-1, -2, -3] := cleft[-1, kl, yl] * tmp[kl, yl, -2, -3]
 	return mpsj
 end
 

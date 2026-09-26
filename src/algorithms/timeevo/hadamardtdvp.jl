@@ -291,14 +291,15 @@ rightsweep!(env::HadamardTDVPCache, alg::HadamardTDVP) = _hadamard_rightsweep!(e
 # same three-chain environments at the bonds on both ends of the pair.
 
 # two-site target: fuse the generator's pair with the state's pair (physical indices
-# shared) and contract with the environments at the bonds on both ends
+# shared) and contract with the environments at the bonds on both ends — two explicit
+# steps, right environment first (see `c_prime` for the nary-contraction pathology)
 function _reduce_hadamard_site2(A1::MPSTensor, A2::MPSTensor, Θ::AbstractArray{T,4},
 								cleft::AbstractArray{T,3}, cright::AbstractArray{T,3}) where {T}
 	K12 = _two_site_tensor(A1, A2)              # [K_L, p1, p2, K_R]
 	KB = reshape(K12, size(K12, 1), 1, size(K12, 2), size(K12, 3), size(K12, 4), 1) .*
 		 reshape(Θ, 1, size(Θ, 1), size(Θ, 2), size(Θ, 3), 1, size(Θ, 4))
-	@tensor mpsj[-1, -2, -3, -4] :=
-		cleft[-1, 1, 2] * KB[1, 2, -2, -3, 3, 4] * cright[-4, 3, 4]
+	@tensor tmp[kl, yl, p1, p2, or] := KB[kl, yl, p1, p2, kr, yr] * cright[or, kr, yr]
+	@tensor mpsj[-1, -2, -3, -4] := cleft[-1, kl, yl] * tmp[kl, yl, -2, -3, -4]
 	return mpsj
 end
 

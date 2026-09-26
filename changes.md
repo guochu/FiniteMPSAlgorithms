@@ -1,5 +1,25 @@
 # Interface changes
 
+## Fixed: contraction order of the three-tensor local maps (~400× on the Hadamard bond map)
+
+The nary `@tensor` contractions of the three-tensor local maps let TensorOperations pick
+the pairwise order, and for these shapes it contracts the two *environments* through their
+small middle legs first, materializing a `χ_L×χ_R×χ'_L×χ'_R` intermediate instead of
+folding the (small) iterate in first. At the TEMPO `TDVPIF` scales (χ=50, w=4) the bond
+map `c_prime` took **167 ms** per call this way (vs 0.41 ms for the explicit two-step,
+~400×) and one Hadamard bond exponentiate 4.3 s. All three hot maps now contract in two
+explicit, BLAS-shaped steps (fold the iterate into the right environment, then the left):
+
+- `c_prime` (shared: the hadamard bond maps and the `DMRG1`/`TDVP1`/`TDVP2` bond maps);
+- `_reduce_hadamard_site` (the ALS hadamard target and the `HadamardTDVP` site maps);
+- `_reduce_hadamard_site2` (the `HadamardTDVP2` pair target).
+
+Same contractions, different summation order — the flow is bit-identical at the printed
+precision. End-to-end at χ=50, d=2, w=4, L=22: one `HadamardTDVP` sweep went from
+**113 s to 1.66 s** (68×) on the same machine; the Krylov parameters are untouched (with
+cheap maps the 26 applications of an `exponentiate` are no longer the bottleneck). See
+`plan/08_hadamard_tdvp_performance.md` for the full analysis.
+
 ## New: lattices with non-uniform per-site dimensions in the sparse MPO route
 
 `OpSum`/`OpTerm`/`MPOHamiltonian` used to require one common local dimension per term and
