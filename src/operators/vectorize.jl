@@ -73,25 +73,31 @@ Base.transpose(h::CanonicalMPO) =
 	CanonicalMPO([permutedims(W, (1, 4, 3, 2)) for W in h.data]; scaling=scaling(h))
 
 """
-	Base.kron(a::AbstractMPO, b::AbstractMPO) -> MPO
+	superoperator(a::AbstractMPO, b::AbstractMPO) -> MPO
 
-The Kronecker product of two operator chains of equal length: site `i` of the result
-carries the local Kronecker product of the site operators on the fused physical space —
-from the site tensors `A[aL, po, aR, pin]` and `B[bL, q, bR, qin]` the result tensor is
+The fused-space Kronecker product of two operator chains of equal length: site `i` of
+the result carries the local Kronecker product of the site operators on the fused
+physical space — from the site tensors `A[aL, po, aR, pin]` and `B[bL, q, bR, qin]` the
+result tensor is
 
 	S[(aL,bL), (po,q), (aR,bR), (pin,qin)] = A[aL, po, aR, pin] · B[bL, q, bR, qin]
 
 (the legs of `a` are the fastest on every fused index, matching the `vectorize`
-convention); the bond dimensions multiply. The `scaling` of `CanonicalMPO` inputs is
-NOT folded (data-level convention). The two-sided superoperators are the special cases
+convention); the bond dimensions multiply. Acting on [`vectorize(X)`](@ref) this is the
+superoperator of the two-sided map `X ↦ a·X·transpose(b)`; the one-sided multiplication
+superoperators are the special cases
 
-	superoperator(h, :left)  == kron(h, identitympo(T, iphydims(h)))
-	superoperator(h, :right) == kron(identitympo(T, ophydims(h)), transpose(h))
+	superoperator(h, :left)  == superoperator(h, identity chain of `iphydims(h)`)
+	superoperator(h, :right) == superoperator(identity chain of `ophydims(h)`, transpose(h))
+
+(`Base.kron` orders its first dense factor slowest, i.e. with the roles swapped, so this
+is deliberately not a `Base.kron` overload.) The `scaling` of `CanonicalMPO` inputs is
+NOT folded (data-level convention).
 """
-function Base.kron(a::AbstractMPO, b::AbstractMPO)
+function superoperator(a::AbstractMPO, b::AbstractMPO)
 	L = length(a)
-	(L == length(b)) || throw(DimensionMismatch("kron requires chains of equal length, "
-		* "got $L and $(length(b))"))
+	(L == length(b)) || throw(DimensionMismatch("superoperator requires chains of equal "
+		* "length, got $L and $(length(b))"))
 	T = promote_type(scalartype(a), scalartype(b))
 	data = Vector{Array{T,4}}(undef, L)
 	for i in 1:L
@@ -111,10 +117,10 @@ end
 
 The superoperator induced by left/right multiplication with `h`: the map `X ↦ h·X`
 (`side = :left`) or `X ↦ X·h` (`side = :right`) on the vectorized space, built from the
-MPO Kronecker product with the identity chain,
+fused-space Kronecker product with the identity chain,
 
-	superoperator(h, :left)  = kron(h, I)          # h acts on the output (po) legs
-	superoperator(h, :right) = kron(I, transpose(h)) # hᵀ acts on the input (pi) legs
+	superoperator(h, :left)  = superoperator(h, I)            # h acts on the output (po) legs
+	superoperator(h, :right) = superoperator(I, transpose(h)) # hᵀ acts on the input (pi) legs
 
 so the result is a chain on the doubled physical space (per-site dimension `d_out·d_in`)
 with the same bond dimensions as `h`. Applying it to [`vectorize(X)`](@ref) and
@@ -128,9 +134,9 @@ function superoperator(h::MPO, side::Symbol=:left)
 	(side === :left || side === :right) ||
 		throw(ArgumentError("side must be :left or :right, got $side"))
 	if side === :left
-		return kron(h, MPO(scalartype(h), iphydims(h)))
+		return superoperator(h, MPO(scalartype(h), iphydims(h)))
 	end
-	return kron(MPO(scalartype(h), ophydims(h)), transpose(h))
+	return superoperator(MPO(scalartype(h), ophydims(h)), transpose(h))
 end
 superoperator(h::CanonicalMPO, side::Symbol=:left) =
 	CanonicalMPO(superoperator(MPO(h), side).data; scaling=scaling(h))

@@ -1,5 +1,16 @@
 # Interface changes
 
+## Renamed: `Base.kron(a::AbstractMPO, b::AbstractMPO)` → `superoperator(a, b)`
+
+The fused-space Kronecker product of two operator chains overrode `Base.kron` with a
+factor order that contradicts Julia's slowest-first convention (on the dense forms the
+factor roles are swapped: `todense(superoperator(a, b)) = kron(todense(b), todense(a))`),
+so it is no longer a `Base.kron` overload. The new name states what it is: acting on
+`vectorize(X)` the result is the superoperator of the two-sided map
+`X ↦ a·X·transpose(b)`, with the side-superoperators as special cases
+(`superoperator(h, :left) = superoperator(h, I)`,
+`superoperator(h, :right) = superoperator(I, transpose(h))`). Behavior is unchanged.
+
 ## Changed: `_naive_svd_guess` streams `site(i, carry)` — the carry is absorbed into the site construction
 
 The on-the-fly naive-SVD guess (shared by `svdguess_mult` / `svdguess_add` /

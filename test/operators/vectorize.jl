@@ -78,7 +78,7 @@ end
 	@test superoperator(hH; side=:left) isa MPO
 end
 
-@testset "MPO kron and transpose" begin
+@testset "MPO superoperator and transpose" begin
 	Random.seed!(25)
 	L = 3
 	ds = fill(2, L)
@@ -91,22 +91,22 @@ end
 	@test todense(transpose(ρ)) ≈ collect(transpose(todense(ρ))) atol = 1e-10
 	@test scaling(transpose(ρ)) ≈ 1.2
 
-	# kron of one-site chains is the fused-space Kronecker product: `a` carries the
-	# FAST fused legs (vectorize convention), while Base.kron orders its first factor
-	# slowest — so the dense forms swap the factor roles
+	# the fused-space Kronecker product of one-site chains: `a` carries the FAST fused
+	# legs (vectorize convention), while Base.kron orders its first factor slowest — so
+	# the dense forms swap the factor roles
 	a1 = MPO([randn(ComplexF64, 1, 3, 1, 3)])
 	b1 = MPO([randn(ComplexF64, 1, 2, 1, 2)])
-	@test todense(kron(a1, b1)) ≈ kron(todense(b1), todense(a1)) atol = 1e-10
+	@test todense(superoperator(a1, b1)) ≈ kron(todense(b1), todense(a1)) atol = 1e-10
 	# bond dimensions multiply; equal chain lengths are required
 	a2 = MPO(randommpo(ComplexF64, ds; D=2).data)
 	b2 = MPO(randommpo(ComplexF64, ds; D=4).data)
-	@test bonddims(kron(a2, b2)) == bonddims(a2) .* bonddims(b2)
-	@test_throws DimensionMismatch kron(h, MPO(randommpo(ComplexF64, fill(2, 2); D=3).data))
+	@test bonddims(superoperator(a2, b2)) == bonddims(a2) .* bonddims(b2)
+	@test_throws DimensionMismatch superoperator(h, MPO(randommpo(ComplexF64, fill(2, 2); D=3).data))
 
-	# the superoperators are the kron products with the identity chain
+	# the side superoperators are the fused products with the identity chain
 	𝕀 = MPO(Float64, ds)
-	@test superoperator(h, :left).data == kron(h, 𝕀).data
-	@test superoperator(h, :right).data == kron(𝕀, transpose(h)).data
+	@test superoperator(h, :left).data == superoperator(h, 𝕀).data
+	@test superoperator(h, :right).data == superoperator(𝕀, transpose(h)).data
 end
 
 @testset "expectation scaling (regression)" begin
