@@ -1,5 +1,26 @@
 # Interface changes
 
+## Changed: `_naive_svd_guess` streams `site(i, carry)` — the carry is absorbed into the site construction
+
+The on-the-fly naive-SVD guess (shared by `svdguess_mult` / `svdguess_add` /
+`svdguess_hadamard`) used to materialize each composed site tensor of the exact chain
+(`copy(site(i))`), then apply the truncated-SVD carry in a *separate* pass
+(`_contract_last(B, carry)`), and in the mult route also pay a full-size `permute`
+beforehand. The producer interface is now `site(i, carry)`: each producer folds the carry
+(acting on the site's composite right bond) into the construction, contracting it against
+the uncombined tensors before the composite site tensor is ever formed —
+
+- mult (MPO·MPS / MPO·MPO): the carry block reshapes onto the composite right-bond
+  factors and contracts the uncombined contraction output; the `@tensor` writes the tied
+  leg order directly, so the `permute` copy is gone as well;
+- add: the carry distributes over the right-bond `cat` blocks (site 1 adds the
+  block results, bulk sites cat them along the left bond);
+- hadamard: the carry contracts the fused pair before tying (and reuses `_fused_pair`).
+
+Per site this removes one full defensive copy and one full pass over the composed tensor
+(plus the permute copy in the mult route); the streamed tensor now goes straight into the
+mutating `tsvd!`. Results are unchanged (same sums, different order of passes).
+
 ## Fixed: the projected excited-state map is now Hermitian (unit-test warnings gone)
 
 Running the test suite emitted 194 KrylovKit warnings

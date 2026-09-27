@@ -22,27 +22,32 @@ _gauge_right(A::MPSTensor) = rightorth!(A, (1,), (2, 3))
 _gauge_right(A::MPOTensor) = rightorth!(A, (1,), (2, 3, 4))
 
 # ---------- on-the-fly naive SVD initial guess (shared by mult / add / hadamard) ----------
-# Stream the exact chain's site tensors (generated lazily by `site(i)` for i = L:-1:1)
-# right to left; each is right-orthogonalized with truncation under `trunc` (bond ≤ D):
-# the right factor becomes the site tensor and the left factor times the spectrum is
-# carried into the next site. The exact chain itself is never materialized. Returns a
-# right-canonical chain (vectors of rank-3/rank-4 tensors) with the remainder (scale)
-# absorbed into site 1, plus the maximal truncation error.
+# Stream the exact chain's site tensors (produced by `site(i, carry)`, i = L:-1:1) right
+# to left; each is right-orthogonalized with truncation under `trunc` (bond ≤ D): the
+# right factor becomes the site tensor and the left factor times the spectrum is carried
+# into the next site. The exact chain itself is never materialized. `carry` is the matrix
+# acting on the site's right bond produced by the previous step — the producer must
+# absorb it *during* construction (it couples the composite right-bond factors, so
+# contracting it before tying/composing the site tensor avoids a separate full pass over
+# the composed tensor, and the streamed tensor can go straight into the mutating tsvd).
+# Returns a right-canonical chain (vectors of rank-3/rank-4 tensors) with the remainder
+# (scale) absorbed into site 1, plus the maximal truncation error.
 function _naive_svd_guess(site::Function, L::Int; trunc::TruncationScheme)
 	carry = nothing
-	proto = copy(site(L))
-	out = Vector{typeof(proto)}(undef, L)
+	out = nothing
 	maxerr = 0.0
-	for i in L:-1:2
-		B = i == L ? proto : copy(site(i))
-		carry === nothing || (B = _contract_last(B, carry))
-		N = ndims(B)
-		u, s, v, err = tsvd!(B, (1,), ntuple(d -> d + 1, Val(N - 1)); trunc)
-		out[i] = v
-		carry = u * Diagonal(s)
-		maxerr = max(maxerr, err)
+	for i in L:-1:1
+		B = site(i, carry)
+		out === nothing && (out = Vector{typeof(B)}(undef, L))
+		if i > 1
+			u, s, v, err = tsvd!(B, (1,), ntuple(d -> d + 1, Val(ndims(B) - 1)); trunc)
+			out[i] = v
+			carry = u * Diagonal(s)
+			maxerr = max(maxerr, err)
+		else
+			out[1] = B
+		end
 	end
-	out[1] = carry === nothing ? copy(site(1)) : _contract_last(copy(site(1)), carry)
 	return out, maxerr
 end
 
@@ -193,20 +198,37 @@ _naive_svd_mult(h::MPOHamiltonian, x::CanonicalMPS, trunc::TruncationScheme) =
 _naive_svd_mult(h::MPOHamiltonian, x::AbstractMPO, trunc::TruncationScheme) =
 	_naive_svd_mult(MPO(tompotensors(h)), x, trunc)
 function _naive_svd_mult(h::AbstractMPO, x::CanonicalMPS, trunc::TruncationScheme)
-	site = i -> begin
-		W = h[i]
-		A = x[i]
+	# exact product site tensor (aL·bL, po, aR·bR); the carry acts on the composite right
+	# bond (aR·bR), so it is applied to the uncombined contraction output before tying —
+	# this skips both the defensive copy and the full-size permute of the old
+	# construct-then-contract path (the contraction writes the tied leg order directly)
+	site = (i, carry) -> begin
+		W = h[i]   # (aL, po, aR, pin)
+		A = x[i]   # (bL, pin, bR)
+		if carry === nothing
+			@tensor r[aL, bL, po, aR, bR] := W[aL, po, aR, pin] * A[bL, pin, bR]
+			return tie(r, (2, 1, 2))
+		end
 		@tensor r[aL, po, aR, bL, bR] := W[aL, po, aR, pin] * A[bL, pin, bR]
-		tie(permute(r, (1, 4, 2, 3, 5)), (2, 1, 2))
+		c3 = reshape(carry, size(W, 3), size(A, 3), :)   # (aR, bR, k)
+		@tensor rc[aL, bL, po, k] := r[aL, po, aR, bL, bR] * c3[aR, bR, k]
+		return tie(rc, (2, 1, 1))
 	end
 	return _naive_svd_guess(site, length(h); trunc)
 end
 function _naive_svd_mult(h::AbstractMPO, x::AbstractMPO, trunc::TruncationScheme)
-	site = i -> begin
-		WA = h[i]
-		WB = x[i]
+	# exact product site tensor (aA·aB, poA, aA2·aB2, q); carry folded in as above
+	site = (i, carry) -> begin
+		WA = h[i]   # (aA, poA, aA2, p)
+		WB = x[i]   # (aB, p, aB2, q)
+		if carry === nothing
+			@tensor t[aA, aB, poA, aA2, aB2, q] := WA[aA, poA, aA2, p] * WB[aB, p, aB2, q]
+			return tie(t, (2, 1, 2, 1))
+		end
 		@tensor t[aA, poA, aA2, aB, aB2, q] := WA[aA, poA, aA2, p] * WB[aB, p, aB2, q]
-		tie(permute(t, (1, 4, 2, 3, 5, 6)), (2, 1, 2, 1))
+		c4 = reshape(carry, size(WA, 3), size(WB, 3), :)   # (aA2, aB2, k)
+		@tensor tc[aA, aB, poA, k, q] := t[aA, poA, aA2, aB, aB2, q] * c4[aA2, aB2, k]
+		return tie(tc, (2, 1, 1, 1))
 	end
 	return _naive_svd_guess(site, length(h); trunc)
 end

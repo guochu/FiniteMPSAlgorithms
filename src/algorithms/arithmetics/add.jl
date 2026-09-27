@@ -141,13 +141,30 @@ function svdguess_add(chains, D::Int)
 	L = length(chains[1])
 	s1 = scaling(chains[1])
 	scales = [scaling(ψ) / s1 for ψ in chains]
-	site = i -> begin
-		if i == 1
-			cat([scales[n] * chains[n][1] for n in eachindex(chains)]...; dims=3)
+	site = (i, carry) -> begin
+		ts = [scales[n] * chains[n][i] for n in eachindex(chains)]
+		if carry === nothing
+			if i == 1
+				cat(ts...; dims=3)
+			elseif i == L
+				cat(ts...; dims=1)
+			else
+				cat(ts...; dims=(1, 3))
+			end
 		elseif i == L
-			cat([scales[n] * chains[n][L] for n in eachindex(chains)]...; dims=1)
+			# the right bond is per-chain (shared): contract it with the whole carry
+			cat([_contract_last(t, carry) for t in ts]...; dims=1)
 		else
-			cat([scales[n] * chains[n][i] for n in eachindex(chains)]...; dims=(1, 3))
+			# the right bond is a cat over the chains (the contracted side): distribute the
+			# carry over the blocks; the output bond k is shared, so the site-1 blocks add
+			# and the bulk blocks cat along the left bond
+			off = 0
+			for n in eachindex(ts)
+				dr = size(ts[n], 3)
+				ts[n] = _contract_last(ts[n], carry[off+1:off+dr, :])
+				off += dr
+			end
+			i == 1 ? sum(ts) : cat(ts...; dims=1)
 		end
 	end
 	data, _ = _naive_svd_guess(site, L; trunc=truncdim(D))

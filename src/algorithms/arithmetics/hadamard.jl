@@ -143,12 +143,14 @@ iterative hadamard (the exact product itself is never materialized). The bond
 dimension is capped at `D` (`truncdim(D)`).
 """
 function svdguess_hadamard(ψA, ψB, D::Int)
-	site = i -> begin
-		A = ψA[i]
-		B = ψB[i]
-		r = reshape(A, size(A, 1), 1, size(A, 2), size(A, 3), 1) .*
-			reshape(B, 1, size(B, 1), size(B, 2), 1, size(B, 3))
-		tie(r, (2, 1, 2))
+	# exact product site tensor (aL·bL, p, aR·bR); the carry acts on the composite right
+	# bond (aR·bR) and is applied to the fused pair before tying
+	site = (i, carry) -> begin
+		KB = _fused_pair(ψA[i], ψB[i])   # (aL, bL, p, aR, bR)
+		carry === nothing && return tie(KB, (2, 1, 2))
+		c3 = reshape(carry, size(ψA[i], 3), size(ψB[i], 3), :)   # (aR, bR, k)
+		@tensor kc[aL, bL, p, k] := KB[aL, bL, p, aR, bR] * c3[aR, bR, k]
+		return tie(kc, (2, 1, 1))
 	end
 	data, _ = _naive_svd_guess(site, length(ψA); trunc=truncdim(D))
 	return CanonicalMPS(Vector{Array{scalartype(data[1]),3}}(data))
