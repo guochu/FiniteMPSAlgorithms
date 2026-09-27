@@ -22,8 +22,22 @@ function _fused_pair(A::MPSTensor, B::MPSTensor)
 end
 
 function _updateleft(hold::AbstractArray{T,3}, O::MPSTensor, A::MPSTensor, B::MPSTensor) where {T}
-	KB = _fused_pair(A, B)
-	@tensor hnew[-1, -2, -3] := conj(O[1, 4, -1]) * hold[1, 2, 3] * KB[2, 3, 4, -2, -3]
+	# contraction order: fold hold into conj(O) first, then apply A and B batched over
+	# the physical index (p is shared elementwise between A and B, NOT contracted).
+	# Every intermediate stays at O(D^3) — materializing the fused pair KB would cost
+	# O(D^4·d) memory and O(D^5·d) work per transfer.
+	dL, dp, dR = size(A, 1), size(A, 2), size(A, 3)
+	dbL, dbR = size(B, 1), size(B, 3)
+	dO = size(O, 3)
+	hnew = zeros(T, dO, dR, dbR)
+	Hm = reshape(permutedims(hold, (2, 3, 1)), dL * dbL, size(O, 1))   # (aL bL, oL)
+	for p in 1:dp
+		M = Hm * conj(@view(O[:, p, :]))                    # (aL bL, oR)
+		Y = reshape(transpose(@view(A[:, p, :])) * reshape(M, dL, dbL * dO), dR, dbL, dO)    # (aR, bL, oR)
+		Y2 = reshape(permutedims(Y, (2, 1, 3)), dbL, dR * dO)         # (bL, aR oR)
+		res = reshape(transpose(@view(B[:, p, :])) * Y2, dbR, dR, dO) # (bR, aR, oR)
+		hnew .+= permutedims(res, (3, 2, 1))                         # (oR, aR, bR)
+	end
 	return hnew
 end
 
@@ -33,19 +47,39 @@ end
 Right-to-left transfer of the three-chain environment (symmetric to [`_updateleft`](@ref)).
 """
 function _updateright(hold::AbstractArray{T,3}, O::MPSTensor, A::MPSTensor, B::MPSTensor) where {T}
-	KB = _fused_pair(A, B)
-	@tensor hnew[-1, -2, -3] := conj(O[-1, 4, 1]) * hold[1, 2, 3] * KB[-2, -3, 4, 2, 3]
+	# mirror of `_updateleft`: fold hold into conj(O) first, then batch over p
+	dL, dp, dR = size(A, 1), size(A, 2), size(A, 3)
+	dbL, dbR = size(B, 1), size(B, 3)
+	dO = size(O, 1)
+	hnew = zeros(T, dO, dL, dbL)
+	Hm = reshape(hold, size(O, 3), dR * dbR)               # (oR, aR bR)
+	for p in 1:dp
+		M = reshape(transpose(conj(@view(O[:, p, :])) * Hm), dR, dbR, dO)  # (aR, bR, oL)
+		Y = reshape(@view(A[:, p, :]) * reshape(M, dR, dbR * dO), dL, dbR, dO)  # (aL, bR, oL)
+		Y2 = reshape(permutedims(Y, (2, 1, 3)), dbR, dL * dO)            # (bR, aL oL)
+		res = reshape(@view(B[:, p, :]) * Y2, dbL, dL, dO)    # (bL, aL, oL)
+		hnew .+= permutedims(res, (3, 2, 1))                            # (oL, aL, bL)
+	end
 	return hnew
 end
 
 # local ALS target: drive the omps site tensor towards the pointwise product
 function _reduce_hadamard_site(A::MPSTensor, B::MPSTensor,
 							   cleft::AbstractArray{T,3}, cright::AbstractArray{T,3}) where {T}
-	KB = _fused_pair(A, B)
-	# two explicit steps: fold the right environment into the fused pair first, then the
-	# left one (both BLAS-shaped; see `c_prime` for the nary-contraction pathology)
-	@tensor tmp[kl, yl, p, or] := KB[kl, yl, p, kr, yr] * cright[or, kr, yr]
-	@tensor mpsj[-1, -2, -3] := cleft[-1, kl, yl] * tmp[kl, yl, -2, -3]
+	# batched over the physical index (shared elementwise between A and B): fold B into
+	# cright, then A, then cleft — all intermediates O(D^3), no fused-pair materialization
+	dL, dp = size(A, 1), size(A, 2)
+	dbL, dbR = size(B, 1), size(B, 3)
+	dR = size(A, 3)
+	dOl, dOr = size(cleft, 1), size(cright, 1)
+	mpsj = zeros(T, dOl, dp, dOr)
+	Cm = reshape(permutedims(cright, (3, 2, 1)), dbR, dOr * dR)  # (yr, or kr)
+	Lm = reshape(cleft, dOl, dL * dbL)                           # (oL, kl yl)
+	for p in 1:dp
+		W = reshape(@view(B[:, p, :]) * Cm, dbL, dR, dOr)             # (yl, kr, or)
+		t1 = @view(A[:, p, :]) * reshape(permutedims(W, (2, 1, 3)), dR, dbL * dOr)
+		mpsj[:, p, :] .= reshape(Lm * reshape(t1, dL * dbL, dOr), dOl, dOr)
+	end
 	return mpsj
 end
 
