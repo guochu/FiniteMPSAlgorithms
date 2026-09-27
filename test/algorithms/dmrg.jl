@@ -55,6 +55,13 @@ end
 	E1_exact = e.values[2]
 	@test abs(real(expectation(H6, ψex)) - E1_exact) < 1e-6
 
+	# the second excited state, projected against both lower states
+	ψ2 = randommps(ComplexF64, fill(2, 6); D=8)
+	excited_state!(ψ2, H6, [ψ0, ψex], DMRG1(maxiter=50, tol=1e-12, verbosity=0))
+	@test abs(real(expectation(H6, ψ2)) - e.values[3]) < 1e-6
+	@test abs(dot(todense(ψ2), todense(ψ0))) < 1e-6
+	@test abs(dot(todense(ψ2), todense(ψex))) < 1e-6
+
 	# leftsweep! / rightsweep! (explicit single-direction sweeps)
 	H = mpo_model(p6)
 	ψs = randommps(ComplexF64, fill(2, 6); D=4)

@@ -1,5 +1,27 @@
 # Interface changes
 
+## Fixed: the projected excited-state map is now Hermitian (unit-test warnings gone)
+
+Running the test suite emitted 194 KrylovKit warnings
+("ignoring imaginary component … operator might not be hermitian?"), from two unrelated
+sources:
+
+- **`excited_state` (40 warnings)** — `_projected_local_update!` built the one-sided
+  projected map `(I-P)·H_eff`. `P` and `H_eff` do not commute, so that map is *not*
+  Hermitian (measured defect 2.5e-3 … 1.9e-1), yet it was passed to Lanczos with
+  `ishermitian=true`. It now builds `Q†·H_eff·Q` with `Q = Πₖ(I-Pₖ)` (the adjoint side
+  projects in reverse order), which is Hermitian for any number of non-commuting
+  projectors (defect ~1e-16) and, on the subspace orthogonal to all projectors, coincides
+  with `H_eff` — the converged state and energy are unchanged.
+- **`test/operators/longrangeop.jl` (154 warnings)** — the DMRG smoke test fed a
+  *non-Hermitian* Hamiltonian (`ExpDecayOpSum` built from `randn(ComplexF64, …)` ends) to
+  `ground_state`/DMRG, which assumes a Hermitian operator. The decay chain in that test now
+  uses `σy` at both ends (Hermitian, complex) with an identity propagator, i.e.
+  `Σ_{i<j} λ^(j-i) σy_i σy_j`, which stays Hermitian while keeping `ComplexF64` arithmetic.
+
+Full suite: 936/936 (the `excited_state!` coverage now also computes the second excited
+state against both lower states), no warnings.
+
 ## Fixed: contraction order of the three-tensor local maps (~400× on the Hadamard bond map)
 
 The nary `@tensor` contractions of the three-tensor local maps let TensorOperations pick

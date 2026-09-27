@@ -69,7 +69,9 @@ end
 	@test maximum(abs.(todense(MPO(tompotensors(Hos))) - Wsum)) < 1e-12
 
 	# ground state of an exponentially decaying perturbed TFIM: the exact sum of the
-	# OpTerm-built TFIM chain and the ExpDecay chain
+	# OpTerm-built TFIM chain and the ExpDecay chain. DMRG assumes a Hermitian operator, so
+	# the decay chain uses σy at both ends (Hermitian, complex) with an identity propagator:
+	# Σ_{i<j} λ^(j-i) σy_i σy_j stays Hermitian while keeping ComplexF64 arithmetic.
 	tfim = OpSum(fill(2, L))
 	for i in 1:L
 		push!(tfim, OpTerm(-1.0, i => Float64[0 1; 1 0]))
@@ -77,7 +79,7 @@ end
 	for i in 1:L-1
 		push!(tfim, OpTerm(-1.0, i => Float64[1 0; 0 -1], i + 1 => Float64[1 0; 0 -1]))
 	end
-	Hdecay = MPOHamiltonian(ExpDecayOpSum(a, m, b, [0.3], [0.05]), L)
+	Hdecay = MPOHamiltonian(ExpDecayOpSum(_SY, I(2), _SY, [0.3], [0.05]), L)
 	Hmixed = MPOHamiltonian(MPO(tompotensors(MPOHamiltonian(tfim))) + Hdecay)
 	E, ψ = ground_state(Hmixed, DMRG1(maxiter=30, tol=1e-10, D=16))
 	@test isfinite(real(E))
