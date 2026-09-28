@@ -209,9 +209,12 @@ function _naive_svd_mult(h::AbstractMPO, x::CanonicalMPS, trunc::TruncationSchem
 			@tensor r[aL, bL, po, aR, bR] := W[aL, po, aR, pin] * A[bL, pin, bR]
 			return tie(r, (2, 1, 2))
 		end
-		@tensor r[aL, po, aR, bL, bR] := W[aL, po, aR, pin] * A[bL, pin, bR]
+		# fold the carry in FIRST, one bond at a time: the composite right bond (aR·bR)
+		# is the largest auxiliary dimension, and the 5-leg product tensor
+		# r (aL, po, aR, bL, bR) then never has to exist
 		c3 = reshape(carry, size(W, 3), size(A, 3), :)   # (aR, bR, k)
-		@tensor rc[aL, bL, po, k] := r[aL, po, aR, bL, bR] * c3[aR, bR, k]
+		ca = @tensor ca[bL, pin, aR, k] := A[bL, pin, bR] * c3[aR, bR, k]
+		rc = @tensor rc[aL, bL, po, k] := W[aL, po, aR, pin] * ca[bL, pin, aR, k]
 		return tie(rc, (2, 1, 1))
 	end
 	return _naive_svd_guess(site, length(h); trunc)
@@ -225,9 +228,11 @@ function _naive_svd_mult(h::AbstractMPO, x::AbstractMPO, trunc::TruncationScheme
 			@tensor t[aA, aB, poA, aA2, aB2, q] := WA[aA, poA, aA2, p] * WB[aB, p, aB2, q]
 			return tie(t, (2, 1, 2, 1))
 		end
-		@tensor t[aA, poA, aA2, aB, aB2, q] := WA[aA, poA, aA2, p] * WB[aB, p, aB2, q]
+		# fold the carry in FIRST (see the MPS case): the composite (aA2·aB2) bond and
+		# the 6-leg product tensor never have to exist
 		c4 = reshape(carry, size(WA, 3), size(WB, 3), :)   # (aA2, aB2, k)
-		@tensor tc[aA, aB, poA, k, q] := t[aA, poA, aA2, aB, aB2, q] * c4[aA2, aB2, k]
+		tb = @tensor tb[aB, p, aA2, k, q] := WB[aB, p, aB2, q] * c4[aA2, aB2, k]
+		tc = @tensor tc[aA, aB, poA, k, q] := WA[aA, poA, aA2, p] * tb[aB, p, aA2, k, q]
 		return tie(tc, (2, 1, 1, 1))
 	end
 	return _naive_svd_guess(site, length(h); trunc)
@@ -375,28 +380,30 @@ _wrap_canonicalmpo(out::AbstractMPO) = CanonicalMPO(out.data)
 # ---------- two-site (DMRG2) sweeps and interface ----------
 
 # the two-site optimal block: left environment · ket pair · MPO pair · right environment.
-# Explicit binary contractions, the ket pair applied to the MPO pair first: every
-# intermediate stays at O(χ²·d⁴·D²) or less — the previous n-ary order materialized
-# O(χ·d⁴·D³) intermediates (the whole ket pair times an open MPO bond)
+# The left environment is folded into H[s] first and the chain is followed site by site,
+# so no multi-site MPO pair tensor ever exists and every intermediate keeps at most one
+# MPO bond and one ket bond open — O(bra·chi·d^2·D) instead of chi^2*d^4*D^2
 function _reduce_site2(m::MultCache, s::Integer)
+	H1, H2 = m.H[s], m.H[s+1]
 	cL, cR = m.hstorage[s], m.hstorage[s+2]
-	W2 = @tensor W[u, q1, q2, v, r1, r2] := m.H[s][u, q1, c, r1] * m.H[s+1][c, q2, v, r2]
+	# fold the left environment into the first MPO site over its wL bond (its ket-bond
+	# leg kL stays open and pairs the ket pair's left bond below)
+	clh = @tensor u[b, p1, m, i1, kL] := cL[b, w1, kL] * H1[w1, p1, m, i1]
 	if m.ket[s] isa MPSTensor
 		k2 = @tensor k[a, q1, q2, b] := m.ket[s][a, q1, c] * m.ket[s+1][c, q2, b]
-		# the ket's physical pair contracts W2's input pair
-		kW = @tensor u[a, wL, po1, po2, wR, b] := k2[a, q1, q2, b] *
-												 W2[wL, po1, po2, wR, q1, q2]
-		hh = @tensor hh[b, po1, po2, wR, bR] := cL[b, wL, a] *
-												kW[a, wL, po1, po2, wR, bR]
-		return @tensor t[-1, -2, -3, -4] := hh[-1, -2, -3, wR, bR] * cR[-4, wR, bR]
+		# the ket's left bond and first physical contract the folded block; the ket's
+		# second physical pairs the second MPO site's input
+		clhk = @tensor v[b, p1, m, q2, kR] := clh[b, p1, m, i1, kL] * k2[kL, i1, q2, kR]
+		hh = @tensor w[b, p1, p2, w2, kR] := clhk[b, p1, m, q2, kR] * H2[m, p2, w2, q2]
+		return @tensor t[-1, -2, -3, -4] := hh[-1, -2, -3, w2, kR] * cR[-4, w2, kR]
 	end
-	# ket pair of the MPO case: the ket's OUT legs (o1, o2) contract W2's IN legs (the
-	# H·ket matrix product, matching `_updateleft3`); the bra's free pair is (W2.po, ket.pi)
+	# ket pair of the MPO case (the H·ket matrix product: the ket's OUT physicals
+	# contract the MPO's IN physicals, matching `_updateleft3`)
 	k2 = @tensor k[a, o1, o2, b, i1, i2] := m.ket[s][a, o1, c, i1] * m.ket[s+1][c, o2, b, i2]
-	kW = @tensor u[a, w1, p1, p2, w2, bR, i1, i2] := k2[a, o1, o2, bR, i1, i2] *
-													W2[w1, p1, p2, w2, o1, o2]
-	hh = @tensor hh[b, p1, p2, w2, bR, i1, i2] := cL[b, w1, a] *
-												 kW[a, w1, p1, p2, w2, bR, i1, i2]
+	clhk = @tensor v[b, p1, m, o2, bR, j1, j2] := clh[b, p1, m, i1, kL] *
+												 k2[kL, i1, o2, bR, j1, j2]
+	hh = @tensor w[b, p1, p2, w2, bR, j1, j2] := clhk[b, p1, m, o2, bR, j1, j2] *
+												 H2[m, p2, w2, o2]
 	return @tensor t[-1, -2, -3, -4, -5, -6] := hh[-1, -2, -3, w2, bR, -4, -5] *
 											   cR[-6, w2, bR]
 end

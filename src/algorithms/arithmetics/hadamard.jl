@@ -13,14 +13,6 @@
 Left-to-right transfer of the ⟨omps| ψA ⊙ ψB⟩ three-chain environment; the shared
 physical index of all three site tensors is contracted.
 """
-# pointwise-fused local tensor KB[aL,bL,p,aR,bR] = A[aL,p,aR]*B[bL,p,bR]; the physical
-# index is NOT summed (a broadcast, not a contraction) — same local map as exact hadamard
-function _fused_pair(A::MPSTensor, B::MPSTensor)
-	KB = reshape(A, size(A, 1), 1, size(A, 2), size(A, 3), 1) .*
-		 reshape(B, 1, size(B, 1), size(B, 2), 1, size(B, 3))
-	return KB   # (aL, bL, p, aR, bR)
-end
-
 function _updateleft(hold::AbstractArray{T,3}, O::MPSTensor, A::MPSTensor, B::MPSTensor) where {T}
 	# contraction order: fold hold into conj(O) first, then apply A and B batched over
 	# the physical index (p is shared elementwise between A and B, NOT contracted).
@@ -184,7 +176,18 @@ function svdguess_hadamard(ψA, ψB, D::Int)
 		A = ψA[i]
 		B = ψB[i]
 		if carry === nothing
-			return tie(_fused_pair(A, B), (2, 1, 2))
+			# the fused pair (aL, bL, p, aR, bR) is never materialized (D^4*d): the
+			# tied tensor is built one physical slice at a time (tie's (2,1,2) groups
+			# the legs as (aL, bL), (p), (aR, bR) — the slice layout below matches)
+			daL, dp, daR = size(A, 1), size(A, 2), size(A, 3)
+			dbL, dbR = size(B, 1), size(B, 3)
+			kb = zeros(eltype(A), daL * dbL, dp, daR * dbR)
+			for p in 1:dp
+				kb4 = reshape(@view(kb[:, p, :]), daL, dbL, daR, dbR)
+				kb4 .= reshape(@view(A[:, p, :]), daL, 1, daR, 1) .*
+					   reshape(@view(B[:, p, :]), 1, dbL, 1, dbR)
+			end
+			return kb
 		end
 		daL, dp, daR = size(A, 1), size(A, 2), size(A, 3)
 		dbL, dbR = size(B, 1), size(B, 3)
