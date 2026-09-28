@@ -17,18 +17,29 @@
 """
 function _h_updateleft(hold::AbstractArray{T,4},
 					   x::MPSTensor, W::MPOTensor, xk::MPSTensor) where {T}
-	@tensor hnew[-1, -2, -3, -4] :=
-		conj(x[1, pb, -1]) * conj(W[2, po, -2, pb]) * hold[1, 2, 3, 4] *
-		W[3, po, -3, pin] * xk[4, pin, -4]
-	return hnew
+	# the A†A pair first (contracted over the shared output physical, an outer product
+	# over the input physicals — χ⁴·d² elements), then the environments folded in one
+	# bond at a time: intermediates O(χ²·d²·D²) instead of the naive n-ary order's
+	# O(χ·d·D⁴) (which already allocated 8.9 MiB per transfer at D=16, output 0.06 MiB)
+	g = @tensor g[cL, cR, cL2, cR2, pb, pin] := conj(W[cL, po, cL2, pb]) *
+												W[cR, po, cR2, pin]
+	u = @tensor u[kL, kR, cL2, pb, cR2, pin] := hold[kL, cL, cR, kR] *
+												g[cL, cR, cL2, cR2, pb, pin]
+	v = @tensor v[xL, kR, cL2, cR2, pin] := conj(x[kL, pb, xL]) *
+											u[kL, kR, cL2, pb, cR2, pin]
+	return @tensor hnew[xL, cL2, cR2, xR] := v[xL, kR, cL2, cR2, pin] * xk[kR, pin, xR]
 end
 
 function _h_updateright(hold::AbstractArray{T,4},
 						x::MPSTensor, W::MPOTensor, xk::MPSTensor) where {T}
-	@tensor hnew[-1, -2, -3, -4] :=
-		conj(x[-1, pb, 1]) * conj(W[-2, po, 2, pb]) * hold[1, 2, 3, 4] *
-		W[-3, po, 3, pin] * xk[-4, pin, 4]
-	return hnew
+	# mirror of `_h_updateleft`
+	g = @tensor g[cL, cR, cL2, cR2, pb, pin] := conj(W[cL, po, cL2, pb]) *
+												W[cR, po, cR2, pin]
+	u = @tensor u[kL, kR, cL, cR, pb, pin] := hold[kL, cL2, cR2, kR] *
+											  g[cL, cR, cL2, cR2, pb, pin]
+	v = @tensor v[xL, kR, cL, cR, pin] := conj(x[xL, pb, kL]) *
+										  u[kL, kR, cL, cR, pb, pin]
+	return @tensor hnew[xL, cL, cR, xR] := v[xL, kR, cL, cR, pin] * xk[xR, pin, kR]
 end
 
 """
@@ -38,27 +49,45 @@ end
 """
 function _b_updateleft(hold::AbstractArray{T,3},
 					   x::MPSTensor, W::MPOTensor, y::MPSTensor) where {T}
-	@tensor bnew[-1, -2, -3] :=
-		conj(x[1, pb, -1]) * conj(W[2, py, -2, pb]) * hold[1, 2, 3] * y[3, py, -3]
-	return bnew
+	# explicit binary steps, the physical legs contracted last (all intermediates tiny)
+	u = @tensor u[kL, yL, cL2, pb, py] := hold[kL, cL, yL] * conj(W[cL, py, cL2, pb])
+	v = @tensor v[xL, yL, cL2, py] := conj(x[kL, pb, xL]) * u[kL, yL, cL2, pb, py]
+	return @tensor bnew[xL, cL2, yR] := v[xL, yL, cL2, py] * y[yL, py, yR]
 end
 
 function _b_updateright(hold::AbstractArray{T,3},
 					   x::MPSTensor, W::MPOTensor, y::MPSTensor) where {T}
-	@tensor bnew[-1, -2, -3] :=
-		conj(x[-1, pb, 1]) * conj(W[-2, py, 2, pb]) * hold[1, 2, 3] * y[-3, py, 3]
-	return bnew
+	# mirror of `_b_updateleft`
+	u = @tensor u[kL, yL, cL, pb, py] := hold[kL, cL2, yL] * conj(W[cL, py, cL2, pb])
+	v = @tensor v[xL, yL, cL, py] := conj(x[xL, pb, kL]) * u[kL, yL, cL, pb, py]
+	return @tensor bnew[xL, cL, yR] := v[xL, yL, cL, py] * y[yR, py, yL]
 end
 
 # ---------- local normal equation at one site ----------
 
+# the site-independent half of `_h_apply` (depends only on the MPO tensor and the left
+# environment): computed once per site and reused across the Krylov iterations
+function _h_apply_left(W::MPOTensor, hL::AbstractArray{T,4}) where {T}
+	# fold W's left bond into the left environment: O(χ·d²·D³)
+	return @tensor u[xL, cL, zL, po, kR, pin] := hL[xL, cL, aL, zL] * W[aL, po, kR, pin]
+end
+
 # H_eff z = (A†A)_eff z; t_eff = (A†y)_eff
 function _h_apply(z::MPSTensor, W::MPOTensor,
 				  hL::AbstractArray{T,4}, hR::AbstractArray{T,4}) where {T}
-	@tensor y[-1, -2, -3] :=
-		hL[-1, cL, aL, 1] * conj(W[cL, po, cR, -2]) *
-		W[aL, po, kR, pin] * z[1, pin, 4] * hR[-3, cR, kR, 4]
-	return y
+	_h_apply(z, W, hL, hR, _h_apply_left(W, hL))
+end
+
+# explicit binary contractions, the physical legs opened last: intermediates
+# O(χ·d²·D³) + O(χ·d·D³). The previous n-ary order produced O(χ·d²·D⁴) intermediates
+# (35.6 MiB allocated per call at D=16, against 0.01 MiB of output)
+function _h_apply(z::MPSTensor, W::MPOTensor,
+				  hL::AbstractArray{T,4}, hR::AbstractArray{T,4},
+				  u::AbstractArray{<:Any,6}) where {T}
+	v = @tensor v[xL, zL, cR, q, kR, pin] := u[xL, cL, zL, po, kR, pin] *
+											 conj(W[cL, po, cR, q])
+	zr = @tensor zr[zL, pin, cR, kR, xR] := z[zL, pin, zR] * hR[xR, cR, kR, zR]
+	return @tensor y[xL, q, xR] := v[xL, zL, cR, q, kR, pin] * zr[zL, pin, cR, kR, xR]
 end
 
 function _b_target(W::MPOTensor, y::MPSTensor,
@@ -113,8 +142,10 @@ function _site_solve(m::LinsolveCache, s::Integer, solver::KrylovKit.LinearSolve
         shape = (size(m.hstorage[s], 1), size(W, 2), size(m.hstorage[s+1], 1))
         z0 = size(m.ket[s]) == shape ? m.ket[s] : zero(t)
         # the local normal equation is solved iteratively (KrylovKit) on the linear
-        # operator action — the dense H matrix is never formed
-        z, _ = KrylovKit.linsolve(y -> _h_apply(y, W, m.hstorage[s], m.hstorage[s+1]), t, z0, solver)
+        # operator action — the dense H matrix is never formed; the site-independent
+        # half of the operator action is hoisted out of the Krylov iterations
+        u = _h_apply_left(W, m.hstorage[s])
+        z, _ = KrylovKit.linsolve(y -> _h_apply(y, W, m.hstorage[s], m.hstorage[s+1], u), t, z0, solver)
         return z, t
 end
 

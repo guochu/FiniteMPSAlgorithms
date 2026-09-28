@@ -146,15 +146,25 @@ chid = maximum(bonddims(h))
 # workload definitions: f(D) runs the engine once with bond cap D
 engines = [
     ("mult-var", D -> begin
-        mult(h, randommps(ComplexF64, fill(2, L); D=D), DMRG1(maxiter=3, tol=1e-14, D=D, verbosity=0))
-        nothing
-    end),
-    ("hadamard-var", D -> begin
-        psia = randommps(ComplexF64, fill(2, L); D=D)
-        psib = randommps(ComplexF64, fill(2, L); D=D)
-        hadamard(psia, psib, DMRG1(maxiter=3, tol=1e-14, D=D, verbosity=0))
-        nothing
-    end),
+		mult(h, randommps(ComplexF64, fill(2, L); D=D), DMRG1(maxiter=3, tol=1e-14, D=D, verbosity=0))
+		nothing
+	end),
+	("mult-dmrg2", D -> begin
+		mult(h, randommps(ComplexF64, fill(2, L); D=D), DMRG2(maxiter=2, tol=1e-14, trunc=truncdimcutoff(D, 1e-12), verbosity=0))
+		nothing
+	end),
+	("hadamard-var", D -> begin
+		psia = randommps(ComplexF64, fill(2, L); D=D)
+		psib = randommps(ComplexF64, fill(2, L); D=D)
+		hadamard(psia, psib, DMRG1(maxiter=3, tol=1e-14, D=D, verbosity=0))
+		nothing
+	end),
+	("hadamard-dmrg2", D -> begin
+		psia = randommps(ComplexF64, fill(2, L); D=D)
+		psib = randommps(ComplexF64, fill(2, L); D=D)
+		hadamard(psia, psib, DMRG2(maxiter=2, tol=1e-14, trunc=truncdimcutoff(D, 1e-12), verbosity=0))
+		nothing
+	end),
     ("add-var", D -> begin
         psia = randommps(ComplexF64, fill(2, L); D=D)
         psib = randommps(ComplexF64, fill(2, L); D=D)

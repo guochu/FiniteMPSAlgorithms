@@ -374,24 +374,30 @@ _wrap_canonicalmpo(out::AbstractMPO) = CanonicalMPO(out.data)
 
 # ---------- two-site (DMRG2) sweeps and interface ----------
 
-# the two-site optimal block: left environment · ket pair · MPO pair · right environment
+# the two-site optimal block: left environment · ket pair · MPO pair · right environment.
+# Explicit binary contractions, the ket pair applied to the MPO pair first: every
+# intermediate stays at O(χ²·d⁴·D²) or less — the previous n-ary order materialized
+# O(χ·d⁴·D³) intermediates (the whole ket pair times an open MPO bond)
 function _reduce_site2(m::MultCache, s::Integer)
 	cL, cR = m.hstorage[s], m.hstorage[s+2]
 	W2 = @tensor W[u, q1, q2, v, r1, r2] := m.H[s][u, q1, c, r1] * m.H[s+1][c, q2, v, r2]
 	if m.ket[s] isa MPSTensor
 		k2 = @tensor k[a, q1, q2, b] := m.ket[s][a, q1, c] * m.ket[s+1][c, q2, b]
-		return @tensor t[-1, -2, -3, -4] := cL[-1, 1, 2] * k2[2, q1, q2, 3] *
-										   W2[1, -2, -3, 4, q1, q2] * cR[-4, 4, 3]
+		# the ket's physical pair contracts W2's input pair
+		kW = @tensor u[a, wL, po1, po2, wR, b] := k2[a, q1, q2, b] *
+												 W2[wL, po1, po2, wR, q1, q2]
+		hh = @tensor hh[b, po1, po2, wR, bR] := cL[b, wL, a] *
+												kW[a, wL, po1, po2, wR, bR]
+		return @tensor t[-1, -2, -3, -4] := hh[-1, -2, -3, wR, bR] * cR[-4, wR, bR]
 	end
-	# explicit binary contraction steps (the n-ary tree is unreliable at 6 free legs).
-	# W2 legs: (wL, po1, po2, wR, pi1, pi2); the ket's OUT legs contract W2's IN legs
-	# (the H·ket matrix product, matching `_updateleft3`), the bra's free pair is
-	# (W2.po, ket.pi)
+	# ket pair of the MPO case: the ket's OUT legs (o1, o2) contract W2's IN legs (the
+	# H·ket matrix product, matching `_updateleft3`); the bra's free pair is (W2.po, ket.pi)
 	k2 = @tensor k[a, o1, o2, b, i1, i2] := m.ket[s][a, o1, c, i1] * m.ket[s+1][c, o2, b, i2]
-	hh = @tensor hh[b, w1, o1, o2, bR, i1, i2] := cL[b, w1, kL] * k2[kL, o1, o2, bR, i1, i2]
-	hw = @tensor hw[b, p1, p2, w2, bR, i1, i2] := hh[b, w1, o1, o2, bR, i1, i2] *
-												 W2[w1, p1, p2, w2, o1, o2]
-	return @tensor t[b, -2, -3, -4, -5, -6] := hw[b, -2, -3, w2, bR, -4, -5] *
+	kW = @tensor u[a, w1, p1, p2, w2, bR, i1, i2] := k2[a, o1, o2, bR, i1, i2] *
+													W2[w1, p1, p2, w2, o1, o2]
+	hh = @tensor hh[b, p1, p2, w2, bR, i1, i2] := cL[b, w1, a] *
+												 kW[a, w1, p1, p2, w2, bR, i1, i2]
+	return @tensor t[-1, -2, -3, -4, -5, -6] := hh[-1, -2, -3, w2, bR, -4, -5] *
 											   cR[-6, w2, bR]
 end
 

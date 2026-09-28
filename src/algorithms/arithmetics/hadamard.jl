@@ -277,16 +277,32 @@ end
 
 # ---------- two-site (DMRG2) sweeps and interface ----------
 
-# the two-site optimal pointwise-product block: the fused pairs of both sites
+# the two-site optimal pointwise-product block, batched over the pair of shared physical
+# indices: the fused pair of BOTH sites is never materialized (KB2 would hold D^4*d^2
+# elements, e.g. 1.07 GiB at D=64, and the n-ary contraction around it produced the same
+# order of intermediates); every intermediate below stays at O(D^3)
 function _reduce_hadamard_site2(m::HadamardCache, s::Integer)
-	A2 = @tensor a[aL, p1, p2, aR] := m.ketx[s][aL, p1, b] * m.ketx[s+1][b, p2, aR]
-	B2 = @tensor b[bL, q1, q2, bR] := m.kety[s][bL, q1, c] * m.kety[s+1][c, q2, bR]
-	# the pointwise product shares ONE physical value per site: broadcast, not contract
-	KB2 = reshape(A2, size(A2, 1), 1, size(A2, 2), size(A2, 3), size(A2, 4), 1) .*
-		  reshape(B2, 1, size(B2, 1), size(B2, 2), size(B2, 3), 1, size(B2, 4))
-	# KB2: (aL, bL, p1, p2, aR, bR)
-	return @tensor t[-1, -2, -3, -4] := m.hstorage[s][-1, 1, 2] * KB2[1, 2, -2, -3, 3, 4] *
-									   m.hstorage[s+2][-4, 3, 4]
+	A1, A2 = m.ketx[s], m.ketx[s+1]
+	B1, B2 = m.kety[s], m.kety[s+1]
+	hL = m.hstorage[s]        # (oL, aL, bL)
+	hR = m.hstorage[s + 2]    # (oR, aR, bR)
+	T = promote_type(eltype(hL), eltype(A1))
+	dOL, dAL = size(hL, 1), size(A1, 1)
+	dp1, dp2 = size(A1, 2), size(A2, 2)
+	dAR, dOR = size(A2, 3), size(hR, 1)
+	dbL, dbR = size(B1, 1), size(B2, 3)
+	t2 = zeros(T, dOL, dp1, dp2, dOR)
+	# the physical pair is shared elementwise between the two kets: broadcast, not contract
+	HRm = reshape(permutedims(hR, (3, 2, 1)), dbR, dAR * dOR)   # (bR, aR oR)
+	Lm = reshape(hL, dOL, dAL * dbL)                           # (oL, aL bL)
+	for p1 in 1:dp1, p2 in 1:dp2
+		a2 = @view(A1[:, p1, :]) * @view(A2[:, p2, :])   # (aL, aR)
+		b2 = @view(B1[:, p1, :]) * @view(B2[:, p2, :])   # (bL, bR)
+		Y = reshape(b2 * HRm, dbL, dAR, dOR)             # (bL, aR, oR)
+		Y2 = reshape(permutedims(Y, (2, 1, 3)), dAR, dbL * dOR)   # (aR, bL oR)
+		t2[:, p1, p2, :] .= reshape(Lm * reshape(a2 * Y2, dAL * dbL, dOR), dOL, dOR)
+	end
+	return t2
 end
 
 function leftsweep!(m::HadamardCache, alg::DMRG2)
