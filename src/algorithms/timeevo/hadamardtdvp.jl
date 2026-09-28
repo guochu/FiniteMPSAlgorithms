@@ -285,7 +285,7 @@ rightsweep!(env::HadamardTDVPCache, alg::HadamardTDVP) = _hadamard_rightsweep!(e
 # single-site *backward* half-step `exp(-dt/2·H_site)` on the fresh center (which is why
 # the environments have to follow the state, exactly as in `TDVP2`).
 #
-# The pair target `_reduce_hadamard_site2` is the two-site counterpart of
+# The pair target `_reduce_hadamard_pair` is the two-site counterpart of
 # `_reduce_hadamard_site`: the generator's pair (its middle bond contracted) and the
 # state's pair are fused with their physical indices shared, then contracted with the
 # same three-chain environments at the bonds on both ends of the pair.
@@ -293,8 +293,8 @@ rightsweep!(env::HadamardTDVPCache, alg::HadamardTDVP) = _hadamard_rightsweep!(e
 # two-site target: fuse the generator's pair with the state's pair (physical indices
 # shared) and contract with the environments at the bonds on both ends — two explicit
 # steps, right environment first (see `c_prime` for the nary-contraction pathology)
-function _reduce_hadamard_site2(A1::MPSTensor, A2::MPSTensor, Θ::AbstractArray{T,4},
-								cleft::AbstractArray{T,3}, cright::AbstractArray{T,3}) where {T}
+function _reduce_hadamard_pair(A1::MPSTensor, A2::MPSTensor, Θ::AbstractArray{T,4},
+							   cleft::AbstractArray{T,3}, cright::AbstractArray{T,3}) where {T}
 	K12 = _two_site_tensor(A1, A2)              # [K_L, p1, p2, K_R]
 	KB = reshape(K12, size(K12, 1), 1, size(K12, 2), size(K12, 3), size(K12, 4), 1) .*
 		 reshape(Θ, 1, size(Θ, 1), size(Θ, 2), size(Θ, 3), 1, size(Θ, 4))
@@ -306,7 +306,7 @@ end
 function _hadamard_site2_map(env::HadamardTDVPCache, s::Int)
 	hs = env.hstorage
 	c = _hadamard_scale(env)
-	return Θ -> c .* _reduce_hadamard_site2(env.H[s], env.H[s+1], Θ, hs[s], hs[s+2])
+	return Θ -> c .* _reduce_hadamard_pair(env.H[s], env.H[s+1], Θ, hs[s], hs[s+2])
 end
 
 """
