@@ -177,13 +177,27 @@ iterative hadamard (the exact product itself is never materialized). The bond
 dimension is capped at `D` (`truncdim(D)`).
 """
 function svdguess_hadamard(ψA, ψB, D::Int)
-	# exact product site tensor (aL·bL, p, aR·bR); the carry acts on the composite right
-	# bond (aR·bR) and is applied to the fused pair before tying
+	# kc[kl, yl, p, k] = Σ_{kr,yr} A[kl,p,kr]·B[yl,p,yr]·c3[kr,yr,k], batched over the
+	# physical index (shared elementwise between A and B): no fused-pair materialization
+	# (building KB would cost O(D^4·d) memory per site)
 	site = (i, carry) -> begin
-		KB = _fused_pair(ψA[i], ψB[i])   # (aL, bL, p, aR, bR)
-		carry === nothing && return tie(KB, (2, 1, 2))
-		c3 = reshape(carry, size(ψA[i], 3), size(ψB[i], 3), :)   # (aR, bR, k)
-		@tensor kc[aL, bL, p, k] := KB[aL, bL, p, aR, bR] * c3[aR, bR, k]
+		A = ψA[i]
+		B = ψB[i]
+		if carry === nothing
+			return tie(_fused_pair(A, B), (2, 1, 2))
+		end
+		daL, dp, daR = size(A, 1), size(A, 2), size(A, 3)
+		dbL, dbR = size(B, 1), size(B, 3)
+		k = size(carry, 2)
+		c3 = reshape(carry, daR, dbR, k)                              # (kr, yr, k)
+		kc = zeros(eltype(c3), daL, dbL, dp, k)
+		Cm = reshape(c3, daR, dbR * k)                                # (kr, yr k)
+		for p in 1:dp
+			Z = reshape(@view(A[:, p, :]) * Cm, daL, dbR, k)          # (kl, yr, k)
+			Z2 = reshape(permutedims(Z, (2, 1, 3)), dbR, daL * k)     # (yr, kl k)
+			res = reshape(@view(B[:, p, :]) * Z2, dbL, daL, k)        # (yl, kl, k)
+			kc[:, :, p, :] .= permutedims(res, (2, 1, 3))
+		end
 		return tie(kc, (2, 1, 1))
 	end
 	data, _ = _naive_svd_guess(site, length(ψA); trunc=truncdim(D))
