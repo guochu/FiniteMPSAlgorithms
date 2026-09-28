@@ -62,14 +62,16 @@ end
 
 # ---------- shared two-site overlap block (add / compress) ----------
 
-# the two-site optimal overlap block ⟨bra|ket⟩ over the pair
+# the two-site optimal overlap block (add / compress): each ket tensor is contracted
+# with its own environment first — the ket pair tensor is never formed and every
+# intermediate keeps a single ket bond open (rank <= 4)
 function _reduce_two_site(c::OverlapCache, s::Integer)
 	if c.ket[s] isa MPOTensor
-		k2 = @tensor k[a, o1, o2, b, i1, i2] := c.ket[s][a, o1, d, i1] * c.ket[s+1][d, o2, b, i2]
-		return @tensor t[-1, -2, -3, -4, -5, -6] := c.cstorage[s][-1, 1] *
-			k2[1, -2, -3, 2, -4, -5] * c.cstorage[s+2][-6, 2]
+		l = @tensor u[b, o1, m, i1] := c.cstorage[s][b, kL] * c.ket[s][kL, o1, m, i1]
+		r = @tensor v[m, o2, xR, i2] := c.ket[s+1][m, o2, kR, i2] * c.cstorage[s+2][xR, kR]
+		return @tensor t[b, -2, -3, -4, -5, xR] := l[b, -2, m, -4] * r[m, -3, xR, -5]
 	end
-	k2 = @tensor k[a, p1, p2, b] := c.ket[s][a, p1, d] * c.ket[s+1][d, p2, b]
-	return @tensor t[-1, -2, -3, -4] := c.cstorage[s][-1, 1] * k2[1, -2, -3, 2] *
-									   c.cstorage[s+2][-4, 2]
+	l = @tensor u[b, p1, km] := c.cstorage[s][b, kL] * c.ket[s][kL, p1, km]
+	r = @tensor v[km, p2, xR] := c.ket[s+1][km, p2, kR] * c.cstorage[s+2][xR, kR]
+	return @tensor t[-1, -2, -3, -4] := l[-1, -2, km] * r[km, -3, -4]
 end
