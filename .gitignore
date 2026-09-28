@@ -7,9 +7,5 @@
 Manifest.toml
 debug/
 
-# benchmark: cloned third-party packages (TensorCrossInterpolation.jl)
-benchmark/tci/
-
-# benchmark run artifacts
-benchmark/thermalstate/*.log
-benchmark/thermalstate/*.csv
+# benchmark: third-party packages, run artifacts and local logs
+benchmark/
