@@ -18,8 +18,8 @@ function _updateleft(hold::AbstractArray{T,3}, O::MPSTensor, A::MPSTensor, B::MP
 	# the physical index (p is shared elementwise between A and B, NOT contracted).
 	# Every intermediate stays at O(D^3) — materializing the fused pair KB would cost
 	# O(D^4·d) memory and O(D^5·d) work per transfer.
-	# all slicing / permutes / reshapes are lazy StridedViews: the conjugation folds
-	# into the strided gemm and no permutedims copy is ever made
+	# conj(O) is materialized once: matmuls against conj-wrapped strided slices fall
+	# back to the generic (non-BLAS) matmul, ~20x slower than this form (measured, D=32)
 	dL, dp, dR = size(A, 1), size(A, 2), size(A, 3)
 	dbL, dbR = size(B, 1), size(B, 3)
 	dO = size(O, 3)
@@ -69,12 +69,12 @@ function _reduce_hadamard_site(A::MPSTensor, B::MPSTensor,
 	dR = size(A, 3)
 	dOl, dOr = size(cleft, 1), size(cright, 1)
 	mpsj = zeros(T, dOl, dp, dOr)
-	Cm = reshape(permutedims(cright, (3, 2, 1)), dbR, dOr * dR)  # (yr, or kr) — one copy per call
-	Lm = sreshape(StridedView(cleft), (dOl, dL * dbL))                           # (oL, kl yl)
+	Cm = reshape(permutedims(cright, (3, 2, 1)), dbR, dOr * dR)  # (yr, or kr)
+	Lm = reshape(cleft, dOl, dL * dbL)                           # (oL, kl yl)
 	for p in 1:dp
-		W = sreshape(sview(B, :, p, :) * Cm, (dbL, dR, dOr))             # (yl, kr, or)
-		t1 = sreshape(sview(A, :, p, :) * reshape(permutedims(W, (2, 1, 3)), dR, dbL * dOr), (dL, dbL * dOr))
-		mpsj[:, p, :] .= sreshape(Lm * sreshape(t1, (dL * dbL, dOr)), dOl, dOr)
+		W = reshape(@view(B[:, p, :]) * Cm, dbL, dR, dOr)             # (yl, kr, or)
+		t1 = @view(A[:, p, :]) * reshape(permutedims(W, (2, 1, 3)), dR, dbL * dOr)
+		mpsj[:, p, :] .= reshape(Lm * reshape(t1, dL * dbL, dOr), dOl, dOr)
 	end
 	return mpsj
 end
@@ -198,12 +198,12 @@ function svdguess_hadamard(ψA, ψB, D::Int)
 		k = size(carry, 2)
 		c3 = reshape(carry, daR, dbR, k)                              # (kr, yr, k)
 		kc = zeros(eltype(c3), daL, dbL, dp, k)
-		Cm = sreshape(StridedView(c3), (daR, dbR * k))                # (kr, yr k)
+		Cm = reshape(c3, daR, dbR * k)                                # (kr, yr k)
 		for p in 1:dp
-			Z = sreshape(sview(A, :, p, :) * Cm, (daL, dbR, k))      # (kl, yr, k)
+			Z = reshape(@view(A[:, p, :]) * Cm, daL, dbR, k)          # (kl, yr, k)
 			Z2 = reshape(permutedims(Z, (2, 1, 3)), dbR, daL * k)     # (yr, kl k)
-			res = sreshape(sview(B, :, p, :) * Z2, (dbL, daL, k))    # (yl, kl, k)
-			kc[:, :, p, :] .= permutedims(StridedView(res), (2, 1, 3))
+			res = reshape(@view(B[:, p, :]) * Z2, dbL, daL, k)        # (yl, kl, k)
+			kc[:, :, p, :] .= permutedims(res, (2, 1, 3))
 		end
 		return tie(kc, (2, 1, 1))
 	end
@@ -300,14 +300,14 @@ function _reduce_hadamard_site2(m::HadamardCache, s::Integer)
 	dbL, dbR = size(B1, 1), size(B2, 3)
 	t2 = zeros(T, dOL, dp1, dp2, dOR)
 	# the physical pair is shared elementwise between the two kets: broadcast, not contract
-	HRm = reshape(permutedims(hR, (3, 2, 1)), dbR, dAR * dOR)   # (bR, aR oR) — one copy per call
-	Lm = sreshape(StridedView(hL), (dOL, dAL * dbL))                           # (oL, aL bL)
+	HRm = reshape(permutedims(hR, (3, 2, 1)), dbR, dAR * dOR)   # (bR, aR oR)
+	Lm = reshape(hL, dOL, dAL * dbL)                           # (oL, aL bL)
 	for p1 in 1:dp1, p2 in 1:dp2
-		a2 = sview(A1, :, p1, :) * sview(A2, :, p2, :)   # (aL, aR)
-		b2 = sview(B1, :, p1, :) * sview(B2, :, p2, :)   # (bL, bR)
-		Y = sreshape(b2 * HRm, (dbL, dAR, dOR))             # (bL, aR, oR)
+		a2 = @view(A1[:, p1, :]) * @view(A2[:, p2, :])   # (aL, aR)
+		b2 = @view(B1[:, p1, :]) * @view(B2[:, p2, :])   # (bL, bR)
+		Y = reshape(b2 * HRm, dbL, dAR, dOR)             # (bL, aR, oR)
 		Y2 = reshape(permutedims(Y, (2, 1, 3)), dAR, dbL * dOR)   # (aR, bL oR)
-		t2[:, p1, p2, :] .= sreshape(Lm * sreshape(a2 * Y2, (dAL * dbL, dOR)), dOL, dOR)
+		t2[:, p1, p2, :] .= reshape(Lm * reshape(a2 * Y2, dAL * dbL, dOR), dOL, dOR)
 	end
 	return t2
 end

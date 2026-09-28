@@ -5,7 +5,6 @@ using LinearAlgebra: BlasFloat
 using Printf
 using TensorOperations
 import TensorOperations: scalartype
-using Strided: StridedView, sreshape, sview
 using MatrixAlgebraKit: MatrixAlgebraKit, left_orth!, right_orth!, svd_compact!,
 	QRIteration, DivideAndConquer, SafeDivideAndConquer, TruncatedAlgorithm, trunctol,
 	LeftOrthAlgorithm, RightOrthAlgorithm, diagview, isunitary
