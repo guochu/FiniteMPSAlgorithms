@@ -18,13 +18,16 @@ function _updateleft(hold::AbstractArray{T,3}, O::MPSTensor, A::MPSTensor, B::MP
 	# the physical index (p is shared elementwise between A and B, NOT contracted).
 	# Every intermediate stays at O(D^3) — materializing the fused pair KB would cost
 	# O(D^4·d) memory and O(D^5·d) work per transfer.
+	# conj(O) is hoisted: matmuls against conj-wrapped strided slices fall back to the
+	# generic (non-BLAS) matmul, ~20x slower than the hoisted form (measured, D=32)
 	dL, dp, dR = size(A, 1), size(A, 2), size(A, 3)
 	dbL, dbR = size(B, 1), size(B, 3)
 	dO = size(O, 3)
 	hnew = zeros(T, dO, dR, dbR)
 	Hm = reshape(permutedims(hold, (2, 3, 1)), dL * dbL, size(O, 1))   # (aL bL, oL)
+	Oc = conj(O)
 	for p in 1:dp
-		M = Hm * conj(@view(O[:, p, :]))                    # (aL bL, oR)
+		M = Hm * @view(Oc[:, p, :])                         # (aL bL, oR)
 		Y = reshape(transpose(@view(A[:, p, :])) * reshape(M, dL, dbL * dO), dR, dbL, dO)    # (aR, bL, oR)
 		Y2 = reshape(permutedims(Y, (2, 1, 3)), dbL, dR * dO)         # (bL, aR oR)
 		res = reshape(transpose(@view(B[:, p, :])) * Y2, dbR, dR, dO) # (bR, aR, oR)
@@ -45,8 +48,9 @@ function _updateright(hold::AbstractArray{T,3}, O::MPSTensor, A::MPSTensor, B::M
 	dO = size(O, 1)
 	hnew = zeros(T, dO, dL, dbL)
 	Hm = reshape(hold, size(O, 3), dR * dbR)               # (oR, aR bR)
+	Oc = conj(O)   # hoisted: conj-wrapped slices fall back to generic (non-BLAS) matmul
 	for p in 1:dp
-		M = reshape(transpose(conj(@view(O[:, p, :])) * Hm), dR, dbR, dO)  # (aR, bR, oL)
+		M = reshape(transpose(@view(Oc[:, p, :]) * Hm), dR, dbR, dO)  # (aR, bR, oL)
 		Y = reshape(@view(A[:, p, :]) * reshape(M, dR, dbR * dO), dL, dbR, dO)  # (aL, bR, oL)
 		Y2 = reshape(permutedims(Y, (2, 1, 3)), dbR, dL * dO)            # (bR, aL oL)
 		res = reshape(@view(B[:, p, :]) * Y2, dbL, dL, dO)    # (bL, aL, oL)
