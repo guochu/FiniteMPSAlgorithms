@@ -380,32 +380,28 @@ _wrap_canonicalmpo(out::AbstractMPO) = CanonicalMPO(out.data)
 # ---------- two-site (DMRG2) sweeps and interface ----------
 
 # the two-site optimal block: left environment · ket pair · MPO pair · right environment.
-# The left environment is folded into H[s] first and the chain is followed site by site,
-# so no multi-site MPO pair tensor ever exists and every intermediate keeps at most one
-# MPO bond and one ket bond open — O(bra·chi·d^2·D) instead of chi^2*d^4*D^2
+# Each ket tensor is sandwiched between its MPO site and its environment (left: cL·H1·ket,
+# right: H2·ket·cR), so the ket pair tensor is never formed and every intermediate keeps
+# at most one MPO bond and one ket bond open — O(bra·chi·d^2·D) at most
 function _reduce_site2(m::MultCache, s::Integer)
 	H1, H2 = m.H[s], m.H[s+1]
 	cL, cR = m.hstorage[s], m.hstorage[s+2]
-	# fold the left environment into the first MPO site over its wL bond (its ket-bond
-	# leg kL stays open and pairs the ket pair's left bond below)
+	# left sandwich: fold the left environment into the first MPO site, then the ket
 	clh = @tensor u[b, p1, m, i1, kL] := cL[b, w1, kL] * H1[w1, p1, m, i1]
 	if m.ket[s] isa MPSTensor
-		k2 = @tensor k[a, q1, q2, b] := m.ket[s][a, q1, c] * m.ket[s+1][c, q2, b]
-		# the ket's left bond and first physical contract the folded block; the ket's
-		# second physical pairs the second MPO site's input
-		clhk = @tensor v[b, p1, m, q2, kR] := clh[b, p1, m, i1, kL] * k2[kL, i1, q2, kR]
-		hh = @tensor w[b, p1, p2, w2, kR] := clhk[b, p1, m, q2, kR] * H2[m, p2, w2, q2]
-		return @tensor t[-1, -2, -3, -4] := hh[-1, -2, -3, w2, kR] * cR[-4, w2, kR]
+		v = @tensor v[b, p1, m, km] := clh[b, p1, m, i1, kL] * m.ket[s][kL, i1, km]
+		# right sandwich: the second ket into the right environment, then the MPO site
+		hr = @tensor h[br, w2, km, q2] := cR[br, w2, kb] * m.ket[s+1][km, q2, kb]
+		hh = @tensor w[m, p2, br, km] := H2[m, p2, w2, q2] * hr[br, w2, km, q2]
+		return @tensor t[-1, -2, -3, -4] := v[-1, -2, m, km] * hh[m, -3, -4, km]
 	end
-	# ket pair of the MPO case (the H·ket matrix product: the ket's OUT physicals
-	# contract the MPO's IN physicals, matching `_updateleft3`)
-	k2 = @tensor k[a, o1, o2, b, i1, i2] := m.ket[s][a, o1, c, i1] * m.ket[s+1][c, o2, b, i2]
-	clhk = @tensor v[b, p1, m, o2, bR, j1, j2] := clh[b, p1, m, i1, kL] *
-												 k2[kL, i1, o2, bR, j1, j2]
-	hh = @tensor w[b, p1, p2, w2, bR, j1, j2] := clhk[b, p1, m, o2, bR, j1, j2] *
-												 H2[m, p2, w2, o2]
-	return @tensor t[-1, -2, -3, -4, -5, -6] := hh[-1, -2, -3, w2, bR, -4, -5] *
-											   cR[-6, w2, bR]
+	# MPO-shaped ket (density matrices): same sandwiches; the ket's OUT physicals
+	# contract the MPO's IN physicals (the H·ket matrix product, matching `_updateleft3`)
+	v = @tensor v[b, p1, m, km, j1] := clh[b, p1, m, i1, kL] * m.ket[s][kL, i1, km, j1]
+	hr = @tensor h[br, w2, km, o2, j2] := cR[br, w2, kb] * m.ket[s+1][km, o2, kb, j2]
+	hh = @tensor w[m, p2, br, km, j2] := H2[m, p2, w2, o2] * hr[br, w2, km, o2, j2]
+	return @tensor t[-1, -2, -3, -4, -5, -6] := v[-1, -2, m, km, -4] *
+											   hh[m, -3, -6, km, -5]
 end
 
 function leftsweep!(m::MultCache, alg::DMRG2)
