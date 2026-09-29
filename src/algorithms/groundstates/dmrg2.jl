@@ -151,29 +151,30 @@ end
 # ---------- driver ----------
 
 """
-	ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::DMRG2) -> khist
+	ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::DMRG2) -> info
 
 Two-site DMRG ground-state search starting from the user-provided ansatz `ψ`
-(modified in place; `alg.trunc` only affects the sweep truncations). Returns
-`khist`, the per-sweep local-energy history.
+(modified in place; `alg.trunc` only affects the sweep truncations). Returns `info`,
+the [`ALSConvergenceInfo`](@ref) of the sweeps (`info.losses` is the per-sweep
+local-energy history).
 """
 function ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::DMRG2)
 	env = DMRGCache(h, ψ)
-	khist = iterative_compute!(env, alg)
+	info = iterative_compute!(env, alg)
 	setscaling!(ψ, 1.0)
 	lmul!(1 / norm(ψ), ψ)
-	return khist
+	return info
 end
 
 """
-	ground_state(h::MPOHamiltonian, alg::DMRG2) -> (E, ψ)
+	ground_state(h::MPOHamiltonian, alg::DMRG2) -> (E, ψ, info)
 
 Ground-state energy and state of `h` found by two-site DMRG, starting from a random MPS
-of bond `Defaults.D`.
+of bond `Defaults.D`; `info` is the [`ALSConvergenceInfo`](@ref) of the sweeps.
 """
 function ground_state(h::MPOHamiltonian, alg::DMRG2)
 	ψ = randommps(scalartype(h), ophydims(h); D=_guess_bond(alg.trunc))
-	khist = ground_state!(ψ, h, alg)
-	(alg.verbosity > 1) && println("DMRG2 converged (delta = $(_iterative_delta(khist)))")
-	return expectation(h, ψ), ψ
+	info = ground_state!(ψ, h, alg)
+	(alg.verbosity > 1) && println("DMRG2 converged (delta = $(info.itererr))")
+	return expectation(h, ψ), ψ, info
 end

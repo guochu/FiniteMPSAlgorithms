@@ -497,30 +497,33 @@ sweep!(env::ThermalDMRGCache, alg::PDMRG; β::Real) =
 # ---------- driver ----------
 
 """
-	thermalstate!(rho::PositiveMPA, h::AbstractMPO, β::Real, alg::PDMRG=PDMRG()) -> rho
+	thermalstate!(rho::PositiveMPA, h::AbstractMPO, β::Real, alg::PDMRG=PDMRG()) -> (rho, info)
 
 Variational search for the equilibrium state `ρ = exp(-β h) / Z` in the PMPA `rho`.
 The canonical `data` tensors are updated in place; because the ansatz is immutable, the
-updated PMPA is **returned** and should be reassigned: `rho = thermalstate!(rho, h, β, alg)`.
-The iteration loop is the generic `iterative_compute!` with `β` forwarded to the sweeps.
+updated PMPA is **returned** and should be reassigned:
+`rho, info = thermalstate!(rho, h, β, alg)`.
+The iteration loop is the generic `iterative_compute!` with `β` forwarded to the sweeps;
+`info` is the returned [`ALSConvergenceInfo`](@ref).
 """
 function thermalstate!(rho::PositiveMPA, h::AbstractMPO, β::Real, alg::PDMRG=PDMRG())
 	env = ThermalDMRGCache(h, rho)
-	iterative_compute!(env, alg; β)
-	return env.rho
+	info = iterative_compute!(env, alg; β)
+	return env.rho, info
 end
 
 """
-	thermalstate(h::AbstractMPO, β::Real, alg::PDMRG=PDMRG()) -> (F, rho)
+	thermalstate(h::AbstractMPO, β::Real, alg::PDMRG=PDMRG()) -> (F, rho, info)
 
 Free energy `F = -log(Z)/β` and the PMPA equilibrium state of `h` at inverse temperature
-`β`, starting from a random PMPA with the bond cap carried by `alg.trunc` and rank `alg.R`.
+`β`, starting from a random PMPA with the bond cap carried by `alg.trunc` and rank
+`alg.R`; `info` is the [`ALSConvergenceInfo`](@ref) of the sweeps.
 """
 function thermalstate(h::AbstractMPO, β::Real, alg::PDMRG=PDMRG())
 	rho = randompmpa(scalartype(h), ophydims(h); D=_guess_bond(alg.trunc), R=alg.R)
-	rho = thermalstate!(rho, h, β, alg)
+	rho, info = thermalstate!(rho, h, β, alg)
 	F = freeenergy(h, rho, β)
-	return F, rho
+	return F, rho, info
 end
 
 """

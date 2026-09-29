@@ -29,7 +29,8 @@
 	Ed = eigen(Hermitian(Hdense))
 	E_gs, ψ_gs = Ed.values[1], Ed.vectors[:, 1]
 
-	camp = ground_state(H, CADMRG(trunc=truncdim(16), maxiter=40, tol=1e-11))
+	camp, cinfo = ground_state(H, CADMRG(trunc=truncdim(16), maxiter=40, tol=1e-11))
+	@test cinfo isa ALSConvergenceInfo && cinfo.residual === nothing
 
 	# the circuits are recorded, and the gates act on valid site pairs
 	@test !isempty(camp.gates)
@@ -86,7 +87,10 @@ end
         # oversampled exact fit: the target is representable with D=6 > 3, so the ridge-
         # conditioned least-squares fit reproduces the tensor (tiny α for conditioning)
         S = [(x, amp(x)) for x in coords]
-        ψ1, traj1 = reconstruct(S, ds, ALSRecon(D=6, α=1e-10, maxiter=100, tol=1e-14))
+        ψ1, rinfo1 = reconstruct(S, ds, ALSRecon(D=6, α=1e-10, maxiter=100, tol=1e-14))
+        @test rinfo1 isa ALSConvergenceInfo
+        @test rinfo1.residual == rinfo1.losses[end][end]   # the loss IS the data residual²
+        traj1 = rinfo1.losses
         @test todense(ψ1) ≈ vref atol = 1e-6 rtol = 1e-6
         @test scaling(ψ1) == 1
         @test bonddim(ψ1) <= 6
@@ -103,14 +107,14 @@ end
 
         # noise robustness (the LS selling point vs TCI's exact interpolation)
         Sn = [(x, amp(x) + 1e-6 * (randn() + 1.0im * randn())) for x in coords]
-        ψ3, traj3 = reconstruct(Sn, ds, ALSRecon(D=6, α=1e-8, maxiter=100, tol=1e-12))
+        ψ3, _ = reconstruct(Sn, ds, ALSRecon(D=6, α=1e-8, maxiter=100, tol=1e-12))
         @test norm(todense(ψ3) - vref) / norm(vref) < 1e-4
 
         # in-place route: bond re-fitted to alg.D; the input scaling is folded into the
         # data and the fit targets the sample amplitudes as represented (scaling 1 out)
         ψ4 = randommps(ComplexF64, ds; D=4)
         setscaling!(ψ4, 1.5)
-        ψ4, traj4 = reconstruct!(ψ4, S, ALSRecon(D=6, α=1e-10, maxiter=100, tol=1e-14))
+        ψ4, _ = reconstruct!(ψ4, S, ALSRecon(D=6, α=1e-10, maxiter=100, tol=1e-14))
         @test scaling(ψ4) == 1
         @test todense(ψ4) ≈ vref atol = 1e-5 rtol = 1e-5
 end
@@ -127,8 +131,9 @@ end
 
         # oversampled exact fit: the pair-wise LS problem reproduces the tensor
         S = [(x, amp(x)) for x in coords]
-        ψ1, traj1 = reconstruct(S, ds,
+        ψ1, rinfo1 = reconstruct(S, ds,
                 ALSRecon2(trunc=truncdim(D=6), α=1e-10, maxiter=100, tol=1e-14))
+        traj1 = rinfo1.losses
         @test todense(ψ1) ≈ vref atol = 1e-6 rtol = 1e-6
         @test scaling(ψ1) == 1
         @test bonddim(ψ1) <= 6
@@ -138,7 +143,7 @@ end
 
         # in-place route: bond re-fitted to the truncation's cap
         ψ2 = randommps(ComplexF64, ds; D=4)
-        ψ2, traj2 = reconstruct!(ψ2, S,
+        ψ2, _ = reconstruct!(ψ2, S,
                 ALSRecon2(trunc=truncdim(D=6), α=1e-10, maxiter=100, tol=1e-14))
         @test todense(ψ2) ≈ vref atol = 1e-5 rtol = 1e-5
 end

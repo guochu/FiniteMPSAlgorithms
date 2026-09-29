@@ -34,7 +34,7 @@ terms = vcat([OpTerm(-1.0, i => SX) for i in 1:L],
              [OpTerm(-0.5, i => SZ, i + 1 => SZ) for i in 1:L-1])
 H = MPOHamiltonian(L, terms)
 
-E, ψ = ground_state(H, DMRG1(maxiter = 50, tol = 1e-10); D = 32)
+E, ψ, info = ground_state(H, DMRG1(maxiter = 50, tol = 1e-10, D = 32))
 ```
 
 ## Conventions

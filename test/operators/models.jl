@@ -105,10 +105,10 @@
 
 	# ---- the models drive the algorithms: DMRG2 vs exact diagonalization ----
 	Hcrit = tfim_hamiltonian(10; J=1.0, h=1.0)
-	E, _ = ground_state(Hcrit, DMRG2(maxiter=20, verbosity=0))
+	E, _, _ = ground_state(Hcrit, DMRG2(maxiter=20, verbosity=0))
 	@test E ≈ eigmin(Hermitian(todense(Hcrit))) rtol = 1e-8
 	Hhub = fermi_hubbard(4; t=1.0, U=2.0)
-	Ef, _ = ground_state(Hhub, DMRG2(maxiter=50, verbosity=0))
+	Ef, _, _ = ground_state(Hhub, DMRG2(maxiter=50, verbosity=0))
 	@test Ef ≈ eigmin(Hermitian(todense(Hhub))) rtol = 1e-6
 
 	# ---- a real element type is supported throughout ----

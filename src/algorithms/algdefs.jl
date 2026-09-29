@@ -113,13 +113,46 @@ _guess_bond(t::TruncationScheme) = something(_truncation_bond(t), Defaults.D)
 const DefaultMultAlg = SVDCompression(trunc=DefaultTruncation)
 
 """
-	iterative_compute!(cache, alg) -> khist
+	ALSConvergenceInfo(niter, converged, losses, itererr, residual)
+	ALSConvergenceInfo(losses, converged; residual=nothing)
+
+Convergence report appended as the last return value of every `IterativeMPSAlgorithm`
+entry point:
+
+* `niter`: number of sweeps performed;
+* `converged`: whether `iterative_compute!` reached `alg.tol`;
+* `losses`: the per-sweep loss history (what `iterative_compute!` used to return);
+* `itererr`: the final relative loss difference (the convergence measure);
+* `residual`: the problem's residual when it is exactly the loss (set by `linsolve`,
+  `seq2seq` and `reconstruct`, whose loss *is* the residual), `nothing` for the other
+  drivers (there the loss is the residual up to an unknown constant or not directly
+  the residual at all).
+"""
+struct ALSConvergenceInfo
+	niter::Int
+	converged::Bool
+	losses::Vector{Vector{Float64}}
+	itererr::Float64
+	residual::Union{Float64, Nothing}
+end
+
+function ALSConvergenceInfo(losses::Vector{Vector{Float64}}, converged::Bool; residual::Union{Float64, Nothing} = nothing)
+	niter = length(losses)
+	itererr = _iterative_delta(losses)
+	return ALSConvergenceInfo(niter, converged, losses, itererr, residual)
+end
+
+"""
+	iterative_compute!(cache, alg; residual=false, kwargs...) -> info::ALSConvergenceInfo
 
 Repeat `sweep!(cache, alg)` until the relative difference of the LAST loss of two
 successive sweeps satisfies `|lₙ - lₙ₋₁| / |lₙ₋₁| < alg.tol` (or `alg.maxiter` is
 reached). The per-site losses of a sweep are monotone in processing time, so the last
 value of a sweep is the best (most recently updated) loss and is comparable across
-sweeps. Returns `khist`, the loss history of every sweep.
+sweeps. Returns `info`, the [`ALSConvergenceInfo`](@ref) carrying the per-sweep loss
+history and the convergence report; with `residual = true` the `residual` field is set
+to the final loss (for the drivers whose loss *is* the problem's residual — `linsolve`,
+`seq2seq`, `reconstruct`). Remaining `kwargs` are forwarded to `sweep!`.
 
 The sweeps keep the working data in mixed canonical form but never touch the Schmidt
 values; the cache constructors therefore reset them (`unset_svectors!`) on the working
@@ -130,7 +163,7 @@ Logging follows the package-wide `verbosity` convention (header of
 (`_logiter`); level ≥ 3 additionally prints the loss of every local update from within
 the sweeps, tagged with the half-sweep direction (`_logupdate`).
 """
-function iterative_compute!(cache, alg; kwargs...)
+function iterative_compute!(cache, alg; residual::Bool = false, kwargs...)
 	khist = Vector{Vector{Float64}}()
 	prev = Inf
 	delta = Inf
@@ -149,7 +182,7 @@ function iterative_compute!(cache, alg; kwargs...)
 	end
 	(!converged && alg.verbosity > 0) && @warn "iterative_compute! reached maxiter without " *
 		"converging: $(alg.maxiter) sweeps, final delta = $(round(delta; sigdigits=4)), tol = $(alg.tol)"
-	return khist
+	return ALSConvergenceInfo(khist, converged; residual = residual ? khist[end][end] : nothing)
 end
 
 # iteration logging (following InfiniteMPSAlgorithms `_logiter`)

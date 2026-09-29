@@ -469,30 +469,31 @@ _initial_bond(alg::ALSRecon) = alg.D
 _initial_bond(alg::ALSRecon2) = _guess_bond(alg.trunc)
 
 """
-	reconstruct(samples, ds, alg = ALSRecon()) -> (ψ, traj)
+	reconstruct(samples, ds, alg = ALSRecon()) -> (ψ, info)
 
 Fit an MPS `ψ` to a fixed sample set of tensor amplitudes by ALS sweeps
 (`samples::Vector` of `Pair{Vector{Int},T}` or `(𝐱, a)` tuples with
 `𝐱::Vector{Int}`; `alg` is an [`ALSRecon`](@ref) or [`ALSRecon2`](@ref)). The
 initial guess is a random chain of the bond profile demanded by `alg`. Returns `ψ`
-(scaling 1; the represented amplitudes are fitted) and `traj`, the per-sweep loss
-history of `iterative_compute!`.
+(scaling 1; the represented amplitudes are fitted) and `info`, the
+[`ALSConvergenceInfo`](@ref) of the sweeps (the loss *is* the squared data residual
+here, so `info.residual` holds the final loss).
 """
 function reconstruct(samples, ds::Vector{Int}, alg::Union{ALSRecon,ALSRecon2} = ALSRecon())
 	# normalized init: an unnormalized random chain of bond D carries amplitudes of
 	# magnitude ~(d·D²)^(L/2), which wrecks the conditioning of the local normal
 	# equations (the CG solves make no progress at all)
 	ψ = randommps(ComplexF64, ds; D=_initial_bond(alg), normalize=true)
-	ψ, traj = reconstruct!(ψ, samples, alg)
-	return ψ, traj
+	return reconstruct!(ψ, samples, alg)
 end
 
 """
-	reconstruct!(ψ, samples, alg = ALSRecon()) -> (ψ, traj)
+	reconstruct!(ψ, samples, alg = ALSRecon()) -> (ψ, info)
 
 In-place variant of [`reconstruct`](@ref): refine the provided chain on the fixed
 sample set (the per-site scaling is folded into the data and the bond profile is
-re-fitted to `alg`'s demand with `changebond!`). Returns `(ψ, traj)`.
+re-fitted to `alg`'s demand with `changebond!`). Returns `(ψ, info)` with `info`, the
+[`ALSConvergenceInfo`](@ref) of the sweeps (`info.residual` = final loss).
 """
 function reconstruct!(ψ::CanonicalMPS, samples, alg::Union{ALSRecon,ALSRecon2} = ALSRecon())
 	ds = phydims(ψ)
@@ -500,8 +501,8 @@ function reconstruct!(ψ::CanonicalMPS, samples, alg::Union{ALSRecon,ALSRecon2} 
 	D0 = _initial_bond(alg)
 	bonddim(ψ) != D0 && changebond!(ψ; D=D0)
 	c = ALSReconCache(ψ, X, a)
-	traj = iterative_compute!(c, alg)
-	return ψ, traj
+	info = iterative_compute!(c, alg; residual=true)
+	return ψ, info
 end
 
 """

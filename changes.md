@@ -1,5 +1,39 @@
 # Interface changes
 
+## Changed: every iterative entry point returns an `ALSConvergenceInfo` as its last value
+
+`iterative_compute!(cache, alg; residual=false, kwargs...)` now returns an exported
+`info::ALSConvergenceInfo` (was the raw per-sweep loss history `khist`). The info carries
+
+- `niter`: the number of sweeps performed;
+- `converged`: whether `alg.tol` was reached;
+- `losses`: the per-sweep loss history (exactly the old `khist`);
+- `itererr`: the final relative loss difference (what `_iterative_delta(khist)` computed);
+- `residual`: the problem's residual when it *is* the loss — set by `linsolve`,
+  `seq2seq` and `reconstruct` (whose losses are the exact squared residual norms) via
+  the new `residual = true` kwarg of `iterative_compute!`; `nothing` for the other
+  drivers, where the loss differs from the residual by an unknown constant or is not
+  the residual at all.
+
+The drivers append the info after their existing returns; the `SVDCompression`
+one-pass routes are not iterative and keep returning the bare chain.
+
+- in-place data drivers: `mult!`, `add!`, `compress!`, `hadamard!`, `linsolve!`
+  (both the single-site and the two-site engines) return `(out, info)`;
+  `seq2seq!` returns `(W, info)`, `reconstruct!` `(ψ, info)`, `thermalstate!` `(rho, info)`;
+- out-of-place: `mult` / `add` / `compress` / `hadamard` / `linsolve` return
+  `(chain, info)`; `ground_state` returns `(E, ψ, info)`, `excited_state`
+  `(E, ψ, info)`, the CADMRG `ground_state` `(CAMPS, info)`, `thermalstate`
+  `(F, rho, info)`, `seq2seq(xs, ys, alg)` `(W, info)`, `reconstruct(samples, ds, alg)`
+  `(ψ, info)`; the oracle-based adaptive variants keep their `NamedTuple` infos;
+- drivers whose only return was the loss history now return the info directly:
+  `ground_state!`, `excited_state!` and the CADMRG `ground_state!`
+  (`info.losses` replaces the old `khist`).
+
+Internal call sites and the test suite are adapted (`_iterative_delta(khist)` became
+`info.itererr`); the `Logging` test dependency missing from the test target of
+`Project.toml` was fixed on the way. Full suite: 952/952.
+
 ## Renamed: `Base.kron(a::AbstractMPO, b::AbstractMPO)` → `superoperator(a, b)`
 
 The fused-space Kronecker product of two operator chains overrode `Base.kron` with a

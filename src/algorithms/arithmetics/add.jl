@@ -174,30 +174,32 @@ function svdguess_add(chains, D::Int)
 end
 
 """
-	add!(out, chains, alg::DMRG1) -> out
+	add!(out, chains, alg::DMRG1) -> (out, info)
 
 Single-site variational (ALS) sum of `chains` refined in place on the initial guess
 `out`. The sweeps determine direction and magnitude at the data level; the sum is
 expressed in the first input's per-site `scaling` convention (a scaling^L power is
-never materialized).
+never materialized). Returns `(out, info)` with `info`, the
+[`ALSConvergenceInfo`](@ref) of the sweeps.
 """
 function add!(out, chains, alg::DMRG1)
 	bonddim(out) != alg.D && changebond!(out; D=alg.D)
 	cache = AddCache(out, chains)
-	iterative_compute!(cache, alg)
+	info = iterative_compute!(cache, alg)
 	setscaling!(out, scaling(chains[1]))
-	return out
+	return out, info
 end
 
 """
 	add(ψs::Vector{<:CanonicalMPS}, alg=SVDCompression(trunc=DefaultTruncation)) -> CanonicalMPS
-	add(ψs::Vector{<:CanonicalMPS}, alg::DMRG1) -> CanonicalMPS
-	add(ρs::Vector{<:CanonicalMPO}, alg) / add(ρs, alg::DMRG1) -> CanonicalMPO
+	add(ψs::Vector{<:CanonicalMPS}, alg::DMRG1) -> (CanonicalMPS, info)
+	add(ρs::Vector{<:CanonicalMPO}, alg) / add(ρs, alg::DMRG1) -> CanonicalMPO / (CanonicalMPO, info)
 
 Sum of chains: the SVD route forms the exact block-diagonal sum and compresses it with
 a single SVD sweep; the variational (ALS) route draws a `svdguess_add(ψs, alg.D)` initial
-guess and refines it by sweeps. The exact sum is `Base.:+` (block-diagonal, no
-truncation).
+guess and refines it by sweeps, returning `(chain, info)` with `info`, the
+[`ALSConvergenceInfo`](@ref) of the sweeps (the SVD route returns the chain only). The
+exact sum is `Base.:+` (block-diagonal, no truncation).
 """
 function add(ψs::Vector{<:CanonicalMPS}, alg::SVDCompression=DefaultMultAlg)
 	isempty(ψs) && throw(ArgumentError("empty input"))
@@ -274,7 +276,7 @@ _kkt_ratio(form::Number, dirnorm2::Number) = form / dirnorm2
 
 function add!(out, chains, alg::DMRG2)
 	cache = AddCache(out, chains)
-	iterative_compute!(cache, alg)
+	info = iterative_compute!(cache, alg)
 	# Σ kets = β·bra at convergence: β = Σ_n ⟨bra|ket_n⟩ / ⟨bra|bra⟩. Unlike the other
 	# DMRG2 drivers, `add` restores the physical scale of the (cancellation-prone) sum
 	# from the problem's KKT eigenvalue; `setscaling!` first, `lmul!` second (the
@@ -282,7 +284,7 @@ function add!(out, chains, alg::DMRG2)
 	setscaling!(out, scaling(chains[1]))
 	form = sum(_dot(out, c) for c in chains)
 	lmul!(_kkt_ratio(form, _dot(out, out)), out)
-	return out
+	return out, info
 end
 
 function add(ψs::Vector{<:CanonicalMPS}, alg::DMRG2)

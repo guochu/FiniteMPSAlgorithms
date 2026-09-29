@@ -17,7 +17,8 @@
 	@test isrightcanonical(out2[1])
 
 	# --- mult, DMRG1 (ALS) route ---
-	out3 = mult(H, ψ, DMRG1(maxiter=20, tol=1e-10, D=16))
+	out3, minfo = mult(H, ψ, DMRG1(maxiter=20, tol=1e-10, D=16))
+	@test minfo isa ALSConvergenceInfo && minfo.residual === nothing
 	@test todense(out3) ≈ vHψ atol = 1e-6 * norm(vHψ)
 
 	# --- mult MPO·MPO ---
@@ -29,7 +30,7 @@
 	# (raw bond-121 vs canonical bond-64) loses ~1e-6 to cancellation even when the
 	# operators agree to machine precision
 	@test norm(todense(prod_exact) - todense(prod_svd)) < 1e-6
-	prod_als = mult(H, H, DMRG1(maxiter=20, tol=1e-10, D=16))
+	prod_als, _ = mult(H, H, DMRG1(maxiter=20, tol=1e-10, D=16))
 	@test prod_als isa CanonicalMPO
 	@test norm(todense(prod_exact) - todense(prod_als)) < 1e-5
 
@@ -37,7 +38,7 @@
 	ρ = randommpo(ComplexF64, fill(2, L); D=2)
 	setscaling!(ρ, 0.7)
 	rho_svd = mult(H, ρ, SVDCompression(trunc=truncdim(8)))
-	rho_als = mult(H, ρ, DMRG1(maxiter=20, tol=1e-10, D=8))
+	rho_als, _ = mult(H, ρ, DMRG1(maxiter=20, tol=1e-10, D=8))
 	@test rho_svd isa CanonicalMPO && rho_als isa CanonicalMPO
 	# the exact product (and the wrapped chains) carry the operand scaling, so the
 	# represented dense operators compare directly, up to the bond-8 truncation error
@@ -52,20 +53,21 @@
 	# --- add ---
 	s = add([ψ, ψ], SVDCompression(trunc=truncdim(64)))
 	@test todense(s) ≈ 2 * vψ atol = 1e-8
-	s2 = add([ψ, ψ], DMRG1(maxiter=20, tol=1e-10, D=16))
+	s2, _ = add([ψ, ψ], DMRG1(maxiter=20, tol=1e-10, D=16))
 	@test todense(s2) ≈ 2 * vψ atol = 1e-6
 
 	# --- compress ---
 	ψbig = mult(H, ψ, SVDCompression(trunc=truncdim(256)))
 	c = compress(ψbig, SVDCompression(trunc=truncdimcutoff(4, 1e-10)))
 	@test bonddim(c) <= 4
-	c2 = compress(ψbig, DMRG1(maxiter=20, tol=1e-10, D=8))
+	c2, _ = compress(ψbig, DMRG1(maxiter=20, tol=1e-10, D=8))
 	@test isrightcanonical(c2[1])
 
 	# in-place ALS compression: the guess object is refined and returned as-is
 	guess = svdguess_compress(ψbig, 8)
-	c3 = compress!(guess, ψbig, DMRG1(maxiter=20, tol=1e-10, D=8))
+	c3, cinfo = compress!(guess, ψbig, DMRG1(maxiter=20, tol=1e-10, D=8))
 	@test c3 === guess
+	@test cinfo isa ALSConvergenceInfo && cinfo.residual === nothing
 	@test todense(c3) ≈ todense(c2) atol = 1e-8
 end
 
@@ -114,31 +116,32 @@ end
 	# mult: the represented product must include the input scaling (both routes)
 	refm = Hd * vs
 	outs = mult(H, ψs, SVDCompression(trunc=truncdim(64)))
-	outa = mult(H, ψs, DMRG1(maxiter=20, tol=1e-10, D=16))
+	outa, _ = mult(H, ψs, DMRG1(maxiter=20, tol=1e-10, D=16))
 	@test scaling(outa) ≈ scaling(ψs) atol = 1e-12
 	@test norm(todense(outs) - refm) / norm(refm) < 1e-8
 	@test norm(todense(outa) - refm) / norm(refm) < 1e-6
 
 	# add: the sum is expressed in the first input's scaling convention
-	s = add([ψs, ψs], DMRG1(maxiter=20, tol=1e-10, D=16))
+	s, _ = add([ψs, ψs], DMRG1(maxiter=20, tol=1e-10, D=16))
 	@test scaling(s) ≈ scaling(ψs) atol = 1e-12
 	@test norm(todense(s) - 2vs) / norm(2vs) < 1e-8
 
 	# compress: the compressed chain represents the scaled input
-	c = compress(ψs, DMRG1(maxiter=20, tol=1e-10, D=8))
+	c, _ = compress(ψs, DMRG1(maxiter=20, tol=1e-10, D=8))
 	@test scaling(c) ≈ scaling(ψs) atol = 1e-12
 	@test norm(todense(c) - vs) / norm(vs) < 1e-8
 
 	# hadamard: the result carries the ⊙ convention scaling(ψA)·scaling(ψB)
 	φs = φ * 1.7
 	refχ = todense(ψs) .* todense(φs)
-	χ = hadamard(ψs, φs, DMRG1(maxiter=20, tol=1e-10, D=16))
+	χ, _ = hadamard(ψs, φs, DMRG1(maxiter=20, tol=1e-10, D=16))
 	@test scaling(χ) ≈ scaling(ψs) * scaling(φs) atol = 1e-12
 	@test norm(todense(χ) - refχ) / norm(refχ) < 1e-6
 
 	# linsolve: the solution is expressed in the right-hand side's scaling convention
 	I = identitympo(ComplexF64, ds)
-	x = linsolve(I, ψs, ALSLinSolve(maxiter=20, tol=1e-10, D=16))
+	x, xinfo = linsolve(I, ψs, ALSLinSolve(maxiter=20, tol=1e-10, D=16))
+	@test xinfo.residual == xinfo.losses[end][end]   # the loss IS the residual²
 	@test scaling(x) ≈ scaling(ψs) atol = 1e-12
 	@test norm(todense(x) - vs) / norm(vs) < 1e-8
 
@@ -191,22 +194,22 @@ end
 	@test isfinite(scaling(outr)) && scaling(outr) > 0
 
 	# add
-	s = add([ψ, ψ], DMRG1(maxiter=5, tol=1e-10, D=1))
+	s, _ = add([ψ, ψ], DMRG1(maxiter=5, tol=1e-10, D=1))
 	@test datafinite(s)
 	@test scaling(s) ≈ 50.0 atol = 1e-12
 
 	# compress
-	c = compress(ψ, DMRG1(maxiter=5, tol=1e-10, D=1))
+	c, _ = compress(ψ, DMRG1(maxiter=5, tol=1e-10, D=1))
 	@test datafinite(c)
 	@test scaling(c) ≈ 50.0 atol = 1e-12
 
 	# hadamard (pointwise square: the ⊙ convention gives 50·50 = 2500 per site)
-	χ = hadamard(ψ, ψ, DMRG1(maxiter=5, tol=1e-10, D=1))
+	χ, _ = hadamard(ψ, ψ, DMRG1(maxiter=5, tol=1e-10, D=1))
 	@test datafinite(χ)
 	@test scaling(χ) ≈ 2500.0 atol = 1e-12
 
 	# linsolve
-	x = linsolve(I, ψ, ALSLinSolve(maxiter=5, tol=1e-10, D=1))
+	x, _ = linsolve(I, ψ, ALSLinSolve(maxiter=5, tol=1e-10, D=1))
 	@test datafinite(x)
 	@test scaling(x) ≈ 50.0 atol = 1e-12
 
@@ -315,11 +318,12 @@ end
 
 	# in-place driver entry points (mult! / add! / linsolve!)
 	Hd = dense_model(p)
-	out_m = mult!(svdguess_mult(H, ψ, 8), H, ψ, DMRG1(maxiter=5, tol=1e-10))
+	out_m, _ = mult!(svdguess_mult(H, ψ, 8), H, ψ, DMRG1(maxiter=5, tol=1e-10))
 	@test todense(out_m) ≈ Hd * todense(ψ) atol = 1e-4
-	out_a = add!(svdguess_add([ψ, ψ], 8), [ψ, ψ], DMRG1(maxiter=5, tol=1e-10))
+	out_a, _ = add!(svdguess_add([ψ, ψ], 8), [ψ, ψ], DMRG1(maxiter=5, tol=1e-10))
 	@test todense(out_a) ≈ 2 * todense(ψ) atol = 1e-5
-	xl = linsolve!(svdguess_compress(ψ, 8), identitympo(ComplexF64, ds), ψ, ALSLinSolve(maxiter=10, tol=1e-10))
+	xl, xlinfo = linsolve!(svdguess_compress(ψ, 8), identitympo(ComplexF64, ds), ψ, ALSLinSolve(maxiter=10, tol=1e-10))
+	@test xlinfo.residual !== nothing
 	@test abs(dot(xl, ψ)) / (norm(xl) * norm(ψ)) ≈ 1 atol = 1e-6
 end
 
@@ -345,7 +349,7 @@ end
 
 	# svdguess_hadamard: naive-SVD initial guess of the pointwise product
 	φ = randommps(ComplexF64, ds; D=4)
-	χg = hadamard!(svdguess_hadamard(ψ, φ, 16), ψ, φ, DMRG1(maxiter=5, tol=1e-10))
+	χg, _ = hadamard!(svdguess_hadamard(ψ, φ, 16), ψ, φ, DMRG1(maxiter=5, tol=1e-10))
 	ref = todense(ψ) .* todense(φ)
 	@test norm(todense(χg) - ref) / norm(ref) < 1e-4
 
@@ -365,7 +369,8 @@ end
 	ref = todense(ψ) .* todense(φ)
 
 	# exact hadamard needs bond 16; a cap of 32 recovers it essentially exactly
-	χ = hadamard(ψ, φ, DMRG1(maxiter=15, tol=1e-10, verbosity=0, D=32))
+	χ, hinfo = hadamard(ψ, φ, DMRG1(maxiter=15, tol=1e-10, verbosity=0, D=32))
+	@test hinfo isa ALSConvergenceInfo && hinfo.residual === nothing
 	@test bonddim(χ) <= 32
 	@test norm(todense(χ) - ref) / norm(ref) < 1e-6
 
@@ -373,7 +378,7 @@ end
 	# All losses are in processing-time order. A full sweep processes sites 1:L then
 	# L:1, and the local-target norm is non-decreasing throughout
 	cache = HadamardCache(ψ, φ, randommps(ComplexF64, ds; D=32))
-	khist = iterative_compute!(cache, DMRG1(maxiter=12, tol=1e-11, verbosity=0, D=32))
+	khist = iterative_compute!(cache, DMRG1(maxiter=12, tol=1e-11, verbosity=0, D=32)).losses
 	χr = cache.bra
 	@test all(kv -> length(kv) == 2 * L, khist)
 	for kv in khist
@@ -394,7 +399,8 @@ end
 	# trivial system: I·x = y, exact solution is y (up to gauge)
 	I_mpo = identitympo(ComplexF64, ds)
 	y = randommps(ComplexF64, ds; D=4)
-	x = linsolve(I_mpo, y, alg)
+	x, xinfo = linsolve(I_mpo, y, alg)
+	@test xinfo isa ALSConvergenceInfo && xinfo.residual == xinfo.losses[end][end]
 	# normalized overlap |⟨x|y⟩|/(‖x‖‖y‖) ≈ 1
 	@test abs(dot(x, y)) / (norm(x) * norm(y)) ≈ 1 atol = 1e-7
 
@@ -404,12 +410,13 @@ end
 	U = timeevompo(H, 0.15, WII())     # unitary MPOHamiltonian
 	x_exact = randommps(ComplexF64, ds; D=4)
 	yU = mult(U, x_exact)              # y = U·x_exact
-	xsol = linsolve(U, yU, alg)
+	xsol, xsinfo = linsolve(U, yU, alg)
+	@test xsinfo.residual == xsinfo.losses[end][end]
 	# recovered solution: normalized overlap with the exact solution
 	@test abs(dot(xsol, x_exact)) / (norm(xsol) * norm(x_exact)) ≈ 1 atol = 1e-5
 
 	# default-algorithm form
-        xk = linsolve(I_mpo, y, ALSLinSolve(D=16))
+        xk, _ = linsolve(I_mpo, y, ALSLinSolve(D=16))
         @test abs(dot(xk, y)) / (norm(xk) * norm(y)) ≈ 1 atol = 1e-7
 
         # scaled canonical MPO input: the represented equation U·x = y holds with the
@@ -418,14 +425,14 @@ end
         setscaling!(Uc, 2.5)
         yUc = copy(yU)
         setscaling!(yUc, 2.5)              # represented y = 2.5^L·U·x_exact
-        xsc = linsolve(Uc, yUc, alg)
+        xsc, _ = linsolve(Uc, yUc, alg)
         @test abs(dot(xsc, x_exact)) / (norm(xsc) * norm(x_exact)) ≈ 1 atol = 1e-5
         @test norm(todense(Uc) * todense(xsc) - todense(yUc)) / norm(todense(yUc)) < 1e-4
 
         # scaled rhs with a raw (Hamiltonian) MPO input: s_A = 1, s_x = scaling(y)
         ys = copy(yU)
         setscaling!(ys, 1.7)
-        xs2 = linsolve(U, ys, alg)
+        xs2, _ = linsolve(U, ys, alg)
         @test abs(dot(xs2, x_exact)) / (norm(xs2) * norm(x_exact)) ≈ 1 atol = 1e-5
         @test norm(todense(U) * todense(xs2) - todense(ys)) / norm(todense(ys)) < 1e-4
 
@@ -446,36 +453,36 @@ end
 	vHψ = Hd * vψ
 
 	# mult: two-site sweeps grow the bond dimension from a small initial guess
-	out = mult(H, ψ, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(8), verbosity=0))
+	out, _ = mult(H, ψ, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(8), verbosity=0))
 	@test todense(out) ≈ vHψ atol = 1e-6
 	@test bonddim(out) <= 8
 	@test iscanonical(out)
 
 	# mult MPO·MPO
-	prod2 = mult(H, H, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(16), verbosity=0))
+	prod2, _ = mult(H, H, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(16), verbosity=0))
 	@test norm(todense(prod2) - Hd * Hd) < 1e-5
 
 	# mult with the DMRG2 in-place driver (the dense MPO layer; sparse Hamiltonians are
 	# expanded by the out-of-place entry points)
 	Hd_mpo = MPO(tompotensors(H))
-	outm = mult!(svdguess_mult(Hd_mpo, ψ, 4), Hd_mpo, ψ, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(8)))
+	outm, _ = mult!(svdguess_mult(Hd_mpo, ψ, 4), Hd_mpo, ψ, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(8)))
 	@test todense(outm) ≈ vHψ atol = 1e-5
 
 	# add: the pair updates can express the exact bond-16 sum within the cap
-	s2 = add([ψ, ψ], DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(8), verbosity=0))
+	s2, _ = add([ψ, ψ], DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(8), verbosity=0))
 	@test todense(s2) ≈ 2 * vψ atol = 1e-5
 	@test iscanonical(s2)
 
 	# compress: bond cap respected and the represented chain recovered
 	ψbig = mult(H, ψ, SVDCompression(trunc=truncdim(64)))
-	c2 = compress(ψbig, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(8), verbosity=0))
+	c2, _ = compress(ψbig, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(8), verbosity=0))
 	@test bonddim(c2) <= 8
 	@test norm(todense(c2) - vHψ) / norm(vHψ) < 1e-6
 	@test iscanonical(c2)
 
 	# hadamard: two-site updates handle the bond-16 exact product within the cap
 	φ = randommps(ComplexF64, ds; D=4)
-	χ = hadamard(ψ, φ, DMRG2(maxiter=15, tol=1e-10, trunc=truncdim(16), verbosity=0))
+	χ, _ = hadamard(ψ, φ, DMRG2(maxiter=15, tol=1e-10, trunc=truncdim(16), verbosity=0))
 	refχ = vψ .* todense(φ)
 	@test norm(todense(χ) - refχ) / norm(refχ) < 1e-5
 	@test iscanonical(χ)
@@ -484,7 +491,7 @@ end
 	U = timeevompo(H, 0.15, WII())
 	x_exact = randommps(ComplexF64, ds; D=4)
 	yU = mult(U, x_exact)
-	xsol = linsolve(U, yU, ALSLinSolve2(maxiter=20, tol=1e-10, trunc=truncdim(8), verbosity=0))
+	xsol, _ = linsolve(U, yU, ALSLinSolve2(maxiter=20, tol=1e-10, trunc=truncdim(8), verbosity=0))
 	@test abs(dot(xsol, x_exact)) / (norm(xsol) * norm(x_exact)) ≈ 1 atol = 1e-5
 	@test iscanonical(xsol)
 
@@ -508,35 +515,35 @@ end
 
 	# mult MPS
 	mc = MultCache(MPO(tompotensors(Hs)), ψs, svdguess_mult(Hs, ψs, 64))
-	kh = iterative_compute!(mc, nt)
+	kh = iterative_compute!(mc, nt).losses
 	@test monotone(kh)
-	@test todense(mult(MPO(tompotensors(Hs)), ψs, nt)) ≈ Hsd * vψs atol = 1e-8 rtol = 1e-8
+	@test todense(first(mult(MPO(tompotensors(Hs)), ψs, nt))) ≈ Hsd * vψs atol = 1e-8 rtol = 1e-8
 
 	# mult MPO·MPO
 	mc = MultCache(MPO(tompotensors(Hs)), MPO(tompotensors(Hs)), svdguess_mult(Hs, Hs, 64))
-	kh = iterative_compute!(mc, nt)
+	kh = iterative_compute!(mc, nt).losses
 	@test monotone(kh)
-	@test todense(mult(MPO(tompotensors(Hs)), MPO(tompotensors(Hs)), nt)) ≈ Hsd * Hsd atol = 1e-8 rtol = 1e-8
+	@test todense(first(mult(MPO(tompotensors(Hs)), MPO(tompotensors(Hs)), nt))) ≈ Hsd * Hsd atol = 1e-8 rtol = 1e-8
 
 	# add
 	oc = AddCache(svdguess_add([ψs, ψs], 64), [ψs, ψs])
-	kh = iterative_compute!(oc, nt)
+	kh = iterative_compute!(oc, nt).losses
 	@test monotone(kh)
-	@test todense(add([ψs, ψs], nt)) ≈ 2 * vψs atol = 1e-8 rtol = 1e-8
+	@test todense(first(add([ψs, ψs], nt))) ≈ 2 * vψs atol = 1e-8 rtol = 1e-8
 
 	# compress
 	xbig = mult(Hs, ψs, SVDCompression(trunc=truncdim(64)))
 	cc = OverlapCache(svdguess_compress(xbig, 64), xbig)
-	kh = iterative_compute!(cc, nt)
+	kh = iterative_compute!(cc, nt).losses
 	@test monotone(kh)
 
 	# hadamard
 	φs = randommps(ComplexF64, dss; D=4)
 	refχs = vψs .* todense(φs)
 	hc = HadamardCache(ψs, φs, svdguess_hadamard(ψs, φs, 64))
-	kh = iterative_compute!(hc, nt)
+	kh = iterative_compute!(hc, nt).losses
 	@test monotone(kh)
-	@test todense(hadamard(ψs, φs, nt)) ≈ refχs atol = 1e-8 rtol = 1e-8
+	@test todense(first(hadamard(ψs, φs, nt))) ≈ refχs atol = 1e-8 rtol = 1e-8
 
 	# linsolve
 	nt2 = ALSLinSolve2(maxiter=30, tol=1e-14, trunc=NoTruncation())
@@ -544,7 +551,7 @@ end
 	xs_exact = randommps(ComplexF64, dss; D=4)
 	ys = mult(Us, xs_exact)
 	lc = LinsolveCache(MPO(tompotensors(Us)), ys, randommps(ComplexF64, dss; D=8, normalize=false))
-	kh = iterative_compute!(lc, nt2)
+	kh = iterative_compute!(lc, nt2).losses
 	@test monotone(kh)
 	@test abs(dot(todense(lc.ket), todense(xs_exact))) /
 		  (norm(todense(lc.ket)) * norm(todense(xs_exact))) ≈ 1 atol = 1e-8
@@ -555,6 +562,6 @@ end
 	setscaling!(Uc2, 3.0)
 	ysc = copy(ys)
 	setscaling!(ysc, 1.4)
-	xsc2 = linsolve(Uc2, ysc, nt2)
+	xsc2, _ = linsolve(Uc2, ysc, nt2)
 	@test norm(todense(Uc2) * todense(xsc2) - todense(ysc)) / norm(todense(ysc)) < 1e-6
 end

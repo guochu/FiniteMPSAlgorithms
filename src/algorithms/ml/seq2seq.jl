@@ -358,7 +358,7 @@ function Seq2SeqCache(H::AbstractMPO, kets, bras)
 end
 
 """
-	seq2seq(xs, ys, alg::Seq2Seq = Seq2Seq()) -> (W, traj)
+	seq2seq(xs, ys, alg::Seq2Seq = Seq2Seq()) -> (W, info)
 
 Fit an MPO `W` to a dataset of MPS pairs `(xs[n], ys[n])` by DMRG (single-site ALS)
 sweeps, following guochu/MPSLearning.jl: minimize `Σ_n ||W·x_n − y_n||²`, with a
@@ -367,27 +367,29 @@ Hilbert-Schmidt ridge `α·||W||²` (`alg.α`) added to the local solves for con
 reported loss). The input (output) physical dimensions of `W` match the dimensions
 of `xs` (`ys`), so rectangular maps `dx → dy` are supported. The initial guess is a
 random MPO of bond dimension `alg.D`; the data scalings are folded into the site tensors
-at entry. `traj` collects the exact global data objective after every site update,
-grouped per sweep; each vector is in processing-time order (the left sweep sites
+at entry. `info` is the [`ALSConvergenceInfo`](@ref) of the sweeps: the per-sweep loss
+history (`info.losses`) collects the exact global data objective after every site
+update, grouped per sweep; each vector is in processing-time order (the left sweep sites
 `1:L`, the right sweep sites `L:-1:1`), so the losses are non-increasing; convergence
 follows the unified `iterative_compute!` criterion (relative difference of the last
-loss of two successive sweeps below `alg.tol`).
+loss of two successive sweeps below `alg.tol`). Since the loss *is* the (squared)
+data residual here, `info.residual` holds the final loss.
 """
 function seq2seq(xs::Vector{<:CanonicalMPS}, ys::Vector{<:CanonicalMPS},
 				 alg::Seq2Seq = Seq2Seq())
 	dxs, dys = _validate_seq2seq(xs, ys)
 	ompo = _random_seq2seq_mpo(promote_type(scalartype(xs[1]), scalartype(ys[1])), dxs, dys, alg.D)
-	traj = seq2seq!(ompo, xs, ys, alg)
-	return ompo, traj
+	return seq2seq!(ompo, xs, ys, alg)
 end
 
 """
-	seq2seq!(W::AbstractMPO, xs, ys, alg::Seq2Seq = Seq2Seq()) -> traj
+	seq2seq!(W::AbstractMPO, xs, ys, alg::Seq2Seq = Seq2Seq()) -> (W, info)
 
 In-place variant of [`seq2seq`](@ref): fit the provided MPO `W` to the dataset
 `(xs[n], ys[n])` (its site tensors are updated in place, so `W` doubles as the initial
-guess). The data scalings are folded into the site tensors at entry. Returns `traj`,
-the per-sweep loss history of `iterative_compute!`.
+guess). The data scalings are folded into the site tensors at entry. Returns
+`(W, info)` with `info`, the [`ALSConvergenceInfo`](@ref) of `iterative_compute!`
+(`info.residual` = final loss = the global data objective `Σ_n ||W·x_n − y_n||²`).
 """
 function seq2seq!(W::AbstractMPO, xs::Vector{<:CanonicalMPS}, ys::Vector{<:CanonicalMPS},
 				  alg::Seq2Seq = Seq2Seq())
@@ -396,7 +398,8 @@ function seq2seq!(W::AbstractMPO, xs::Vector{<:CanonicalMPS}, ys::Vector{<:Canon
 	xsf = [_fold_scaling_sites(x) for x in xs]
 	ysf = [_fold_scaling_sites(y) for y in ys]
 	m = Seq2SeqCache(W, xsf, ysf)
-	return iterative_compute!(m, alg)
+	info = iterative_compute!(m, alg; residual=true)
+	return W, info
 end
 
 # ---------- adaptive oracle-based fit (the seq2seq analog of ALSRecon's enrichment) ----------
@@ -434,11 +437,11 @@ function seq2seq(pairfun::Function, dxs::Vector{Int}, dys::Vector{Int},
 		throw(DimensionMismatch("dxs and dys must have equal length"))
 	W = _random_seq2seq_mpo(ComplexF64, dxs, dys, alg.D)
 	S = [_seq2seq_pair(pairfun, x, dys) for x in _random_seq2seq_inputs(dxs, alg.nbuffer)]
-	traj = Vector{Vector{Float64}}()
 	maxerr = Inf
 	rounds = 0
+	sinfo = nothing
 	while rounds < alg.maxiter
-		traj = seq2seq!(W, [p[1] for p in S], [p[2] for p in S], alg)
+		_, sinfo = seq2seq!(W, [p[1] for p in S], [p[2] for p in S], alg)
 		rounds += 1
 		cand = _random_seq2seq_inputs(dxs, alg.nbuffer)
 		ys = [pairfun(x) for x in cand]
@@ -450,6 +453,6 @@ function seq2seq(pairfun::Function, dxs::Vector{Int}, dys::Vector{Int},
 		worst = partialsortperm(errs, 1:min(alg.nadd, length(errs)); rev=true)
 		append!(S, [_seq2seq_pair(pairfun, cand[i], dys) for i in worst])
 	end
-	loss = isempty(traj) ? NaN : traj[end][end]
+	loss = sinfo === nothing || isempty(sinfo.losses) ? NaN : sinfo.losses[end][end]
 	return W, (loss = loss, maxerr = maxerr, npairs = length(S), rounds = rounds)
 end

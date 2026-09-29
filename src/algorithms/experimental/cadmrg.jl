@@ -391,32 +391,34 @@ sweep!(env::CADMRGCache, alg::CADMRG) = vcat(leftsweep!(env, alg), rightsweep!(e
 # ---------- driver ----------
 
 """
-	ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::CADMRG) -> khist
+	ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::CADMRG) -> info
 
 Clifford-augmented ground-state search starting from the user-provided ansatz `ψ`
 (modified in place; `alg.trunc` only affects the sweep truncations when an explicit
 ansatz is given). The MPO `h`
 is converted to dense form and rewritten in place (transformed by the optimal Clifford
-circuits). Returns `khist`, the per-sweep local-energy history. To obtain the applied
+circuits). Returns `info`, the [`ALSConvergenceInfo`](@ref) of the sweeps
+(`info.losses` is the per-sweep local-energy history). To obtain the applied
 Clifford circuits together with the state, use `ground_state(h, alg)` which returns a
 [`CAMPS`](@ref).
 """
 function ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::CADMRG)
 	hd = _dense_mpo(h)   # CA-DMRG rewrites MPO tensors in place; use dense form
 	env = CADMRGCache(hd, ψ)
-	khist = iterative_compute!(env, alg)
+	info = iterative_compute!(env, alg)
 	setscaling!(ψ, 1.0)
 	lmul!(1 / norm(ψ), ψ)
-	return khist
+	return info
 end
 
 """
-	ground_state(h::MPOHamiltonian, alg::CADMRG) -> CAMPS
+	ground_state(h::MPOHamiltonian, alg::CADMRG) -> (CAMPS, info)
 
 Ground state of `h` found by CA-DMRG, starting from a random MPS with the bond cap
 carried by `alg.trunc`,
 returned as a [`CAMPS`](@ref): the canonical MPS in the Clifford-rotated picture
-together with every applied two-qubit Clifford circuit (in application order).
+together with every applied two-qubit Clifford circuit (in application order);
+`info` is the [`ALSConvergenceInfo`](@ref) of the sweeps.
 Observables on the original Hamiltonian picture are evaluated with
 `expectation(::PauliTerm, ::CAMPS)`; e.g. the ground-state energy is the sum of the
 Hamiltonian's Pauli-term expectations.
@@ -426,11 +428,11 @@ function ground_state(h::MPOHamiltonian, alg::CADMRG)
 	ψ = randommps(TC, ophydims(h); D=_guess_bond(alg.trunc))
 	hd = _dense_mpo(h)   # CA-DMRG rewrites MPO tensors in place; use dense form
 	env = CADMRGCache(hd, ψ)
-	khist = iterative_compute!(env, alg)
-	(alg.verbosity > 1) && println("CA-DMRG converged (delta = $(_iterative_delta(khist)))")
+	info = iterative_compute!(env, alg)
+	(alg.verbosity > 1) && println("CA-DMRG converged (delta = $(info.itererr))")
 	setscaling!(ψ, 1.0)
 	lmul!(1 / norm(ψ), ψ)
-	return CAMPS(ψ, env.gates)
+	return CAMPS(ψ, env.gates), info
 end
 
 # ---------- PauliTerm expectation value ----------

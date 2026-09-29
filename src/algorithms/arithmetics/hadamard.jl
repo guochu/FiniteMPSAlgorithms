@@ -230,7 +230,7 @@ function HadamardCache(ketx, kety, bra)
 end
 
 """
-	hadamard!(χ, ψA, ψB, alg::DMRG1) -> χ
+	hadamard!(χ, ψA, ψB, alg::DMRG1) -> (χ, info)
 
 Single-site variational (ALS) pointwise product of `ψA` and `ψB` refined in place on
 the user-supplied initial guess `χ`. The ansatz is taken exactly as supplied — its bond
@@ -240,12 +240,13 @@ right-canonical `χ`. The sweeps determine direction and magnitude together at t
 level (the exact hadamard product is never formed); the external scale is attached
 through the per-site `scaling` field, with the ⊙ convention
 `scaling(ψA ⊙ ψB) = scaling(ψA)·scaling(ψB)` — a scaling^L power is never materialized.
+Returns `(χ, info)` with `info`, the [`ALSConvergenceInfo`](@ref) of the sweeps.
 """
 function hadamard!(χ, ψA, ψB, alg::DMRG1)
 	cache = HadamardCache(ψA, ψB, χ)
-	iterative_compute!(cache, alg)
+	info = iterative_compute!(cache, alg)
 	setscaling!(χ, scaling(ψA) * scaling(ψB))
-	return χ
+	return χ, info
 end
 
 # SVD route: exact product then a single compression sweep
@@ -262,11 +263,13 @@ end
 
 """
 	hadamard(ψA, ψB, alg=SVDCompression(trunc=DefaultTruncation)) -> χ
-	hadamard(ψA, ψB, alg::DMRG1) -> χ
+	hadamard(ψA, ψB, alg::DMRG1) -> (χ, info)
 
 Compressed pointwise (Hadamard) product ψA ⊙ ψB: the result is a finite-bond MPS approximation
 obtained with `alg` (`SVDCompression`: exact product + one SVD sweep; `DMRG1`: site-by-site
-variational ALS on a `svdguess_hadamard(ψA, ψB, alg.D)` initial guess). To refine a custom
+variational ALS on a `svdguess_hadamard(ψA, ψB, alg.D)` initial guess; the iterative
+routes return `(χ, info)` with `info`, the [`ALSConvergenceInfo`](@ref) of the sweeps,
+while the SVD route returns the chain only). To refine a custom
 ansatz with its own bond profile (ignoring `alg.D` entirely), call
 `hadamard!(χ, ψA, ψB, alg)`.
 
@@ -346,12 +349,12 @@ sweep!(m::HadamardCache, alg::DMRG2) = vcat(leftsweep!(m, alg), rightsweep!(m, a
 
 function hadamard!(χ, ψA, ψB, alg::DMRG2)
 	cache = HadamardCache(ψA, ψB, χ)
-	iterative_compute!(cache, alg)
+	info = iterative_compute!(cache, alg)
 	# attach the ⊙ convention scale scaling(ψA)·scaling(ψB) and fold the center norm
 	# into `scaling` (see `mult!`)
 	setscaling!(χ, scaling(ψA) * scaling(ψB))
 	_renormalize!(χ, χ[1], false)
-	return χ
+	return χ, info
 end
 
 function hadamard(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::DMRG2)

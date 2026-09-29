@@ -121,32 +121,34 @@ function _dmrg_local_update!(env::DMRGCache, s::Integer, alg::DMRG1)
 end
 
 """
-	ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::DMRG1=DMRG1()) -> khist
+	ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::DMRG1=DMRG1()) -> info
 
 Ground-state search starting from the initial state `ψ` (modified in place; e.g.
-`ψ = randommps(ComplexF64, ophydims(h); D=D)`). Returns `khist`, the per-sweep
-local-energy history (the convergence measure follows `_iterative_delta(khist)`).
-The returned state is data-normalized: the external scale is reset through the
-`scaling` field, never materialized as a scaling^L power.
+`ψ = randommps(ComplexF64, ophydims(h); D=D)`). Returns `info`, the
+[`ALSConvergenceInfo`](@ref) of the sweeps (`info.losses` is the per-sweep local-energy
+history, `info.itererr` the final relative loss difference). The returned state is
+data-normalized: the external scale is reset through the `scaling` field, never
+materialized as a scaling^L power.
 """
 function ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::DMRG1=DMRG1())
 	bonddim(ψ) != alg.D && changebond!(ψ; D=alg.D)
 	env = DMRGCache(h, ψ)
-	khist = iterative_compute!(env, alg)
+	info = iterative_compute!(env, alg)
 	setscaling!(ψ, 1.0)
 	lmul!(1 / norm(ψ), ψ)   # data-normalized state (explosion-safe)
-	return khist
+	return info
 end
 
 """
-	ground_state(h::MPOHamiltonian, alg=DMRG1()) -> (E, ψ)
+	ground_state(h::MPOHamiltonian, alg=DMRG1()) -> (E, ψ, info)
 
 Ground-state energy and (canonical) state of the Hamiltonian `h`, starting from a
-random initial state of bond dimension `alg.D`.
+random initial state of bond dimension `alg.D`; `info` is the
+[`ALSConvergenceInfo`](@ref) of the sweeps.
 """
 function ground_state(h::MPOHamiltonian, alg::DMRG1=DMRG1())
 	ψ = randommps(scalartype(h), ophydims(h); D=alg.D)
-	khist = ground_state!(ψ, h, alg)
-	(alg.verbosity > 1) && println("DMRG1 converged (delta = $(_iterative_delta(khist)))")
-	return expectation(h, ψ), ψ
+	info = ground_state!(ψ, h, alg)
+	(alg.verbosity > 1) && println("DMRG1 converged (delta = $(info.itererr))")
+	return expectation(h, ψ), ψ, info
 end

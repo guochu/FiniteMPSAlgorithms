@@ -123,30 +123,32 @@ end
 
 """
 	excited_state!(ψ::CanonicalMPS, h::AbstractMPO, projectors::Vector{CanonicalMPS},
-				   alg::DMRG1=DMRG1()) -> khist
+				   alg::DMRG1=DMRG1()) -> info
 
 Search for the lowest state orthogonal to all `projectors`, starting from the initial
 state `ψ` (modified in place; e.g. `ψ = randommps(ComplexF64, ophydims(h); D=D)`).
-Returns `khist`, the per-sweep local-energy history.
+Returns `info`, the [`ALSConvergenceInfo`](@ref) of the sweeps (`info.losses` is the
+per-sweep local-energy history).
 """
 function excited_state!(ψ::CanonicalMPS, h::AbstractMPO, projectors::Vector{<:CanonicalMPS}, alg::DMRG1=DMRG1())
 	bonddim(ψ) != alg.D && changebond!(ψ; D=alg.D)
 	env = ExcitedStateCache(h, ψ, projectors)
-	khist = iterative_compute!(env, alg)
-	return khist
+	info = iterative_compute!(env, alg)
+	return info
 end
 
 """
-	excited_state(h::MPOHamiltonian, alg::DMRG1, ψ0::CanonicalMPS...) -> (E, ψ)
+	excited_state(h::MPOHamiltonian, alg::DMRG1, ψ0::CanonicalMPS...) -> (E, ψ, info)
 
 The lowest excited state orthogonal to all given previous states `ψ0`, starting from a
-random initial state of bond dimension `alg.D`.
+random initial state of bond dimension `alg.D`; `info` is the
+[`ALSConvergenceInfo`](@ref) of the sweeps.
 """
 function excited_state(h::MPOHamiltonian, alg::DMRG1, ψ0::CanonicalMPS...)
 	ψ = randommps(scalartype(h), ophydims(h); D=alg.D)
-	khist = excited_state!(ψ, h, collect(ψ0), alg)
-	(alg.verbosity > 1) && println("excited DMRG1 converged (delta = $(_iterative_delta(khist)))")
-	return expectation(h, ψ), ψ
+	info = excited_state!(ψ, h, collect(ψ0), alg)
+	(alg.verbosity > 1) && println("excited DMRG1 converged (delta = $(info.itererr))")
+	return expectation(h, ψ), ψ, info
 end
 
 excited_state(h::MPOHamiltonian, ψ0::CanonicalMPS...) =

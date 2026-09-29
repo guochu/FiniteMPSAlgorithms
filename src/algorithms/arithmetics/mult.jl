@@ -300,7 +300,7 @@ function MultCache(h, x, bra)
 end
 
 """
-	mult!(out, h, x, alg::DMRG1) -> out
+	mult!(out, h, x, alg::DMRG1) -> (out, info)
 
 Single-site variational (ALS) evaluation of h·x refined in place on the user-supplied
 initial guess `out`. The ansatz is taken exactly as supplied — its bond profile is
@@ -309,13 +309,14 @@ cap when the guess is drawn automatically by `mult`). Supply a right-canonical `
 The sweeps determine direction and magnitude together at the data level (the exact
 product is never formed); the external scales of canonical operands are attached through
 the per-site `scaling` field of the output — a scaling^L power is never materialized.
+Returns `(out, info)` with `info`, the [`ALSConvergenceInfo`](@ref) of the sweeps.
 """
 function mult!(out, h, x, alg::DMRG1)
 	cache = MultCache(h, x, out)
-	iterative_compute!(cache, alg)
+	info = iterative_compute!(cache, alg)
 	s = _opscaling(h) * _opscaling(x)
 	s == 1 || setscaling!(out, s)
-	return out
+	return out, info
 end
 
 # the external per-site scale of a canonical operand lives in its `scaling` field; plain
@@ -339,7 +340,7 @@ function mult(h::AbstractMPO, x, alg::SVDCompression=DefaultMultAlg)
 end
 
 """
-	mult(h, x, alg::DMRG1) -> CanonicalMPO
+	mult(h, x, alg::DMRG1) -> (chain, info)
 
 Variational (ALS) evaluation of h·x with bond cap `alg.D`: the initial guess is drawn by
 `svdguess_mult(h, x, alg.D)` and refined by sweeps. The operands may be static `MPO`s or
@@ -347,7 +348,8 @@ canonical chains (density matrices / process tensors); the external per-site sca
 canonical operands are inherited through the output's `scaling` field (never
 materialized as a scaling^L power). The result is always a `CanonicalMPO`. To refine a
 custom ansatz with its own bond profile (ignoring `alg.D` entirely), call
-`mult!(out, h, x, alg)`.
+`mult!(out, h, x, alg)`. Returns `(chain, info)` with `info`, the
+[`ALSConvergenceInfo`](@ref) of the sweeps (the SVD route returns the chain only).
 """
 function mult(h::AbstractMPO, x, alg::DMRG1)
 	(length(h) == length(x)) || throw(ArgumentError("dimension mismatch"))
@@ -443,14 +445,14 @@ sweep!(m::MultCache, alg::DMRG2) = vcat(leftsweep!(m, alg), rightsweep!(m, alg))
 # so the guess may be smaller than the final bond
 function mult!(out, h, x, alg::DMRG2)
 	cache = MultCache(h, x, out)
-	iterative_compute!(cache, alg)
+	info = iterative_compute!(cache, alg)
 	# attach the external operand scales and fold the center tensor's norm (the total
 	# data norm — the swept chain is isometric on the other sites) into the `scaling`
 	# field; the bond spectra recorded during the sweeps initialize the Schmidt values
 	s = _opscaling(h) * _opscaling(x)
 	s == 1 || setscaling!(out, s)
 	_renormalize!(out, out[1], false)
-	return out
+	return out, info
 end
 
 function mult(h::AbstractMPO, x, alg::DMRG2)

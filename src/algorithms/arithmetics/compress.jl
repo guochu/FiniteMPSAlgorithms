@@ -70,29 +70,31 @@ function svdguess_compress(x, D::Int)
 end
 
 """
-	compress!(out, x, alg::DMRG1) -> out
+	compress!(out, x, alg::DMRG1) -> (out, info)
 
 Single-site variational (ALS) compression of `x` refined in place on the initial guess
 `out`. The sweeps determine direction and magnitude together at the data level; the
 input's external scale is attached through the per-site `scaling` field of the output
-(a scaling^L power is never materialized).
+(a scaling^L power is never materialized). Returns `(out, info)` with `info`, the
+[`ALSConvergenceInfo`](@ref) of the sweeps.
 """
 function compress!(out, x, alg::DMRG1)
 	bonddim(out) != alg.D && changebond!(out; D=alg.D)
 	cache = OverlapCache(out, x)
-	iterative_compute!(cache, alg)
+	info = iterative_compute!(cache, alg)
 	x isa Union{CanonicalMPS, CanonicalMPO} && setscaling!(out, scaling(x))
-	return out
+	return out, info
 end
 
 """
 	compress(ψ::CanonicalMPS, alg=SVDCompression(trunc=DefaultTruncation)) -> CanonicalMPS
 	compress(h::AbstractMPO, alg=...) -> CanonicalMPO
-	compress(x, alg::DMRG1) -> chain
+	compress(x, alg::DMRG1) -> (chain, info)
 
 Compress a single chain: the SVD route canonicalizes a copy of the input with a
 truncating SVD sweep; the variational (ALS) route draws a `svdguess_compress(x, D)`
-initial guess and refines it by sweeps.
+initial guess and refines it by sweeps, returning `(chain, info)` with `info`, the
+[`ALSConvergenceInfo`](@ref) of the sweeps (the SVD route returns the chain only).
 """
 function compress(ψ::CanonicalMPS, alg::SVDCompression=DefaultMultAlg)
 	return _canonicalize!(copy(ψ); alg=Orthogonalize(SVD(), alg.trunc, false))[1]
@@ -107,8 +109,7 @@ compress(h::MPOHamiltonian, alg::SVDCompression=DefaultMultAlg) =
 
 function compress(x, alg::DMRG1)
 	out = svdguess_compress(x, alg.D)
-	compress!(out, x, alg)
-	return out
+	return compress!(out, x, alg)
 end
 compress(h::MPOHamiltonian, alg::DMRG1) =
         compress(MPO(tompotensors(h)), alg)
@@ -149,16 +150,15 @@ sweep!(c::OverlapCache, alg::DMRG2) = vcat(leftsweep!(c, alg), rightsweep!(c, al
 
 function compress!(out, x, alg::DMRG2)
 	cache = OverlapCache(out, x)
-	iterative_compute!(cache, alg)
+	info = iterative_compute!(cache, alg)
 	# attach the external operand scale and fold the center norm into `scaling` (see `mult!`)
 	x isa Union{CanonicalMPS, CanonicalMPO} && setscaling!(out, scaling(x))
 	_renormalize!(out, out[1], false)
-	return out
+	return out, info
 end
 
 function compress(x, alg::DMRG2)
 	out = svdguess_compress(x, _guess_bond(alg.trunc))
-	compress!(out, x, alg)
-	return out
+	return compress!(out, x, alg)
 end
 compress(h::MPOHamiltonian, alg::DMRG2) = compress(MPO(tompotensors(h)), alg)

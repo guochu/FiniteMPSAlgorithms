@@ -84,6 +84,7 @@ SVDCompression
 DMRG1
 DefaultMultAlg
 Defaults
+ALSConvergenceInfo
 iterative_compute!
 leftsweep!
 rightsweep!

@@ -15,9 +15,17 @@
 	xs = [randommps(ComplexF64, dxs; D=4) for _ in 1:N]
 	ys = [Wtrue * x for x in xs]
 
-	W, traj = seq2seq(xs, ys, alg)
+	W, info = seq2seq(xs, ys, alg)
 	@test ophydims(W) == dys
 	@test iphydims(W) == dxs
+	@test info isa ALSConvergenceInfo
+	@test info.niter <= alg.maxiter
+	@test info.residual == info.losses[end][end]   # the loss IS the data residual
+	# per-sweep vectors of per-site losses (2L per sweep), all in processing-time
+	# order (left sweep sites 1:L, right sweep sites L:-1:1); ALS on the data objective
+	# is non-increasing throughout
+	traj = info.losses
+	@test traj isa Vector{Vector{Float64}}
 	# phydim is only defined for square MPOTensors; the seq2seq MPO itself is rectangular
 	Wr = MPO([randn(ComplexF64, 1, 3, 1, 2)])
 	@test ophydim(Wr[1]) == 3 && iphydim(Wr[1]) == 2
@@ -30,7 +38,6 @@
 	# traj: per-sweep vectors of per-site losses (2L per sweep), all in processing-time
 	# order (left sweep sites 1:L, right sweep sites L:-1:1); ALS on the data objective
 	# is non-increasing throughout
-	@test traj isa Vector{Vector{Float64}}
 	@test all(==(2L), length.(traj))
 	@test all(all(≤(1e-9), diff(kv[1:L])) for kv in traj)
 	@test all(all(≤(1e-9), diff(kv[L+1:2L])) for kv in traj)
@@ -64,7 +71,9 @@ end
 	# (small random entries keep the ALS sweeps out of local minima)
 	Wfit = MPO([0.1 .* randn(ComplexF64, prof[i], dys[i], prof[i+1], dxs[i]) for i in 1:L])
 	Wbefore = [copy(A) for A in Wfit.data]
-	traj = seq2seq!(Wfit, xs, ys, alg)
+	Wfit, sinfo = seq2seq!(Wfit, xs, ys, alg)
+	traj = sinfo.losses
+	@test sinfo isa ALSConvergenceInfo && sinfo.residual == traj[end][end]
 	@test traj isa Vector{Vector{Float64}}
 	@test all(==(2L), length.(traj))
 	# the site tensors were updated in place

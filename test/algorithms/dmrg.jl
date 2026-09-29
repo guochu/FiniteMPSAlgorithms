@@ -7,13 +7,15 @@
 	E_exact = eigmin(Hermitian(Hd))
 
 	# DMRG1, random initial state (bond dimension D)
-	E, ψ = ground_state(H, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32))
+	E, ψ, info = ground_state(H, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32))
 	@test real(E) ≈ E_exact atol = 1e-8
 	@test norm(ψ) ≈ 1 atol = 1e-8
+	@test info isa ALSConvergenceInfo
+	@test info.residual === nothing   # the loss is the energy up to a constant
 
 	# DMRG1 from a caller-provided initial state
 	ψ2 = randommps(ComplexF64, fill(2, L); D=8)
-	khist = ground_state!(ψ2, H, DMRG1(maxiter=50, tol=1e-12, verbosity=0))
+	khist = ground_state!(ψ2, H, DMRG1(maxiter=50, tol=1e-12, verbosity=0)).losses
 	@test real(expectation(H, ψ2)) ≈ E_exact atol = 1e-8
 	# per-sweep energies decrease towards E_exact
 	@test abs(last(last(khist)) - E_exact) < abs(first(last(khist)) - E_exact) + 1e-12
@@ -34,9 +36,9 @@
 	Hd6 = dense_model(p6)
 	e = eigen(Hermitian(Hd6))
 	E0, ψ0d = e.values[1], e.vectors[:, 1]
-	E0gs, ψ0 = ground_state(H6, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32))
+	E0gs, ψ0, _ = ground_state(H6, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32))
 	E1_exact = e.values[2]   # the first excited level (orthogonal to the exact GS)
-	E1, ψ1 = excited_state(H6, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32), ψ0)
+	E1, ψ1, _ = excited_state(H6, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32), ψ0)
 	@test abs(real(E1) - E1_exact) < 1e-6
         @test abs(dot(todense(ψ1), todense(ψ0))) < 1e-6
 end
@@ -49,7 +51,7 @@ end
 	e = eigen(Hermitian(Hd6))
 
 	# excited_state! (in-place variant, caller-provided random initial state)
-	E0gs, ψ0 = ground_state(H6, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32))
+	E0gs, ψ0, _ = ground_state(H6, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32))
 	ψex = randommps(ComplexF64, fill(2, 6); D=8)
 	khist = excited_state!(ψex, H6, [ψ0], DMRG1(maxiter=50, tol=1e-12, verbosity=0))
 	E1_exact = e.values[2]
@@ -122,12 +124,12 @@ end
 	E_exact = eigmin(Hermitian(Hd))
 
 	# DMRG2, random initial state (dimension truncation)
-	E2, ψ2 = ground_state(H, DMRG2(maxiter=50, tol=1e-12, verbosity=0, trunc=truncdim(D=32)))
+	E2, ψ2, _ = ground_state(H, DMRG2(maxiter=50, tol=1e-12, verbosity=0, trunc=truncdim(D=32)))
 	@test real(E2) ≈ E_exact atol = 1e-8
 	@test norm(ψ2) ≈ 1 atol = 1e-8
 
 	# other truncation schemes work as the truncation policy
-	E2n, ψ2n = ground_state(H, DMRG2(maxiter=50, tol=1e-12, verbosity=0, trunc=NoTruncation()))
+	E2n, ψ2n, _ = ground_state(H, DMRG2(maxiter=50, tol=1e-12, verbosity=0, trunc=NoTruncation()))
 	@test real(E2n) ≈ E_exact atol = 1e-8
 
 	# DMRG2 from a caller-provided initial state (alg.trunc only affects the sweeps)
@@ -136,7 +138,7 @@ end
 	@test real(expectation(H, ψ0)) ≈ E_exact atol = 1e-8
 
 	# agreement with DMRG1 on the same model
-	E1, _ = ground_state(H, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32))
+	E1, _, _ = ground_state(H, DMRG1(maxiter=50, tol=1e-12, verbosity=0, D=32))
 	@test real(E2) ≈ real(E1) atol = 1e-8
 
 	# the right sweep keeps the SVD singular values as the bond Schmidt spectra and

@@ -61,8 +61,8 @@
 	@test abs(expectation(h, ψp) - dot(todense(ψp), Hd * todense(ψp))) < 1e-10
 
 	Eed = eigmin(Hermitian(Hd))
-	E1, _ = ground_state(h, DMRG1(maxiter=100, verbosity=0))
-	E2, _ = ground_state(h, DMRG2(maxiter=40, verbosity=0))
+	E1, _, _ = ground_state(h, DMRG1(maxiter=100, verbosity=0))
+	E2, _, _ = ground_state(h, DMRG2(maxiter=40, verbosity=0))
 	@test isapprox(real(E1), Eed; rtol=1e-5)
 	@test isapprox(real(E2), Eed; rtol=1e-6)
 

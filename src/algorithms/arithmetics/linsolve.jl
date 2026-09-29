@@ -220,22 +220,24 @@ function LinsolveCache(A, y, x)
 end
 
 """
-	linsolve!(x, A, y, alg::ALSLinSolve = ALSLinSolve()) -> x
+	linsolve!(x, A, y, alg::ALSLinSolve = ALSLinSolve()) -> (x, info)
 
 Single-site variational (ALS) solve of `A·x ≈ y` refined in place on the initial guess
 `x`; iterated by the generic `iterative_compute!` on the exact global residual². The
 sweeps solve the raw-data problem, and the solution carries the per-site scale
 `scaling(y)/scaling(A)` — the represented equation `A·x = y` holds with the operands'
-external scales (a scaling^L power is never materialized).
+external scales (a scaling^L power is never materialized). Returns `(x, info)` with
+`info`, the [`ALSConvergenceInfo`](@ref) of the sweeps; since the loss *is* the
+(residual-norm-squared) residual here, `info.residual` holds the final loss.
 """
 function linsolve!(x, A, y, alg::ALSLinSolve = ALSLinSolve())
 	bonddim(x) != alg.D && changebond!(x; D=alg.D)
 	m = LinsolveCache(A, y, x)
-	iterative_compute!(m, alg)
+	info = iterative_compute!(m, alg; residual=true)
 	# the sweeps solve the raw-data problem A_data·x = y_data; the represented equation
 	# (s_A^L·A_data)·(s_x^L·x) = s_y^L·y_data holds iff s_x = scaling(y)/scaling(A)
 	setscaling!(m.ket, scaling(y) / _opscaling(A))
-	return x
+	return x, info
 end
 
 # ---------- exported interface ----------
@@ -248,12 +250,13 @@ function _validate_linsolve(A::AbstractMPO, y::CanonicalMPS)
 end
 
 """
-	linsolve(A, y, alg=ALSLinSolve()) -> x
+	linsolve(A, y, alg=ALSLinSolve()) -> (x, info)
 
 Solve `A·x ≈ y` variationally: find a finite-bond MPS `x` of bond dimension `alg.D`
 minimizing the residual norm `||A·x - y||` by single-site ALS sweeps (normal equation
 A†A x = A† y). The initial guess is a random state. Block-sparse (Hamiltonian) inputs
-are expanded to the dense MPO layer.
+are expanded to the dense MPO layer. Returns `(x, info)` with `info`, the
+[`ALSConvergenceInfo`](@ref) of the sweeps (`info.residual` = final loss = ‖A·x − y‖²).
 """
 function linsolve(A::AbstractMPO, y::CanonicalMPS, alg::ALSLinSolve = ALSLinSolve())
 	_validate_linsolve(A, y)
@@ -359,13 +362,13 @@ sweep!(m::LinsolveCache, alg::ALSLinSolve2) = vcat(leftsweep!(m, alg), rightswee
 
 function linsolve!(x, A, y, alg::ALSLinSolve2)
 	m = LinsolveCache(A, y, x)
-	iterative_compute!(m, alg)
+	info = iterative_compute!(m, alg; residual=true)
 	# the sweeps solve the raw-data problem A_data·x = y_data; the represented equation
 	# (s_A^L·A_data)·(s_x^L·x) = s_y^L·y_data holds iff s_x = scaling(y)/scaling(A):
 	# attach that per-site scale and fold the center norm into it (see `mult!`)
 	setscaling!(m.ket, scaling(y) / _opscaling(A))
 	_renormalize!(m.ket, m.ket[1], false)
-	return x
+	return x, info
 end
 
 function linsolve(A::AbstractMPO, y::CanonicalMPS, alg::ALSLinSolve2)
