@@ -1,5 +1,18 @@
 # Interface changes
 
+## Fixed: `randommpo` used the MPS bond bound — the operator chain grows by ds² per site
+
+`randommpo` drew its site tensors on the `max_bonddims` profile (the MPS bound: the bond
+grows by one physical dimension per site), which is not the operator-chain bound. An MPO
+site carries an in and an out physical leg, so the bond space grows by `ds²` per site,
+bounded at every cut by `min(D, ∏_{j≤i} ds[j]², ∏_{j>i} ds[j]²)`. The old profile
+understated the achievable bonds wherever the `ds²` growth matters — e.g. L=6, d=2, D=64
+produced a bond-8 middle cut (capped by 2³) where the operator space allows 64 — and
+over-parametrized the right chain end (rank-deficient tensors later squeezed by
+`canonicalize!`). `randommpo` now draws on the true profile, bounded from both chain
+ends (so no boundary special-casing is needed); random data achieves it almost surely
+(`rank(todense)` full), `randommps` is unchanged, and the profiles are pinned by tests.
+
 ## Changed: every iterative entry point returns an `ALSConvergenceInfo` as its last value
 
 `iterative_compute!(cache, alg; residual=false, kwargs...)` now returns an exported

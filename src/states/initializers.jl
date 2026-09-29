@@ -64,18 +64,29 @@ randommps(::Type{T}, L::Int; d::Int=2, kwargs...) where {T<:Number} = randommps(
 """
 	randommpo(::Type{T}, ds; D=Defaults.D, normalize=true) -> CanonicalMPO
 
-Random canonical MPO-form state (bond-dimension profile from `max_bonddims`), brought
-to canonical form. With `normalize = true` the state is normalized; otherwise the
-external scale stays in the `scaling` field.
+Random canonical MPO-form state (bond-dimension profile from the operator-chain
+bound `b[i] = min(D, ∏_{j≤i} ds[j]², ∏_{j>i} ds[j]²)` — the chain carries an in and an
+out physical leg per site, so the bond space grows by `ds²` per site, capped by `D` and
+by the state-space bounds from both chain ends), brought to canonical form. With
+`normalize = true` the state is normalized; otherwise the external scale stays in the
+`scaling` field.
 """
 function randommpo(::Type{T}, ds::AbstractVector{Int}; D::Int=Defaults.D, normalize::Bool=true) where {T<:Number}
 	L = length(ds)
-	prof = max_bonddims(ds, D)
+	# the operator-chain bond bound: grow by ds² per site from the left, capped by D
+	# and by the right-hand state-space bound at every cut
+	grow = ones(Int, L + 1)
+	for i in 1:L
+		grow[i+1] = min(D, grow[i] * ds[i]^2)
+	end
+	shrink = ones(Int, L + 1)
+	for i in L:-1:1
+		shrink[i] = min(D, shrink[i+1] * ds[i]^2)
+	end
+	prof = min.(grow, shrink)   # prof[1] = prof[L+1] = 1 (the chain boundaries)
 	data = Vector{Array{T,4}}(undef, L)
 	for i in 1:L
-		dl = i == 1 ? 1 : prof[i]
-		dr = i == L ? 1 : prof[i+1]
-		data[i] = randn(T, dl, ds[i], dr, ds[i])
+		data[i] = randn(T, prof[i], ds[i], prof[i+1], ds[i])
 	end
 	ρ = CanonicalMPO(data)
 	canonicalize!(ρ)
