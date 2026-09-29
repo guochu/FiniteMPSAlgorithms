@@ -32,9 +32,21 @@ end
 	LinearAlgebra.norm(h::AbstractMPO)
 
 Hilbert-Schmidt norm `sqrt(tr(h†·h))` of the operator chain, including `scaling`
-of `CanonicalMPO` inputs (applied per site during the contraction).
+of `CanonicalMPO` inputs (applied per site during the contraction — no `scaling^L`
+power is materialized). Mirrors the `CanonicalMPS` definition: the traced `⟨h|h⟩`
+is real up to roundoff and is clamped at zero before the square root, so a vanishing
+chain (or near-cancelling data whose `⟨h|h⟩` rounds to a tiny negative real part)
+returns zero instead of throwing a `DomainError`.
 """
-LinearAlgebra.norm(h::AbstractMPO) = sqrt(real(dot(h, h)))
+function LinearAlgebra.norm(h::AbstractMPO)
+	s2 = h isa CanonicalMPO ? scaling(h)^2 : 1.0
+	hold = l_LL(h, h)
+	for i in eachindex(h)
+		hold = s2 * _updateleft(hold, h[i], h[i])
+	end
+	n2 = real(tr(hold))
+	return sqrt(max(n2, zero(n2)))
+end
 
 """
 	tr(h::AbstractMPO)

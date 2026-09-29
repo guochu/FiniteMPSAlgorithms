@@ -89,6 +89,28 @@ end
 	@test distance(hAph, hB) > 1e-3
 end
 
+@testset "operator norm/dot stability" begin
+	Random.seed!(48)
+	L = 4
+	ds = fill(2, L)
+	hA = randommpo(ComplexF64, ds; D=4)
+	# the Hilbert-Schmidt norm vs the dense matrix (scaling included, applied per site)
+	@test norm(hA) ≈ norm(todense(hA)) rtol = 1e-12
+	dA = todense(hA)
+	@test dot(hA, hA) ≈ tr(dA' * dA) rtol = 1e-12
+	# vanishing data: ⟨h|h⟩ = 0 exactly, norm returns 0 (no DomainError from sqrt)
+	h0 = MPO([zeros(ComplexF64, 1, ds[i], 1, ds[i]) for i in 1:L])
+	@test norm(h0) == 0.0
+	# subnormal external scale: the per-site s² underflows ⟨h|h⟩ to (roundoff of) zero —
+	# the real part can round to a tiny negative, the norm clamps it to 0
+	ρ = randommpo(ComplexF64, ds; D=4)
+	setscaling!(ρ, 1e-170)
+	@test norm(ρ) == 0.0
+	# moderate scaling: norm = scaling^L · norm(data at scaling 1)
+	setscaling!(ρ, 0.01)
+	@test norm(ρ) ≈ 0.01^L rtol = 1e-12
+end
+
 @testset "todense/tompo roundtrip" begin
 	Random.seed!(47)
 	L = 4

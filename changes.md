@@ -1,5 +1,15 @@
 # Interface changes
 
+## Fixed: `norm` of an operator chain clamps `⟨h|h⟩` at zero
+
+`norm(h::AbstractMPO) = sqrt(real(dot(h, h)))` threw a `DomainError` whenever the traced
+value rounded to a tiny negative real part — vanishing chains and near-cancelling data
+are realistic cases (e.g. a subnormal external `scaling`, where the per-site `s²`
+underflows the transfer). `norm` now mirrors the `CanonicalMPS` definition directly:
+the per-site `s²` scaling transfer followed by `real(tr(·))` and a clamp at zero before
+the square root (so a vanishing chain returns `0.0`). `dot` was already the
+`CanonicalMPS`-style per-site-scaling contraction and is unchanged.
+
 ## Fixed: `randommpo` used the MPS bond bound — the operator chain grows by ds² per site
 
 `randommpo` drew its site tensors on the `max_bonddims` profile (the MPS bound: the bond
