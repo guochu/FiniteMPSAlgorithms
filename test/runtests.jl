@@ -5,7 +5,7 @@ using Random
 using TensorOperations
 using FiniteMPSAlgorithms
 # disambiguate from LinearAlgebra's SVD/QR/LQ factorization objects
-using FiniteMPSAlgorithms: SVD, QR, QRpos, LQ, LQpos, SDD, Polar, l_LL, r_RR
+using FiniteMPSAlgorithms: SVD, QR, QRpos, LQ, LQpos, SDD, Polar, max_bonddims, l_LL, r_RR
 
 include("helpers.jl")
 

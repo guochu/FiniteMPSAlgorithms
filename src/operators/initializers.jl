@@ -68,15 +68,8 @@ function _changebond!(h::AbstractMPO; D::Int=Defaults.D, noise::Real=1e-10)
 	L = length(h)
 	ds_out = ophydims(h)
 	ds_in = iphydims(h)
-	Dl = ones(Int, L + 1)
-	for i in 1:L
-		Dl[i+1] = min(D, Dl[i] * ds_out[i] * ds_in[i])
-	end
-	Dr = ones(Int, L + 1)
-	for i in L:-1:1
-		Dr[i] = min(D, Dr[i+1] * ds_out[i] * ds_in[i])
-	end
-	b = min.(Dl, Dr)
+	# the target profile respects both operator-chain state-space bounds
+	b = max_bonddims(ds_out .* ds_in, D)
 	newdata = Vector{Array{T,4}}(undef, L)
 	for i in 1:L
 		dl = i == 1 ? 1 : b[i]

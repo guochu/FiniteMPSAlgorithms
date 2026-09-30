@@ -1,5 +1,17 @@
 # Interface changes
 
+## Fixed: `max_bonddims` respects the state-space bound from both chain ends
+
+`max_bonddims(ds, D)` — the profile behind `randommps`, the random seq2seq MPO and the
+`svdguess_mult` bond cap — only grew the bond dimension from the left, so chains whose
+`D` exceeds the state space over-parametrized the draw (L=6, d=2, D=64 drew bonds up to
+32 where the chain allows 8) and relied on a later `canonicalize!` to trim the padded
+directions. The profile is now the true bound
+`min(D, ∏_{j≤i} ds[j], ∏_{j>i} ds[j])` at every cut, with unit boundary bonds;
+`randommpo` and both `changebond!` variants reuse it as the single source of truth
+(their duplicated profile loops are gone). The `seq2seq` tests recalibrate with the new
+draw (`maxiter` 25 → 50; the thresholds are unchanged). Full suite: 961/961.
+
 ## New: `Defaults.alg_eigsolve` / `alg_expsolve` / `alg_linsolve` / `alg_orth` / `alg_trunc` / `alg_orth_trunc`, and per-algorithm solver fields
 
 The default solvers and factorizations move into [`Defaults`](@ref) as *functions*

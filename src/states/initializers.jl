@@ -3,13 +3,19 @@
 """
 	max_bonddims(ds, D)
 
-The maximal allowed bond-dimension profile for physical dimensions `ds` under the cap `D`.
+The maximal bond-dimension profile for physical dimensions `ds` under the cap `D`: at
+every cut the smaller of the state-space bounds reached from the two chain ends
+(`min(∏_{j≤i} ds[j], ∏_{j>i} ds[j])`, capped by `D`); the chain boundary bonds are 1.
 """
 function max_bonddims(ds::AbstractVector{Int}, D::Int)
 	L = length(ds)
 	prof = ones(Int, L + 1)
 	for i in 1:L
-		prof[i+1] = min(D, prof[i] * ds[i])
+		prof[i + 1] = min(D, prof[i] * ds[i])
+	end
+	prof[L + 1] = 1              # the empty right product
+	for i in L:-1:1
+		prof[i] = min(prof[i], D, prof[i + 1] * ds[i])
 	end
 	return prof
 end
@@ -73,17 +79,9 @@ by the state-space bounds from both chain ends), brought to canonical form. With
 """
 function randommpo(::Type{T}, ds::AbstractVector{Int}; D::Int=Defaults.D, normalize::Bool=true) where {T<:Number}
 	L = length(ds)
-	# the operator-chain bond bound: grow by ds² per site from the left, capped by D
-	# and by the right-hand state-space bound at every cut
-	grow = ones(Int, L + 1)
-	for i in 1:L
-		grow[i+1] = min(D, grow[i] * ds[i]^2)
-	end
-	shrink = ones(Int, L + 1)
-	for i in L:-1:1
-		shrink[i] = min(D, shrink[i+1] * ds[i]^2)
-	end
-	prof = min.(grow, shrink)   # prof[1] = prof[L+1] = 1 (the chain boundaries)
+	# the operator-chain bond bound: an in and an out physical leg per site, so the
+	# bond space grows by ds² per site (both state-space bounds from the chain ends)
+	prof = max_bonddims(ds .^ 2, D)
 	data = Vector{Array{T,4}}(undef, L)
 	for i in 1:L
 		data[i] = randn(T, prof[i], ds[i], prof[i+1], ds[i])
@@ -148,15 +146,8 @@ function changebond!(ψ::CanonicalMPS; D::Int=Defaults.D, noise::Real=1e-10)
 	T = scalartype(ψ)
 	ds = phydims(ψ)
 	L = length(ψ)
-	Dl = ones(Int, L + 1)
-	for i in 1:L
-		Dl[i+1] = min(D, Dl[i] * ds[i])
-	end
-	Dr = ones(Int, L + 1)
-	for i in L:-1:1
-		Dr[i] = min(D, Dr[i+1] * ds[i])
-	end
-	b = min.(Dl, Dr)
+	# the target profile respects both state-space bounds of the chain
+	b = max_bonddims(ds, D)
 	newdata = Vector{Array{T,3}}(undef, L)
 	for i in 1:L
 		dl = i == 1 ? 1 : b[i]

@@ -28,6 +28,7 @@
 	@test norm(ρs2) ≈ 1 atol = 1e-10
 	# bond profiles: randommps grows by d per site, randommpo by d² (an in and an out
 	# physical leg per site) — both capped by D and by the state-space bound at each cut
+	@test max_bonddims(fill(2, 6), 64) == [1, 2, 4, 8, 4, 2, 1]
 	@test bonddims(randommps(ComplexF64, fill(2, 6); D=64)) == [2, 4, 8, 4, 2]
 	@test bonddims(randommpo(ComplexF64, fill(2, 6); D=64)) == [4, 16, 64, 16, 4]
 	@test bonddims(randommpo(ComplexF64, [2, 3, 4]; D=100)) == [4, 16]

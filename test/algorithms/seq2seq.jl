@@ -6,8 +6,9 @@
 	dys = fill(3, L)                       # rectangular map dx → dy
 	# D = 2 matches the bond profile of the ground-truth MPO exactly (tight
 	# parametrization -> fast ALS convergence); α tiny so the ridge only
-	# conditions the local solves without biasing the fit
-	alg = Seq2Seq(maxiter=25, tol=1e-12, verbosity=0, D=2, α=1e-8)
+	# conditions the local solves without biasing the fit; maxiter generous: the ALS
+	# convergence tail on random data is linear, the thresholds below need the sweeps
+	alg = Seq2Seq(maxiter=50, tol=1e-12, verbosity=0, D=2, α=1e-8)
 
 	# ground truth: random bond-2 MPO mapping dx → dy; targets y = Wtrue·x
 	prof = [1, 2, 2, 2, 2, 2, 1]
@@ -45,7 +46,7 @@
 	@test minimum(traj[end]) < 1e-8
 
 	# default-algorithm form
-	Wk, _ = seq2seq(xs, ys, Seq2Seq(maxiter=25, tol=1e-12, verbosity=0, D=2, α=1e-8))
+	Wk, _ = seq2seq(xs, ys, Seq2Seq(maxiter=50, tol=1e-12, verbosity=0, D=2, α=1e-8))
 	@test distance(Wk * xs[1], ys[1]) / norm(ys[1]) < 1e-6
 
 	# dimension mismatch: a y with wrong physical dimensions
