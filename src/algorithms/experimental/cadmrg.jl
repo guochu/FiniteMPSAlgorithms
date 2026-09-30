@@ -13,17 +13,23 @@
 # ---------- algorithm type ----------
 
 """
-	CADMRG(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=DefaultTruncation, verbosity=0)
+	CADMRG(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=Defaults.alg_trunc(),
+	      alg_eigsolve=Defaults.alg_eigsolve(), alg_orth=Defaults.alg_orth(), verbosity=0)
 
 Parameters of the Clifford-augmented two-site DMRG ground-state search. `trunc` is the
 truncation scheme applied to the SVD after each two-site update (its bond cap bounds
-the bond dimension).
+the bond dimension). `alg_eigsolve` (a `KrylovKit` algorithm object, see
+[`Defaults.alg_eigsolve`](@ref)) drives the local effective-Hamiltonian `eigsolve`;
+`alg_orth` ([`Defaults.alg_orth`](@ref)) is accepted for interface uniformity — the
+re-splits are truncating SVDs under `alg.trunc` and carry the gauge themselves.
 """
-@kwdef struct CADMRG{TR<:TruncationScheme} <: TwoSiteUpdate
-	maxiter::Int = Defaults.maxiter
-	tol::Float64 = Defaults.tol
-	trunc::TR = DefaultTruncation
-	verbosity::Int = 0
+@kwdef struct CADMRG{TR<:TruncationScheme,E,O} <: TwoSiteUpdate
+       maxiter::Int = Defaults.maxiter
+       tol::Float64 = Defaults.tol
+       trunc::TR = Defaults.alg_trunc()
+       alg_eigsolve::E = Defaults.alg_eigsolve()
+       alg_orth::O = Defaults.alg_orth()
+       verbosity::Int = 0
 end
 
 # ---------- two-qubit Clifford group ----------
@@ -254,9 +260,7 @@ function _cadmrg_local_update!(env::CADMRGCache, s::Integer, alg::CADMRG; move_r
 	# initial guess: the two-site tensor formed from the current site tensors
 	@tensor guess[aL, p1, p2, aR] := env.ket[s][aL, p1, b] * env.ket[s+1][b, p2, aR]
 
-	vals, vecs, info = eigsolve(y -> ac2_prime(y, heff), guess, 1, :SR;
-								ishermitian=true, tol=max(alg.tol, 1e-12),
-								krylovdim=30, maxiter=200, eager=true)
+	vals, vecs, info = eigsolve(y -> ac2_prime(y, heff), guess, 1, :SR, alg.alg_eigsolve)
 	Ψ = vecs[1]
 	E = real(vals[1])
 

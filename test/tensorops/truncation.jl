@@ -108,7 +108,7 @@ end
 @testset "default truncation definition" begin
 	# pin the exported default: a bond-capped relative cutoff with `Defaults.D`,
 	# gauging precision `Defaults.tolgauge`, and at least one singular value kept
-	dt = FiniteMPSAlgorithms.DefaultTruncation
+	dt = Defaults.alg_trunc()
 	@test dt isa TruncateDimCutoff
 	@test dt.D == Defaults.D
 	@test dt.ϵ == Defaults.tolgauge

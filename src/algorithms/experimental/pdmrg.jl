@@ -24,18 +24,26 @@
 # ---------- algorithm type ----------
 
 """
-	PDMRG(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=DefaultTruncation, R=20, verbosity=0)
+	PDMRG(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=Defaults.alg_trunc(), R=20,
+	      alg_eigsolve=Defaults.alg_eigsolve(), alg_orth=Defaults.alg_orth(), verbosity=0)
 
 Parameters of the positive DMRG thermal-state search. `trunc` is the truncation scheme
 applied to the center-movement SVDs (its bond cap bounds the MPS bond dimension of the
 isometric part of the PMPA) and `R` the rank of the orthogonal center (the maximal
-Schmidt number of the represented mixed state).
+Schmidt number of the represented mixed state). `alg_eigsolve` (a `KrylovKit` algorithm
+object, see [`Defaults.alg_eigsolve`](@ref)) drives the Krylov local thermalization —
+its Krylov dimension is overridden with the problem-dependent `2·min(R, dim)`, every
+other parameter is kept. `alg_orth` ([`Defaults.alg_orth`](@ref)) is accepted for
+interface uniformity; the center-movement re-splits are truncating SVDs under
+`alg.trunc` and carry the gauge themselves.
 """
-@kwdef struct PDMRG{TR<:TruncationScheme} <: TwoSiteUpdate
+@kwdef struct PDMRG{TR<:TruncationScheme,E,O} <: TwoSiteUpdate
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
-	trunc::TR = DefaultTruncation
+	trunc::TR = Defaults.alg_trunc()
 	R::Int = 20
+	alg_eigsolve::E = Defaults.alg_eigsolve()
+	alg_orth::O = Defaults.alg_orth()
 	verbosity::Int = 0
 end
 
@@ -190,6 +198,15 @@ function _thermalize_dense(W, hl, hr, dims::NTuple{3,Int}, β::Real, alg::PDMRG)
 	return M, _local_free_energy(W, hl, hr, M, kept, β)
 end
 
+# rebuild a stored Krylov solver with a different Krylov dimension, keeping every other
+# parameter (the PDMRG local problem's Krylov dimension scales with the center rank)
+_with_krylovdim(alg::KrylovKit.Lanczos, krylovdim::Int) =
+	KrylovKit.Lanczos(orth = alg.orth, krylovdim = krylovdim, maxiter = alg.maxiter,
+					  tol = alg.tol, eager = alg.eager, verbosity = alg.verbosity)
+_with_krylovdim(alg::KrylovKit.Arnoldi, krylovdim::Int) =
+	KrylovKit.Arnoldi(orth = alg.orth, krylovdim = krylovdim, maxiter = alg.maxiter,
+					  tol = alg.tol, eager = alg.eager, verbosity = alg.verbosity)
+
 # Krylov path: at low temperature the thermal state is dominated by the lowest eigenstates
 # of H_eff, so only the alg.R lowest ones are needed
 function _thermalize_krylov(W, hl, hr, dims::NTuple{3,Int}, β::Real, alg::PDMRG, x0)
@@ -201,8 +218,10 @@ function _thermalize_krylov(W, hl, hr, dims::NTuple{3,Int}, β::Real, alg::PDMRG
 	# still returning `n` (unconverged) ones — which silently corrupts the rank-`alg.R`
 	# center. Mix in a small random component to keep the Krylov space non-degenerate.
 	y0 = x0 .+ (1e-2 * norm(x0)) .* randn(eltype(x0), size(x0))
-	vals, vecs, info = eigsolve(y -> ac_prime(y, W, hl, hr), y0, n, :SR;
-								ishermitian=true, tol=1e-10, krylovdim=2n+2)
+	# the Krylov dimension scales with the requested rank: rebuild the stored solver with
+	# `2n+2`, keeping every other parameter
+	eig = _with_krylovdim(alg.alg_eigsolve, 2n + 2)
+	vals, vecs, info = eigsolve(y -> ac_prime(y, W, hl, hr), y0, n, :SR, eig)
 	# Boltzmann weights of the kept lowest eigenstates
 	eigvals = exp.(-β .* real(vals))
 	eigvals ./= sum(eigvals)

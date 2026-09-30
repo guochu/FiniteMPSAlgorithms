@@ -32,8 +32,11 @@ Configuration of single-site TDVP. `stepsize` is the complex time increment itse
 - real-time evolution by `τ`: `stepsize = -im*τ`, i.e. `exp(-i·τ·H)`;
 - imaginary-time evolution (cooling) by `τ`: `stepsize = -τ`, i.e. `exp(-τ·H)`.
 
-`ishermitian` selects the KrylovKit exponentiate driver (Lanczos for hermitian, Arnoldi
-otherwise).
+`ishermitian` selects the default local exponential solver (Lanczos for hermitian,
+Arnoldi otherwise); a fully configured `KrylovKit` algorithm object can be passed as
+`alg_expsolve` (see [`Defaults.alg_expsolve`](@ref)), which then takes precedence. The
+QR/LQ gauge moves of the sweeps take the tensor factorization `alg_orth`
+([`Defaults.alg_orth`](@ref); the right-to-left moves use the adjoint).
 
 # Accuracy, and initial states of too low rank
 
@@ -56,19 +59,24 @@ The guess must also be canonical at all (`iscanonical`), since the environments 
 of an isometric chain; `vectorize(infinite_temperature_state(...))` is not (its site
 tensors are the plain identities) and needs a `rightorth!` (SVD, `NoTruncation`) first.
 """
-@kwdef struct TDVP1{S<:Number} <: MPSAlgorithm
+@kwdef struct TDVP1{S<:Number,E,O} <: MPSAlgorithm
 	stepsize::S
 	D::Int = Defaults.D
 	ishermitian::Bool = true
+	alg_expsolve::E = Defaults.alg_expsolve(ishermitian = ishermitian)
+	alg_orth::O = Defaults.alg_orth()
 	verbosity::Int = Defaults.verbosity
 end
 
 """
-	TDVP2(; stepsize, trunc=DefaultTruncation, ishermitian=true, verbosity=Defaults.verbosity)
+	TDVP2(; stepsize, trunc=Defaults.alg_trunc(), ishermitian=true, verbosity=Defaults.verbosity)
 
 Configuration of two-site TDVP. `stepsize` carries the same convention as
 [`TDVP1`](@ref) — the complex time increment itself, `-τ` for cooling by `τ` and `-im*τ`
-for real time — and one `sweep!` advances the state by it.
+for real time — and one `sweep!` advances the state by it. The local exponentials are
+configured by `alg_expsolve` (a `KrylovKit` algorithm object,
+[`Defaults.alg_expsolve`](@ref); `ishermitian` only selects its default) and the
+re-split is a truncating SVD under `trunc::TruncationScheme`.
 
 Where `TDVP1` freezes the bond dimensions of the guess, `TDVP2` adapts them: the site pair
 is evolved jointly against the two-site effective generator and re-split by a *truncating*
@@ -115,10 +123,12 @@ next-nearest-neighbour test model at L = 4 a β = 1 cooling comes out at 2.3e-3,
 5.7e-4 (density-matrix error) for 20, 40 and 80 sweeps, the same numbers MPSKit's `TDVP2`
 produces. Once the profile has grown, only the truncation under `trunc` remains.
 """
-@kwdef struct TDVP2{S<:Number, TR<:TruncationScheme} <: MPSAlgorithm
+@kwdef struct TDVP2{S<:Number, TR<:TruncationScheme, E, O} <: MPSAlgorithm
 	stepsize::S
-	trunc::TR = DefaultTruncation
+	trunc::TR = Defaults.alg_trunc()
 	ishermitian::Bool = true
+	alg_expsolve::E = Defaults.alg_expsolve(ishermitian = ishermitian)
+	alg_orth::O = Defaults.alg_orth()
 	verbosity::Int = Defaults.verbosity
 end
 
@@ -326,8 +336,7 @@ end
 
 # one Krylov exponential of a local generator (TDVP1 single-site or TDVP2 pair)
 function _tdvp_exponentiate(f, t, x, alg::Union{TDVP1,TDVP2})
-	y, _ = exponentiate(f, t, x; ishermitian=alg.ishermitian,
-						tol=Defaults.tol, krylovdim=25, maxiter=100)
+	y, _ = exponentiate(f, t, x, alg.alg_expsolve)
 	return y
 end
 
@@ -345,7 +354,7 @@ function _tdvp_leftsweep!(env, alg::TDVP1)
 	t = alg.stepsize / 2
 	for s in 1:L-1
 		st[s] = _tdvp_exponentiate(_tdvp_site_map(env, s), t, st[s], alg)
-		st[s], v = _gauge_left(st[s])
+		st[s], v = _gauge_left(st[s], alg.alg_orth)
 		updateleft!(env, s)
 		v = _tdvp_exponentiate(_tdvp_bond_map_left(env, s), -t, v, alg)
 		st[s+1] = _contract_first(st[s+1], v)
@@ -366,7 +375,7 @@ function _tdvp_rightsweep!(env, alg::TDVP1)
 	t = alg.stepsize / 2
 	for s in L:-1:2
 		st[s] = _tdvp_exponentiate(_tdvp_site_map(env, s), t, st[s], alg)
-		v, st[s] = _gauge_right(st[s])
+		v, st[s] = _gauge_right(st[s], alg.alg_orth)
 		updateright!(env, s)
 		v = _tdvp_exponentiate(_tdvp_bond_map_right(env, s), -t, v, alg)
 		st[s-1] = _contract_last(st[s-1], v)

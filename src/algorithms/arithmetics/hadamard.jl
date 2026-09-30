@@ -122,7 +122,7 @@ function leftsweep!(m::HadamardCache, alg::DMRG1)
 		mpsj = _reduce_hadamard_site(m.ketx[s], m.kety[s], m.hstorage[s], m.hstorage[s+1])
 		kvals[s] = norm(mpsj)
 		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
-		q, r = _gauge_left(mpsj)
+		q, r = _gauge_left(mpsj, alg.alg_orth)
 		m.bra[s] = q
 		m.bra[s+1] = _contract_first(m.bra[s+1], r)
 		_env_updateleft!(m, s)
@@ -149,7 +149,7 @@ function rightsweep!(m::HadamardCache, alg::DMRG1)
 		kvals[k] = norm(mpsj)
 		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s, kvals[k])
 		k += 1
-		l, q = _gauge_right(mpsj)
+		l, q = _gauge_right(mpsj, alg.alg_orth)
 		m.bra[s] = q
 		m.bra[s-1] = _contract_last(m.bra[s-1], l)
 		_env_updateright!(m, s)
@@ -262,7 +262,7 @@ _validate_hadamard(ψA::CanonicalMPS, ψB::CanonicalMPS) = begin
 end
 
 """
-	hadamard(ψA, ψB, alg=SVDCompression(trunc=DefaultTruncation)) -> χ
+	hadamard(ψA, ψB, alg=SVDCompression(trunc=Defaults.alg_trunc())) -> χ
 	hadamard(ψA, ψB, alg::DMRG1) -> (χ, info)
 
 Compressed pointwise (Hadamard) product ψA ⊙ ψB: the result is a finite-bond MPS approximation

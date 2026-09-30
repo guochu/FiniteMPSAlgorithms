@@ -623,7 +623,7 @@ end
 	@test errs[2] < errs[1]
 
 	@test HadamardTDVP2(stepsize=-0.1) isa FiniteMPSAlgorithms.MPSAlgorithm
-	@test HadamardTDVP2(stepsize=-0.1).trunc === DefaultTruncation
+	@test HadamardTDVP2(stepsize=-0.1).trunc === Defaults.alg_trunc()
 	@test HadamardTDVP2(stepsize=-0.1, trunc=truncdim(3)).trunc == truncdim(3)
 	@test HadamardTDVP2(stepsize=-0.1).ishermitian == false
 end

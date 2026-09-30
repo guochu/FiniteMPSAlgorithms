@@ -114,9 +114,7 @@ function _projected_local_update!(env::ExcitedStateCache, s::Integer, alg::DMRG1
 		end
 		return y
 	end
-	vals, vecs, info = eigsolve(f, env.ket[s], 1, :SR;
-								ishermitian=true, tol=max(alg.tol, 1.0e-12),
-								krylovdim=30, maxiter=200, eager=true)
+	vals, vecs, info = eigsolve(f, env.ket[s], 1, :SR, alg.alg_eigsolve)
 	env.ket[s] = vecs[1]
 	return real(vals[1]), info
 end

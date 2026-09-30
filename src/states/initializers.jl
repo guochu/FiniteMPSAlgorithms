@@ -175,10 +175,10 @@ function changebond!(ψ::CanonicalMPS; D::Int=Defaults.D, noise::Real=1e-10)
 end
 
 """
-	truncate!(ψ::CanonicalMPS; trunc=DefaultOrthTruncation) -> (ψ, err)
+	truncate!(ψ::CanonicalMPS; trunc=Defaults.alg_orth_trunc()) -> (ψ, err)
 
 Truncate `ψ` by canonicalizing with an SVD sweep under the truncation scheme `trunc`.
 Returns `ψ` and the maximal truncation error.
 """
-truncate!(ψ::CanonicalMPS; trunc::TruncationScheme=DefaultOrthTruncation) =
+truncate!(ψ::CanonicalMPS; trunc::TruncationScheme=Defaults.alg_orth_trunc()) =
 	canonicalize!(ψ; alg=Orthogonalize(SVD(), trunc, false))

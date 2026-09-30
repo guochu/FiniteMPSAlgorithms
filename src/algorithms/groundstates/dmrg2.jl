@@ -123,9 +123,7 @@ function _dmrg2_local_update!(env::DMRGCache, s::Integer, alg::DMRG2; move_right
 	# initial guess: the two-site tensor formed from the current site tensors
 	@tensor guess[aL, p1, p2, aR] := env.ket[s][aL, p1, b] * env.ket[s+1][b, p2, aR]
 
-	vals, vecs, info = eigsolve(y -> ac2_prime(y, heff), guess, 1, :SR;
-								ishermitian=true, tol=max(alg.tol, 1e-12),
-								krylovdim=30, maxiter=200, eager=true)
+	vals, vecs, info = eigsolve(y -> ac2_prime(y, heff), guess, 1, :SR, alg.alg_eigsolve)
 	Ψ = vecs[1]
 	E = real(vals[1])
 

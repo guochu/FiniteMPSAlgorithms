@@ -70,7 +70,7 @@ function leftsweep!(env::DMRGCache, alg::DMRG1)
 	for s in 1:L-1
 		kvals[s], _ = _dmrg_local_update!(env, s, alg)
 		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
-		q, r = leftorth!(env.ket[s], (1, 2), (3,))
+		q, r = _gauge_left(env.ket[s], alg.alg_orth)
 		env.ket[s] = q
 		env.ket[s+1] = _contract_first(env.ket[s+1], r)
 		updateleft!(env, s)
@@ -94,7 +94,7 @@ function rightsweep!(env::DMRGCache, alg::DMRG1)
 		kvals[k], _ = _dmrg_local_update!(env, s, alg)
 		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s, kvals[k])
 		k += 1
-		l, q = rightorth!(env.ket[s], (1,), (2, 3))
+		l, q = _gauge_right(env.ket[s], alg.alg_orth)
 		env.ket[s] = q
 		env.ket[s-1] = _contract_last(env.ket[s-1], l)
 		updateright!(env, s)
@@ -113,9 +113,7 @@ sweep!(env::DMRGCache, alg::DMRG1) = vcat(leftsweep!(env, alg), rightsweep!(env,
 
 function _dmrg_local_update!(env::DMRGCache, s::Integer, alg::DMRG1)
 	heff = Heff(env.H[s], env.hstorage[s], env.hstorage[s+1])
-	vals, vecs, info = eigsolve(x -> ac_prime(x, heff), env.ket[s], 1, :SR;
-								ishermitian=true, tol=max(alg.tol, 1.0e-12),
-								krylovdim=30, maxiter=200, eager=true)
+	vals, vecs, info = eigsolve(x -> ac_prime(x, heff), env.ket[s], 1, :SR, alg.alg_eigsolve)
 	env.ket[s] = vecs[1]
 	return real(vals[1]), info
 end

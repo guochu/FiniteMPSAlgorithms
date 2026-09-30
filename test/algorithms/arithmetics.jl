@@ -340,7 +340,7 @@ end
 
 	# DefaultMultAlg
 	@test DefaultMultAlg isa SVDCompression
-	@test DefaultMultAlg.trunc == DefaultTruncation
+	@test DefaultMultAlg.trunc == Defaults.alg_trunc()
 
 	# truncation scheme types
 	tr = truncdimcutoff(8, 1e-10)

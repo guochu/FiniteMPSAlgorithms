@@ -80,7 +80,7 @@ function todense(ψ::CanonicalMPS; order::Symbol=:msb)
 end
 
 """
-	tomps(v, phydims; order=:msb, trunc=DefaultOrthTruncation) -> CanonicalMPS
+	tomps(v, phydims; order=:msb, trunc=Defaults.alg_orth_trunc()) -> CanonicalMPS
 
 Tensor-train (MPS) representation of the dense state vector `v` on the physical
 dimensions `phydims`. The `order` keyword selects the endianness of the merged
@@ -95,12 +95,12 @@ physical index, matching [`todense`](@ref):
 
 The chain is built from consecutive right-to-left SVDs (right-canonical form, the
 center on the first site; the bond spectra are recorded), truncated with
-`trunc::TruncationScheme` (`DefaultOrthTruncation` by default); with a bond-cap scheme
+`trunc::TruncationScheme` (`Defaults.alg_orth_trunc()` by default); with a bond-cap scheme
 the result is exact whenever every intermediate rank stays within the cap. Any
 external norm of `v` is folded into the chain `scaling`.
 """
 function tomps(v::AbstractVector, phydims::AbstractVector{Int}; order::Symbol=:msb,
-			   trunc::TruncationScheme=DefaultOrthTruncation)
+			   trunc::TruncationScheme=Defaults.alg_orth_trunc())
 	L = length(phydims)
 	prod(phydims) == length(v) ||
 		throw(DimensionMismatch("vector length $(length(v)) does not match prod(phydims) = $(prod(phydims))"))

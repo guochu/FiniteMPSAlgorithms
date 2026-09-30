@@ -126,12 +126,6 @@ function _site_solve(m::LinsolveCache, s::Integer, solver::KrylovKit.LinearSolve
         return z, t
 end
 
-# the local-solve algorithm of the sweep: the linsolve algorithm types carry their own
-# solver, the other iterative algorithms use the package default
-_solverof(alg::ALSLinSolve) = alg.solver
-_solverof(alg::ALSLinSolve2) = alg.solver
-_solverof(alg) = DefaultLinearSolver
-
 # the exact global residual² ‖A·x − y‖², evaluated from the local decomposition at the
 # site with the updated tensor z — no global contraction is needed
 function _site_loss1(m::LinsolveCache, s::Integer, z::AbstractArray{T,3}, t::AbstractArray{T,3}) where {T}
@@ -140,17 +134,18 @@ function _site_loss1(m::LinsolveCache, s::Integer, z::AbstractArray{T,3}, t::Abs
 end
 
 """
-	leftsweep!(m::LinsolveCache, alg) -> kvals
+	leftsweep!(m::LinsolveCache, alg::ALSLinSolve) -> kvals
 
-One left-to-right ALS sweep: at each site the local normal equation H z = t is solved,
+One left-to-right ALS sweep: at each site the local normal equation H z = t is solved
+by `alg.alg_linsolve`,
 the chain is moved by QR and both environment stacks incremented. `kvals` collects the
 exact global residual² ‖A·x − y‖² after every site update (non-increasing).
 """
-function leftsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
+function leftsweep!(m::LinsolveCache, alg::ALSLinSolve)
 	L = length(m.ket)
 	kvals = zeros(Float64, L)
 	for s in 1:L-1
-		z, t = _site_solve(m, s, _solverof(alg))
+		z, t = _site_solve(m, s, alg.alg_linsolve)
 		kvals[s] = _site_loss1(m, s, z, t)
 		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		q, r = _gauge_left(z)
@@ -159,7 +154,7 @@ function leftsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 		_h_left!(m, s)
 		_b_left!(m, s)
 	end
-	z, t = _site_solve(m, L, _solverof(alg))
+	z, t = _site_solve(m, L, alg.alg_linsolve)
 	kvals[L] = _site_loss1(m, L, z, t)
 	(alg.verbosity > 2) && _logupdate(stdout, "l2r", L, kvals[L])
 	m.ket[L] = z
@@ -167,18 +162,18 @@ function leftsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 end
 
 """
-	rightsweep!(m::LinsolveCache, alg) -> kvals
+	rightsweep!(m::LinsolveCache, alg::ALSLinSolve) -> kvals
 
 One right-to-left ALS sweep (symmetric, LQ gauge moves). `kvals` is ordered by processing
 time — sites `L, L-1, …, 1` — and collects the exact global residual² ‖A·x − y‖² after
 every site update (non-increasing).
 """
-function rightsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
+function rightsweep!(m::LinsolveCache, alg::ALSLinSolve)
 	L = length(m.ket)
 	kvals = zeros(Float64, L)
 	k = 1
 	for s in L:-1:2
-		z, t = _site_solve(m, s, _solverof(alg))
+		z, t = _site_solve(m, s, alg.alg_linsolve)
 		kvals[k] = _site_loss1(m, s, z, t)
 		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s, kvals[k])
 		k += 1
@@ -188,7 +183,7 @@ function rightsweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm)
 		_h_right!(m, s)
 		_b_right!(m, s)
 	end
-	z, t = _site_solve(m, 1, _solverof(alg))
+	z, t = _site_solve(m, 1, alg.alg_linsolve)
 	kvals[L] = _site_loss1(m, 1, z, t)
 	(alg.verbosity > 2) && _logupdate(stdout, "r2l", 1, kvals[L])
 	m.ket[1] = z
@@ -330,7 +325,7 @@ function leftsweep!(m::LinsolveCache, alg::ALSLinSolve2)
 	L = length(m.ket)
 	kvals = zeros(Float64, L)
 	for s in 1:L-1
-		z2, t = _site_solve2(m, s, _solverof(alg))
+		z2, t = _site_solve2(m, s, alg.alg_linsolve)
 		kvals[s] = _site_loss2(m, s, z2, t)
 		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
 		_als2_update!(m.ket, s, z2, alg; move_right=true)
@@ -346,7 +341,7 @@ function rightsweep!(m::LinsolveCache, alg::ALSLinSolve2)
 	kvals = zeros(Float64, L)
 	k = 1
 	for s in L:-1:2
-		z2, t = _site_solve2(m, s - 1, _solverof(alg))
+		z2, t = _site_solve2(m, s - 1, alg.alg_linsolve)
 		kvals[k] = _site_loss2(m, s - 1, z2, t)
 		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s - 1, kvals[k])
 		k += 1

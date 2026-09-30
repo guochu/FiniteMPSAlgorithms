@@ -13,13 +13,16 @@ _contract_first(B::MPOTensor, r::AbstractMatrix) = @tensor z[-1, -2, -3, -4] := 
 _contract_last(A::MPSTensor, l::AbstractMatrix) = @tensor z[-1, -2, -3] := A[-1, -2, 1] * l[1, -3]
 _contract_last(A::MPOTensor, l::AbstractMatrix) = @tensor z[-1, -2, -3, -4] := A[-1, -2, 1, -4] * l[1, -3]
 
-_gauge_left(A::MPSTensor) = leftorth!(A, (1, 2), (3,))
-function _gauge_left(A::MPOTensor)
-	q, r = leftorth!(A, (1, 2, 4), (3,))
+# the gauge moves take the factorization algorithm as an optional argument (the sweep
+# engines pass `alg.alg_orth`); the right-to-left moves use the adjoint (`QRpos'` = LQpos),
+# so one setting covers both sweep directions
+_gauge_left(A::MPSTensor, orth = Defaults.alg_orth()) = leftorth!(A, (1, 2), (3,); alg = orth)
+function _gauge_left(A::MPOTensor, orth = Defaults.alg_orth())
+	q, r = leftorth!(A, (1, 2, 4), (3,); alg = orth)
 	return permute(q, (1, 2, 4, 3)), r
 end
-_gauge_right(A::MPSTensor) = rightorth!(A, (1,), (2, 3))
-_gauge_right(A::MPOTensor) = rightorth!(A, (1,), (2, 3, 4))
+_gauge_right(A::MPSTensor, orth = Defaults.alg_orth()) = rightorth!(A, (1,), (2, 3); alg = orth')
+_gauge_right(A::MPOTensor, orth = Defaults.alg_orth()) = rightorth!(A, (1,), (2, 3, 4); alg = orth')
 
 # ---------- on-the-fly naive SVD initial guess (shared by mult / add / hadamard) ----------
 # Stream the exact chain's site tensors (produced by `site(i, carry)`, i = L:-1:1) right
@@ -132,7 +135,7 @@ function leftsweep!(m::MultCache, alg::DMRG1)
 		mpsj = _reduce_site(m.ket[s], m.H[s], m.hstorage[s], m.hstorage[s+1])
 		kvals[s] = norm(mpsj)
 		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
-		q, r = _gauge_left(mpsj)
+		q, r = _gauge_left(mpsj, alg.alg_orth)
 		m.bra[s] = q
 		m.bra[s+1] = _contract_first(m.bra[s+1], r)
 		_env_updateleft!(m, s)
@@ -159,7 +162,7 @@ function rightsweep!(m::MultCache, alg::DMRG1)
 		kvals[k] = norm(mpsj)
 		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s, kvals[k])
 		k += 1
-		l, q = _gauge_right(mpsj)
+		l, q = _gauge_right(mpsj, alg.alg_orth)
 		m.bra[s] = q
 		m.bra[s-1] = _contract_last(m.bra[s-1], l)
 		_env_updateright!(m, s)
@@ -327,7 +330,7 @@ _opscaling(x::Union{CanonicalMPS, CanonicalMPO}) = scaling(x)
 # ---------- exported interface ----------
 
 """
-	mult(h, x, alg=SVDCompression(trunc=DefaultTruncation)) -> CanonicalMPO
+	mult(h, x, alg=SVDCompression(trunc=Defaults.alg_trunc())) -> CanonicalMPO
 
 Apply the operator `h` to the state / operator `x` (SVD route): the exact product is
 formed and compressed by a single SVD sweep under `alg.trunc`. For the variational ALS

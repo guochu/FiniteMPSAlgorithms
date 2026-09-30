@@ -80,7 +80,7 @@ function leftsweep!(m::AddCache, alg::DMRG1)
 		mpsj = _reduce_site(m, s)
 		kvals[s] = norm(mpsj)
 		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
-		q, r = _gauge_left(mpsj)
+		q, r = _gauge_left(mpsj, alg.alg_orth)
 		# normalize the gauge factor: ALS determines only the direction, and keeping the
 		# bra data O(1) stabilizes the sweeps when inputs have tiny norms. The exact scale
 		# of the sum is restored once at the end of `iterative_add`.
@@ -108,7 +108,7 @@ function rightsweep!(m::AddCache, alg::DMRG1)
 		kvals[k] = norm(mpsj)
 		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s, kvals[k])
 		k += 1
-		l, q = _gauge_right(mpsj)
+		l, q = _gauge_right(mpsj, alg.alg_orth)
 		ln = norm(l)
 		ln == 0 || (l /= ln)
 		m.bra[s] = q
@@ -191,7 +191,7 @@ function add!(out, chains, alg::DMRG1)
 end
 
 """
-	add(ψs::Vector{<:CanonicalMPS}, alg=SVDCompression(trunc=DefaultTruncation)) -> CanonicalMPS
+	add(ψs::Vector{<:CanonicalMPS}, alg=SVDCompression(trunc=Defaults.alg_trunc())) -> CanonicalMPS
 	add(ψs::Vector{<:CanonicalMPS}, alg::DMRG1) -> (CanonicalMPS, info)
 	add(ρs::Vector{<:CanonicalMPO}, alg) / add(ρs, alg::DMRG1) -> CanonicalMPO / (CanonicalMPO, info)
 

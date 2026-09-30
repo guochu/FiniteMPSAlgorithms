@@ -156,7 +156,7 @@ timeevompo(h::MPOHamiltonian{<:SchurMPOTensor}, dt::Number) = timeevompo(h, dt, 
 # non-unitary (e.g. Lindblad) evolution operators.
 
 """
-	timeevolve!(ψ::CanonicalMPS, h::MPOHamiltonian, dt, alg=WII(); trunc=DefaultTruncation)
+	timeevolve!(ψ::CanonicalMPS, h::MPOHamiltonian, dt, alg=WII(); trunc=Defaults.alg_trunc())
 	timeevolve!(ψ, h, dt, ComplexStepper(); trunc)
 
 One W-matrix time step: build the evolved MPO with [`timeevompo`](@ref) and apply it to
@@ -164,7 +164,7 @@ One W-matrix time step: build the evolved MPO with [`timeevompo`](@ref) and appl
 half steps for second-order accuracy.
 """
 function timeevolve!(ψ::CanonicalMPS, h::MPOHamiltonian{<:SchurMPOTensor}, dt::Number,
-					 alg::MPSAlgorithm=WII(); trunc::TruncationScheme=DefaultTruncation)
+					 alg::MPSAlgorithm=WII(); trunc::TruncationScheme=Defaults.alg_trunc())
 	if alg isa ComplexStepper
 		dt1, dt2 = complex_stepper(dt)
 		W1, W2 = timeevompo(h, dt1, alg.stepper), timeevompo(h, dt2, alg.stepper)

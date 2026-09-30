@@ -18,7 +18,8 @@
 
 """
 	ALSRecon(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D, α=1.0e-4,
-	         solver=DefaultLinearSolver, nbuffer=1024, nadd=128, nrounds=20, verbosity=0)
+	         alg_linsolve=Defaults.alg_linsolve(), nbuffer=1024, nadd=128, nrounds=20,
+	         verbosity=0)
 
 Sample-amplitude MPS reconstruction by quadratic (least-squares) optimization —
 the variational alternative to tensor cross interpolation. Given the sample set
@@ -34,7 +35,7 @@ out-of-place entry points draw a random guess of bond `alg.D`, the in-place rout
 re-fits the caller's guess with `changebond!`). `α ≥ 0` is the Hilbert-Schmidt ridge
 added to the local normal equations for conditioning (the seq2seq regularization; not
 part of the reported loss). The local normal equations are solved by the KrylovKit
-iterative solver `alg.solver`. `nbuffer`/`nadd`/`nrounds` drive the adaptive
+iterative solver `alg.alg_linsolve`. `nbuffer`/`nadd`/`nrounds` drive the adaptive
 sample-enrichment loop of [`reconstruct`](@ref): an initial random pool of `nbuffer`
 oracle queries, then `nadd` Born samples of the current fit (re-evaluated by the
 oracle) per round, for at most `nrounds` rounds.
@@ -44,7 +45,7 @@ oracle) per round, for at most `nrounds` rounds.
 	tol::Float64 = Defaults.tol
 	D::Int = Defaults.D
 	α::Float64 = 1.0e-4      # HS ridge on the local solves (seq2seq regularizer)
-	solver::S = DefaultLinearSolver
+	alg_linsolve::S = Defaults.alg_linsolve()
 	nbuffer::Int = 1024      # initial random sample pool of the adaptive loop
 	nadd::Int = 128          # Born samples of the current fit added per round
 	nrounds::Int = 20        # adaptive enrichment round cap
@@ -53,12 +54,13 @@ end
 
 """
 	ALSRecon2(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=truncdim(D=Defaults.D),
-	          α=1.0e-4, solver=DefaultLinearSolver, nbuffer=1024, nadd=128, nrounds=20,
-	          verbosity=0)
+	          α=1.0e-4, alg_linsolve=Defaults.alg_linsolve(), nbuffer=1024, nadd=128,
+	          nrounds=20, verbosity=0)
 
 Two-site variant of [`ALSRecon`](@ref): the neighboring site pair is optimized jointly
-(the same rank-4 local normal equation structure, solved matrix-free by `alg.solver`)
-and re-split by a truncating SVD under `alg.trunc::TruncationScheme`, so the bond
+(the same rank-4 local normal equation structure, solved matrix-free by
+`alg.alg_linsolve`) and re-split by a truncating SVD under
+`alg.trunc::TruncationScheme`, so the bond
 dimension adapts during the sweeps — growth where the samples demand it, truncation
 where the scheme caps it. The single-site ALS losses stay monotone; the two-site
 re-split further relieves local minima of the single-site problem. Shares the
@@ -69,7 +71,7 @@ adaptive sample-enrichment loop of [`reconstruct`](@ref).
 	tol::Float64 = Defaults.tol
 	trunc::TR = truncdim(D=Defaults.D)
 	α::Float64 = 1.0e-4      # HS ridge on the local solves (seq2seq regularizer)
-	solver::S = DefaultLinearSolver
+	alg_linsolve::S = Defaults.alg_linsolve()
 	nbuffer::Int = 1024      # initial random sample pool of the adaptive loop
 	nadd::Int = 128          # Born samples of the current fit added per round
 	nrounds::Int = 20        # adaptive enrichment round cap
@@ -277,7 +279,7 @@ tensor `w` of shape (Dl, d, Dr).
 """
 function _ls_solve(c::ALSReconCache, s::Integer, alg::ALSRecon)
 	b = _ls_rhs(c, s)
-	w, _ = KrylovKit.linsolve(z -> _ls_apply(c, s, z, alg.α), b, c.ψ[s], alg.solver)
+	w, _ = KrylovKit.linsolve(z -> _ls_apply(c, s, z, alg.α), b, c.ψ[s], alg.alg_linsolve)
 	return w
 end
 
@@ -408,7 +410,7 @@ chain is the warm start). Returns the updated pair tensor of shape (Dl, d, d, Dr
 function _ls2_solve(c::ALSReconCache, s::Integer, alg::ALSRecon2)
 	b = _ls2_rhs(c, s)
 	w0 = @tensor w0[a, p, q, b] := c.ψ[s][a, p, j] * c.ψ[s+1][j, q, b]
-	w, _ = KrylovKit.linsolve(z -> _ls2_apply(c, s, z, alg.α), b, w0, alg.solver)
+	w, _ = KrylovKit.linsolve(z -> _ls2_apply(c, s, z, alg.α), b, w0, alg.alg_linsolve)
 	return w
 end
 

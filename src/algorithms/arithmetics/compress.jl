@@ -14,7 +14,7 @@ function leftsweep!(c::OverlapCache, alg::DMRG1)
 		t = _reduce_compress_site(c, s)
 		kvals[s] = norm(t)
 		(alg.verbosity > 2) && _logupdate(stdout, "l2r", s, kvals[s])
-		q, r = _gauge_left(t)
+		q, r = _gauge_left(t, alg.alg_orth)
 		c.bra[s] = q
 		c.bra[s+1] = _contract_first(c.bra[s+1], r)
 		updateleft!(c, s)
@@ -35,7 +35,7 @@ function rightsweep!(c::OverlapCache, alg::DMRG1)
 		kvals[k] = norm(t)
 		(alg.verbosity > 2) && _logupdate(stdout, "r2l", s, kvals[k])
 		k += 1
-		l, q = _gauge_right(t)
+		l, q = _gauge_right(t, alg.alg_orth)
 		c.bra[s] = q
 		c.bra[s-1] = _contract_last(c.bra[s-1], l)
 		updateright!(c, s)
@@ -87,7 +87,7 @@ function compress!(out, x, alg::DMRG1)
 end
 
 """
-	compress(ψ::CanonicalMPS, alg=SVDCompression(trunc=DefaultTruncation)) -> CanonicalMPS
+	compress(ψ::CanonicalMPS, alg=SVDCompression(trunc=Defaults.alg_trunc())) -> CanonicalMPS
 	compress(h::AbstractMPO, alg=...) -> CanonicalMPO
 	compress(x, alg::DMRG1) -> (chain, info)
 

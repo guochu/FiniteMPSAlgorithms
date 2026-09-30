@@ -35,7 +35,8 @@
 # `canonicalize!(ψ; alg=Orthogonalize(SVD(), trunc, false))`, as in `tdvpif`.
 
 """
-	HadamardTDVP(; stepsize, ishermitian=false, verbosity=Defaults.verbosity)
+	HadamardTDVP(; stepsize, ishermitian=false, alg_expsolve=Defaults.alg_expsolve(ishermitian),
+	             alg_orth=Defaults.alg_orth(), verbosity=Defaults.verbosity)
 
 Configuration of the Hadamard-product TDVP flow `dz/dτ = H ∘ z` between two MPS chains:
 the generator `H` and the state `z` are both [`CanonicalMPS`](@ref), and their product is
@@ -45,8 +46,12 @@ the pointwise (Hadamard) one. `stepsize` is the complex time increment itself �
 - the cooling `z ↦ e^{-τ·H}.*z`: `stepsize = -τ`;
 - the real-time flow `z ↦ e^{-i·τ·H}.*z`: `stepsize = -im*τ`.
 
-`ishermitian` selects the Krylov exponentiate driver (Lanczos for hermitian, Arnoldi
-otherwise) of the local projected generator. Only the bra side of the environments is
+`ishermitian` selects the default Krylov exponentiate driver (Lanczos for hermitian,
+Arnoldi otherwise) of the local projected generator; a fully configured `KrylovKit`
+algorithm object can be passed as `alg_expsolve`
+([`Defaults.alg_expsolve`](@ref)), which then takes precedence. The QR/LQ gauge moves of
+the sweeps take the tensor factorization `alg_orth` ([`Defaults.alg_orth`](@ref)). Only
+the bra side of the environments is
 conjugated, so that generator is *not* hermitian in general — hence the `false` default,
 as in TEMPO's `tdvpif` — and `true` is only safe for chains where the local maps are known
 to be hermitian.
@@ -62,14 +67,18 @@ sweep reproduces the elementwise `exp(stepsize·H).*z` to roundoff, so several s
 accumulate the exact flow. On a restricted manifold the sweep realizes the projected flow
 instead, which leaves a remainder linear in `stepsize` (halving `stepsize` halves it).
 """
-@kwdef struct HadamardTDVP{S<:Number} <: MPSAlgorithm
+@kwdef struct HadamardTDVP{S<:Number,E,O} <: MPSAlgorithm
 	stepsize::S
 	ishermitian::Bool = false
+	alg_expsolve::E = Defaults.alg_expsolve(ishermitian = ishermitian)
+	alg_orth::O = Defaults.alg_orth()
 	verbosity::Int = Defaults.verbosity
 end
 
 """
-	HadamardTDVP2(; stepsize, trunc=DefaultTruncation, ishermitian=false, verbosity=Defaults.verbosity)
+	HadamardTDVP2(; stepsize, trunc=Defaults.alg_trunc(), ishermitian=false,
+	              alg_expsolve=Defaults.alg_expsolve(ishermitian), alg_orth=Defaults.alg_orth(),
+	              verbosity=Defaults.verbosity)
 
 Configuration of the two-site Hadamard flow `dz/dτ = H ∘ z`. `stepsize` carries the same
 convention as [`HadamardTDVP`](@ref) — the complex time increment itself, so one `sweep!`
@@ -89,10 +98,12 @@ environments is conjugated, so the projected generator is generally not hermitia
 by default), and the generator's `scaling` is folded into the local generators as the
 factor `scaling(H)^L`. The sweeps are documented with their implementations below.
 """
-@kwdef struct HadamardTDVP2{S<:Number, TR<:TruncationScheme} <: MPSAlgorithm
+@kwdef struct HadamardTDVP2{S<:Number, TR<:TruncationScheme, E, O} <: MPSAlgorithm
 	stepsize::S
-	trunc::TR = DefaultTruncation
+	trunc::TR = Defaults.alg_trunc()
 	ishermitian::Bool = false
+	alg_expsolve::E = Defaults.alg_expsolve(ishermitian = ishermitian)
+	alg_orth::O = Defaults.alg_orth()
 	verbosity::Int = Defaults.verbosity
 end
 
@@ -204,8 +215,7 @@ end
 
 # one Krylov exponential of a local projected generator
 function _hadamard_exponentiate(f, t, x, alg::Union{HadamardTDVP,HadamardTDVP2})
-	y, _ = exponentiate(f, t, x; ishermitian=alg.ishermitian,
-						tol=Defaults.tol, krylovdim=25, maxiter=100)
+	y, _ = exponentiate(f, t, x, alg.alg_expsolve)
 	return y
 end
 
@@ -225,7 +235,7 @@ function _hadamard_leftsweep!(env::HadamardTDVPCache, alg::HadamardTDVP)
 	t = alg.stepsize / 2
 	for s in 1:L-1
 		st[s] = _hadamard_exponentiate(_hadamard_site_map(env, s), t, st[s], alg)
-		st[s], v = _gauge_left(st[s])
+		st[s], v = _gauge_left(st[s], alg.alg_orth)
 		updateleft!(env, s)
 		v = _hadamard_exponentiate(_hadamard_bond_map_left(env, s), -t, v, alg)
 		st[s+1] = _contract_first(st[s+1], v)
@@ -245,7 +255,7 @@ function _hadamard_rightsweep!(env::HadamardTDVPCache, alg::HadamardTDVP)
 	t = alg.stepsize / 2
 	for s in L:-1:2
 		st[s] = _hadamard_exponentiate(_hadamard_site_map(env, s), t, st[s], alg)
-		v, st[s] = _gauge_right(st[s])
+		v, st[s] = _gauge_right(st[s], alg.alg_orth)
 		updateright!(env, s)
 		v = _hadamard_exponentiate(_hadamard_bond_map_right(env, s), -t, v, alg)
 		st[s-1] = _contract_last(st[s-1], v)

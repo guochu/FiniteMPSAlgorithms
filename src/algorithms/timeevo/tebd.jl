@@ -139,7 +139,7 @@ function _swap_content!(ψ::CanonicalMPS, b::Integer; trunc::TruncationScheme)
 end
 
 """
-	apply!(g::UnitaryGate{2}, ψ::CanonicalMPS; trunc=DefaultTruncation) -> ψ
+	apply!(g::UnitaryGate{2}, ψ::CanonicalMPS; trunc=Defaults.alg_trunc()) -> ψ
 
 Apply a two-site unitary gate to `ψ` with the Hastings update (aligned with
 TEMPO/GTEMPO). The two gate sites may be any ascending pair `(i, j)`: non-adjacent
@@ -174,7 +174,7 @@ spectrum:
 If the input is right-canonical and the truncation error is small, the right-canonical
 form is preserved without any `canonicalize!`.
 """
-function apply!(g::UnitaryGate{2}, ψ::CanonicalMPS; trunc::TruncationScheme=DefaultTruncation)
+function apply!(g::UnitaryGate{2}, ψ::CanonicalMPS; trunc::TruncationScheme=Defaults.alg_trunc())
 	i, j = g.positions
 	(1 <= i < j <= length(ψ)) || throw(BoundsError())
 	for b in j-1:-1:i+1
@@ -188,7 +188,7 @@ function apply!(g::UnitaryGate{2}, ψ::CanonicalMPS; trunc::TruncationScheme=Def
 end
 
 """
-	apply!(g::GeneralGate{2}, ψ::CanonicalMPS; trunc=DefaultTruncation) -> ψ
+	apply!(g::GeneralGate{2}, ψ::CanonicalMPS; trunc=Defaults.alg_trunc()) -> ψ
 
 Apply a possibly non-unitary two-site gate with the same Hastings update as
 [`UnitaryGate`](@ref) (identical fold–SVD–back-project step; the gate sites may be any
@@ -197,7 +197,7 @@ the right-orthogonality of the left factor (the *gauge* property of the Hastings
 update), so the state is re-canonicalized with `canonicalize!` afterwards. Initializes
 the canonical form if needed.
 """
-function apply!(g::GeneralGate{2}, ψ::CanonicalMPS; trunc::TruncationScheme=DefaultTruncation)
+function apply!(g::GeneralGate{2}, ψ::CanonicalMPS; trunc::TruncationScheme=Defaults.alg_trunc())
 	i, j = g.positions
 	(1 <= i < j <= length(ψ)) || throw(BoundsError())
 	for b in j-1:-1:i+1
@@ -212,7 +212,7 @@ function apply!(g::GeneralGate{2}, ψ::CanonicalMPS; trunc::TruncationScheme=Def
 end
 
 """
-	swap!(ψ::CanonicalMPS, i::Integer; trunc=DefaultTruncation) -> ψ
+	swap!(ψ::CanonicalMPS, i::Integer; trunc=Defaults.alg_trunc()) -> ψ
 
 Exchange the physical content of the neighboring sites `i` and `i+1` of `ψ` using the
 Hastings SWAP gate (aligned with TEMPO/GTEMPO): the two-site block is formed with the
@@ -225,13 +225,13 @@ preserved without any `canonicalize!` (the SWAP gate is unitary). Sequences of
 `swap!` (`permutation2swaps`) generate arbitrary permutations of the site contents.
 Initializes the canonical form if needed.
 """
-function swap!(ψ::CanonicalMPS, i::Integer; trunc::TruncationScheme=DefaultTruncation)
+function swap!(ψ::CanonicalMPS, i::Integer; trunc::TruncationScheme=Defaults.alg_trunc())
 	(1 <= i <= length(ψ) - 1) || throw(BoundsError())
 	return _swap_content!(ψ, i; trunc)
 end
 
 """
-	swap!(ρ::CanonicalMPO, i::Integer; trunc=DefaultTruncation) -> ρ
+	swap!(ρ::CanonicalMPO, i::Integer; trunc=Defaults.alg_trunc()) -> ρ
 
 Exchange the physical content `(p_out, p_in)` of the neighboring sites `i` and `i+1`
 of the operator chain `ρ` — the operator-space analog of the MPS [`swap!`](@ref)
@@ -245,7 +245,7 @@ preserved without any `canonicalize!`. Sequences of `swap!` (`permutation2swaps`
 generate arbitrary permutations of the site contents. Initializes the canonical form
 if needed.
 """
-function swap!(ρ::CanonicalMPO, i::Integer; trunc::TruncationScheme=DefaultTruncation)
+function swap!(ρ::CanonicalMPO, i::Integer; trunc::TruncationScheme=Defaults.alg_trunc())
 	(1 <= i <= length(ρ) - 1) || throw(BoundsError())
 	svectors_uninitialized(ρ) && canonicalize!(ρ)
 	W = ρ[i]

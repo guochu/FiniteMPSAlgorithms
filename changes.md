@@ -1,5 +1,44 @@
 # Interface changes
 
+## New: `Defaults.alg_eigsolve` / `alg_expsolve` / `alg_linsolve` / `alg_orth` / `alg_trunc` / `alg_orth_trunc`, and per-algorithm solver fields
+
+The default solvers and factorizations move into [`Defaults`](@ref) as *functions*
+returning the configured algorithm objects (mirroring MPSKit/InfiniteMPSAlgorithms'
+`Defaults` style):
+
+- `Defaults.alg_eigsolve(; ishermitian=true, tol, maxiter, krylovdim, eager)` — the
+  Lanczos/Arnoldi object of the local effective-Hamiltonian problems;
+- `Defaults.alg_expsolve(; ishermitian=true, tol, maxiter, krylovdim)` — the local
+  exponentials of TDVP1/TDVP2 (and the Hadamard TDVP);
+- `Defaults.alg_linsolve(; tol, maxiter)` — the `CG` wrapper of the ALS local normal
+  equations (replaces the exported `DefaultLinearSolver` **const**, which is gone);
+- `Defaults.alg_orth()` — the factorization of the QR/LQ gauge moves (`QRpos()`; the
+  right-to-left moves use the adjoint `alg'` = LQpos);
+- `Defaults.alg_trunc()` / `Defaults.alg_orth_trunc()` — the package-level truncation
+  schemes (replacing the `DefaultTruncation` / `DefaultOrthTruncation` **consts**, which
+  are gone).
+
+The variational engines carry the corresponding fields (typed, `Defaults`-defaulted):
+
+- `DMRG1{E,O}` / `DMRG2{TR,E,O}` / `PDMRG{TR,E,O}` / `CADMRG{TR,E,O}`: `alg_eigsolve`
+  drives the local `eigsolve` (positional argument of `KrylovKit.eigsolve`; PDMRG
+  rebuilds it with the rank-dependent Krylov dimension `2·min(R, dim)`), and `alg_orth`
+  the QR/LQ gauge moves — for DMRG2/PDMRG/CADMRG it is accepted for interface
+  uniformity (their re-splits are truncating SVDs under `alg.trunc` and carry the
+  gauge themselves);
+- `TDVP1{S,E,O}` / `TDVP2{S,TR,E,O}` and `HadamardTDVP{S,E,O}` / `HadamardTDVP2{S,TR,E,O}`:
+  `alg_expsolve` drives every local `KrylovKit.exponentiate` (`ishermitian` now only
+  selects the field's default) and `alg_orth` the single-site gauge moves;
+- `ALSLinSolve`, `ALSLinSolve2`, `ALSRecon`, `ALSRecon2`: the `solver` field is renamed
+  `alg_linsolve` (same for the `linsolve` sweeps, which now dispatch on `ALSLinSolve`
+  only; the `_solverof` indirection is gone).
+
+All defaults reproduce the previously hard-coded parameters exactly
+(`Defaults.alg_trunc()` = the old `DefaultTruncation` with `add_back = 1`,
+`Defaults.alg_orth_trunc()` = the old `DefaultOrthTruncation`); existing positional/keyword
+constructions keep working, and explicit overrides (`DMRG1(alg_eigsolve=KrylovKit.Arnoldi(...))`,
+`TDVP2(stepsize, trunc=...)`, ...) are now possible. Full suite: 960/960.
+
 ## Fixed: `norm` of an operator chain clamps `⟨h|h⟩` at zero
 
 `norm(h::AbstractMPO) = sqrt(real(dot(h, h)))` threw a `DomainError` whenever the traced

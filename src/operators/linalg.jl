@@ -300,7 +300,7 @@ function todense(h::AbstractMPO; order::Symbol=:msb)
 end
 
 """
-	tompo(M, phydims; order=:msb, trunc=DefaultOrthTruncation) -> CanonicalMPO
+	tompo(M, phydims; order=:msb, trunc=Defaults.alg_orth_trunc()) -> CanonicalMPO
 
 MPO representation of the dense operator matrix `M` on the physical dimensions
 `phydims` — the inverse of [`todense(::AbstractMPO)`](@ref). The `order` keyword
@@ -314,12 +314,12 @@ selects the endianness of the merged row/column indices, matching
 
 The chain is built from consecutive two-site SVDs on the interleaved (bra, ket) index
 pairs (right-canonical form, the center on the first site; the bond spectra are
-recorded), truncated with `trunc::TruncationScheme` (`DefaultOrthTruncation` by
+recorded), truncated with `trunc::TruncationScheme` (`Defaults.alg_orth_trunc()` by
 default); with a bond-cap scheme the result is exact whenever every intermediate rank
 stays within the cap. Any external scale of `M` is folded into the chain `scaling`.
 """
 function tompo(M::AbstractMatrix, phydims::AbstractVector{Int};
-			   order::Symbol=:msb, trunc::TruncationScheme=DefaultOrthTruncation)
+			   order::Symbol=:msb, trunc::TruncationScheme=Defaults.alg_orth_trunc())
 	L = length(phydims)
 	prod(phydims) == size(M, 1) == size(M, 2) ||
 		throw(DimensionMismatch("matrix size $((size(M, 1), size(M, 2))) does not match prod(phydims) = $(prod(phydims)) on both sides"))

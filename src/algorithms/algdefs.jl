@@ -31,7 +31,8 @@ and then compressed by an SVD right-orthogonalization sweep under the scheme `tr
 end
 
 """
-	DMRG1(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D, verbosity=0)
+	DMRG1(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D,
+	      alg_eigsolve=Defaults.alg_eigsolve(), alg_orth=Defaults.alg_orth(), verbosity=0)
 
 Parameters of the single-site variational (ALS) sweep engine: pure iteration parameters
 (maximal sweeps, convergence tolerance, verbosity) and the bond
@@ -40,16 +41,25 @@ guess with bond cap `alg.D` (`svdguess_add`, `svdguess_mult`, `svdguess_hadamard
 `svdguess_compress`, `randommps` / `randommpo`), and the in-place variants re-fit a
 caller-provided guess to `alg.D` bonds with `changebond!`. `DMRG1` itself does not
 truncate.
+
+The local problems are configured by the two solver fields: `alg_eigsolve` (a
+`KrylovKit` algorithm object, see [`Defaults.alg_eigsolve`](@ref)) drives the local
+effective-Hamiltonian `eigsolve`, and `alg_orth` (a tensor factorization such as
+`QRpos()`, see [`Defaults.alg_orth`](@ref)) the QR/LQ gauge moves — the right-to-left
+moves use the adjoint `alg_orth'`.
 """
-@kwdef struct DMRG1 <: SingleSiteUpdate
+@kwdef struct DMRG1{E,O} <: SingleSiteUpdate
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
 	D::Int = Defaults.D
+	alg_eigsolve::E = Defaults.alg_eigsolve()
+	alg_orth::O = Defaults.alg_orth()
 	verbosity::Int = 0
 end
 
 """
-	DMRG2(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=DefaultTruncation, verbosity=0)
+	DMRG2(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=Defaults.alg_trunc(),
+	      alg_eigsolve=Defaults.alg_eigsolve(), alg_orth=Defaults.alg_orth(), verbosity=0)
 
 Parameters of the two-site variational sweep engine: the neighboring site pair is
 optimized jointly and re-split by an SVD under `trunc::TruncationScheme`, so the bond
@@ -59,45 +69,53 @@ where the scheme caps it). All engines accepting a `DMRG1` (`mult`, `add`, `comp
 two-site `linsolve` configuration is [`ALSLinSolve2`](@ref). `alg.trunc` is also
 consulted for the bond cap of automatically drawn initial guesses
 (`_truncation_bond`).
+
+`alg_eigsolve` (a `KrylovKit` algorithm object, see [`Defaults.alg_eigsolve`](@ref))
+drives the local effective-Hamiltonian `eigsolve`. `alg_orth`
+([`Defaults.alg_orth`](@ref)) is accepted for interface uniformity with `DMRG1`; the
+two-site re-splits are truncating SVDs under `alg.trunc` (factorization `SDD`) and
+carry the gauge themselves, so no QR/LQ moves consume it.
 """
-@kwdef struct DMRG2{TR<:TruncationScheme} <: TwoSiteUpdate
+@kwdef struct DMRG2{TR<:TruncationScheme,E,O} <: TwoSiteUpdate
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
-	trunc::TR = DefaultTruncation
+	trunc::TR = Defaults.alg_trunc()
+	alg_eigsolve::E = Defaults.alg_eigsolve()
+	alg_orth::O = Defaults.alg_orth()
 	verbosity::Int = 0
 end
 
 """
 	ALSLinSolve(; maxiter=Defaults.maxiter, tol=Defaults.tol, D=Defaults.D,
-	            solver=DefaultLinearSolver, verbosity=0)
+	            alg_linsolve=Defaults.alg_linsolve(), verbosity=0)
 
 Algorithm configuration of the iterative `linsolve`: single-site ALS sweeps over the
 normal-equation stacks with the bond profile `alg.D`; the local normal equations are
-solved by the KrylovKit iterative solver `alg.solver` (matrix-free, the current site
-tensor as warm start).
+solved by the KrylovKit iterative solver `alg.alg_linsolve` (matrix-free, the current
+site tensor as warm start).
 """
 @kwdef struct ALSLinSolve <: SingleSiteUpdate
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
 	D::Int = Defaults.D
-	solver::KrylovKit.LinearSolver = DefaultLinearSolver
+	alg_linsolve::KrylovKit.LinearSolver = Defaults.alg_linsolve()
 	verbosity::Int = 0
 end
 
 """
-	ALSLinSolve2(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=DefaultTruncation,
-	             solver=DefaultLinearSolver, verbosity=0)
+	ALSLinSolve2(; maxiter=Defaults.maxiter, tol=Defaults.tol, trunc=Defaults.alg_trunc(),
+	             alg_linsolve=Defaults.alg_linsolve(), verbosity=0)
 
 Algorithm configuration of the two-site iterative `linsolve`: two-site ALS sweeps over
 the normal-equation stacks with the bond profile `alg.trunc`; the local normal equations
-are solved by the KrylovKit iterative solver `alg.solver` (matrix-free, the current
+are solved by the KrylovKit iterative solver `alg.alg_linsolve` (matrix-free, the current
 site-pair tensor as warm start).
 """
 @kwdef struct ALSLinSolve2{TR<:TruncationScheme, S<:KrylovKit.LinearSolver} <: TwoSiteUpdate
 	maxiter::Int = Defaults.maxiter
 	tol::Float64 = Defaults.tol
-	trunc::TR = DefaultTruncation
-	solver::S = DefaultLinearSolver
+	trunc::TR = Defaults.alg_trunc()
+	alg_linsolve::S = Defaults.alg_linsolve()
 	verbosity::Int = 0
 end
 
@@ -110,7 +128,7 @@ _truncation_bond(t::TruncationScheme) = nothing
 # (`Defaults.D` for schemes without a bond cap)
 _guess_bond(t::TruncationScheme) = something(_truncation_bond(t), Defaults.D)
 
-const DefaultMultAlg = SVDCompression(trunc=DefaultTruncation)
+const DefaultMultAlg = SVDCompression(trunc=Defaults.alg_trunc())
 
 """
 	ALSConvergenceInfo(niter, converged, losses, itererr, residual)

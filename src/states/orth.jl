@@ -115,7 +115,7 @@ function _rightorth!(ψ::CanonicalMPS, alg::SVD, trunc::TruncationScheme, normal
 end
 
 """
-	canonicalize!(ψ::CanonicalMPS; alg::Orthogonalize=Orthogonalize(SVD(), DefaultOrthTruncation, false))
+	canonicalize!(ψ::CanonicalMPS; alg::Orthogonalize=Orthogonalize(SVD(), Defaults.alg_orth_trunc(), false))
 	-> (ψ, err)
 
 Transform `ψ` into canonical form (in place): one QR left-orthogonalization sweep (without
@@ -123,7 +123,7 @@ truncation) followed by a right-orthogonalization sweep with `alg` (truncating w
 says so). After the call `ψ` is right-canonical with all Schmidt values initialized. Returns
 `ψ` and the maximal truncation error of the right sweep.
 """
-canonicalize!(ψ::CanonicalMPS; alg::Orthogonalize=Orthogonalize(SVD(), DefaultOrthTruncation, false)) =
+canonicalize!(ψ::CanonicalMPS; alg::Orthogonalize=Orthogonalize(SVD(), Defaults.alg_orth_trunc(), false)) =
 	_canonicalize!(ψ; alg)
 
 """
@@ -136,7 +136,7 @@ canonicalize(ψ::CanonicalMPS; kwargs...) = canonicalize!(copy(ψ); kwargs...)
 
 # internal variant carrying the truncation error; used by the algorithms on their own
 # working copies (the public canonicalize! is a thin wrapper)
-function _canonicalize!(ψ::CanonicalMPS; alg::Orthogonalize=Orthogonalize(SVD(), DefaultOrthTruncation, false))
+function _canonicalize!(ψ::CanonicalMPS; alg::Orthogonalize=Orthogonalize(SVD(), Defaults.alg_orth_trunc(), false))
 	_leftorth!(ψ, QR(), NoTruncation(), alg.normalize, alg.verbosity)
 	err = _rightorth!(ψ, alg.orth, alg.trunc, alg.normalize, alg.verbosity)[2]
 	_renormalize_coeff!(ψ, alg.normalize)
@@ -237,13 +237,13 @@ function _rightorth!(h::AbstractMPO, alg::SVD, trunc::TruncationScheme, normaliz
 end
 
 """
-	canonicalize!(ρ::CanonicalMPO; alg::Orthogonalize=Orthogonalize(SVD(), DefaultOrthTruncation, false))
+	canonicalize!(ρ::CanonicalMPO; alg::Orthogonalize=Orthogonalize(SVD(), Defaults.alg_orth_trunc(), false))
 	-> (ρ, err)
 
 Transform the density-matrix chain into canonical form (in place): QR left sweep + `alg`
 right sweep. Returns `ρ` and the maximal truncation error of the right sweep.
 """
-canonicalize!(ρ::CanonicalMPO; alg::Orthogonalize=Orthogonalize(SVD(), DefaultOrthTruncation, false)) =
+canonicalize!(ρ::CanonicalMPO; alg::Orthogonalize=Orthogonalize(SVD(), Defaults.alg_orth_trunc(), false)) =
 	_canonicalize!(ρ; alg)
 
 canonicalize(ρ::CanonicalMPO; kwargs...) = canonicalize!(copy(ρ); kwargs...)
@@ -251,7 +251,7 @@ canonicalize(ρ::CanonicalMPO; kwargs...) = canonicalize!(copy(ρ); kwargs...)
 # internal variant carrying the truncation error; used by the algorithms on their own
 # working data (plain MPO chains are gauged only through this internal path, never through
 # the public in-place API)
-function _canonicalize!(h::AbstractMPO; alg::Orthogonalize=Orthogonalize(SVD(), DefaultOrthTruncation, false))
+function _canonicalize!(h::AbstractMPO; alg::Orthogonalize=Orthogonalize(SVD(), Defaults.alg_orth_trunc(), false))
 	_leftorth!(h, QR(), NoTruncation(), alg.normalize, alg.verbosity)
 	err = _rightorth!(h, alg.orth, alg.trunc, alg.normalize, alg.verbosity)[2]
 	_renormalize_coeff!(h, alg.normalize)
