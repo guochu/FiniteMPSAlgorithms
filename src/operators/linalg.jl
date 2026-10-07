@@ -220,8 +220,8 @@ end
 """
 	Base.adjoint(h::MPO) -> MPO
 
-The hermitian conjugate chain: the site order is reversed and every site tensor is
-adjointed (conjugated and transposed in the `(wl, po, wr, pi)` convention), so that
+The hermitian conjugate chain: every site tensor is adjointed in place (conjugated,
+`(po, pi)` swapped; the site positions are kept), so that
 `todense(adjoint(h)) == adjoint(todense(h))`.
 """
 Base.adjoint(h::MPO) = MPO([permutedims(conj(W), (1, 4, 3, 2)) for W in h.data])
