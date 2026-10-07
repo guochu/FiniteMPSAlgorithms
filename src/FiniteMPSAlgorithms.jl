@@ -26,7 +26,7 @@ export TruncationScheme, NoTruncation, TruncateDim, TruncateRelError, TruncateDi
 export AbstractMPS, AbstractMPO, MPSTensor, MPOTensor, CanonicalMPS, CanonicalMPO,
 	MPO, MPOHamiltonian, Orthogonalize,
 	SchurMPOTensor, SparseMPOHamiltonian,
-	OpTerm, OpSum, term, tompotensors,
+	OpTerm, OpSum, term, tompotensor, tompotensors,
 	todense, vectorize, devectorize, superoperator,
 	ExpDecayOpTerm, ExpDecayOpSum,
 	isleftcanonical, isrightcanonical, iscanonical, canonicalize!, canonicalize,

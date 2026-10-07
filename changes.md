@@ -1,5 +1,30 @@
 # Interface changes
 
+## New: `dot` / `distance` / `fidelity` for `CanonicalMPO` pairs
+
+`CanonicalMPO` gains the same linear-algebra interface as `CanonicalMPS`:
+
+- `LinearAlgebra.dot(hA, hB)`: the Hilbert-Schmidt overlap `Σ tr(conj(hA)·hB)` including
+  the per-site `scaling` factors of both operands (total = `(scalingA·scalingB)^L`,
+  applied per site during the transfer contraction — no `scaling^L` power is
+  materialized, mirroring the `CanonicalMPS` `dot`);
+- `_dot(hA, hB)`: the raw (scale-free) data contraction;
+- `distance` / `distance2`: the represented-chain distance (the generic `_distance2`
+  built on the scaling-aware `dot`);
+- `fidelity` / `infidelity`: computed from the raw scale-free contractions, so the
+  `scaling` factors cancel exactly and the value stays finite for arbitrarily large
+  external scalings (`dot`/`norm` remain finite through the per-site application).
+- `norm` / `tr` already supported `CanonicalMPO` (they are defined on `AbstractMPO`)
+  and are unchanged.
+
+The tests restore the `CanonicalMPO` inputs of the "operator fidelity" and
+"operator norm/dot stability" testsets (external-scaling invisibility of `fidelity`,
+scaling-carrying `dot` vs the dense Hilbert-Schmidt value) and add an overflow-stability
+testset: `fidelity` identical for `scaling = 1e150` (where `scaling^L` overflows) and
+`dot`/`norm` finite with shrunken data through the per-site application, with the
+log-scale consistency `log|dot| = log|dot₀| + L·log(scalingA·scalingB)`.
+Full suite: 1023/1023.
+
 ## Changed: cache constructors take the optimized chain as their first argument
 
 The public constructors of the nine iterative algorithm caches now take the chain being

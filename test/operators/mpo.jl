@@ -72,17 +72,20 @@ end
 	Random.seed!(46)
 	L = 4
 	ds = fill(2, L)
-	# fidelity/distance are same-kind operations: plain MPO inputs
-	hA = MPO(randommpo(ComplexF64, ds; D=4).data)
-	hB = MPO(randommpo(ComplexF64, ds; D=4).data)
+	hA = randommpo(ComplexF64, ds; D=4)
+	hB = randommpo(ComplexF64, ds; D=4)
 	dA, dB = todense(hA), todense(hB)
 	# generic pair vs the direct dense Hilbert-Schmidt formula
 	@test fidelity(hA, hB) ≈ abs(sum(conj.(dA) .* dB)) / (norm(dA) * norm(dB)) atol = 1e-10
 	@test fidelity(hA, hA) ≈ 1 atol = 1e-12
 	@test infidelity(hA, hA) ≈ 0 atol = 1e-12
-	# the global phase is invisible to fidelity (unlike distance)
+	# global phase and external scaling are invisible to fidelity (unlike distance)
+	hAs = copy(hA)
+	setscaling!(hAs, 2.5)
 	hAph = hA * cis(0.9)
+	@test fidelity(hAs, hB) ≈ fidelity(hA, hB) atol = 1e-10
 	@test fidelity(hAph, hB) ≈ fidelity(hA, hB) atol = 1e-10
+	@test distance(hAs, hB) > distance(hA, hB)
 	@test distance(hAph, hB) > 1.0e-3
 	# the same interface for two MPOHamiltonians
 	t1 = term(1.0, 1 => _SX) + term(0.5, 2 => _SZ) + term(0.25, 3 => _SX, 4 => _SX)
@@ -97,11 +100,15 @@ end
 	Random.seed!(48)
 	L = 4
 	ds = fill(2, L)
-	hA = MPO(randommpo(ComplexF64, ds; D=4).data)
-	# the Hilbert-Schmidt norm vs the dense matrix
+	hA = randommpo(ComplexF64, ds; D=4)
+	# the Hilbert-Schmidt norm and dot vs the dense matrix (scaling included, per site)
 	@test norm(hA) ≈ norm(todense(hA)) rtol = 1e-12
 	dA = todense(hA)
 	@test dot(hA, hA) ≈ tr(dA' * dA) rtol = 1e-12
+	# the dot includes the per-site scaling of both operands
+	setscaling!(hA, 2.5)
+	@test dot(hA, hA) ≈ 2.5^2L * tr(dA' * dA) rtol = 1e-12
+	setscaling!(hA, 1.0)
 	# vanishing data: ⟨h|h⟩ = 0 exactly, norm returns 0 (no DomainError from sqrt)
 	h0 = MPO([zeros(ComplexF64, 1, ds[i], 1, ds[i]) for i in 1:L])
 	@test norm(h0) == 0.0
@@ -113,6 +120,38 @@ end
 	# moderate scaling: norm = scaling^L · norm(data at scaling 1)
 	setscaling!(ρ, 0.01)
 	@test norm(ρ) ≈ 0.01^L rtol = 1e-12
+end
+
+@testset "operator dot overflow stability" begin
+	# fidelity is computed from the raw (scale-free) contractions: finite and
+	# independent of the external scaling, even when scaling^L itself overflows
+	hA = randommpo(ComplexF64, fill(2, 8); D=2)
+	hB = randommpo(ComplexF64, fill(2, 8); D=2)
+	setscaling!(hA, 1e150)
+	setscaling!(hB, 1e150)
+	@test (scaling(hA) * scaling(hB))^8 == Inf
+	hA0, hB0 = copy(hA), copy(hB)
+	setscaling!(hA0, 1.0)
+	setscaling!(hB0, 1.0)
+	@test isfinite(fidelity(hA, hB))
+	@test fidelity(hA, hB) ≈ fidelity(hA0, hB0) rtol = 1e-12
+	# dot/norm apply the scaling per site: with shrunken data the contractions stay
+	# finite while the naive scaling^L-at-the-end evaluation overflows (deterministic
+	# positive data, so no random-phase cancellation enters the magnitudes)
+	L = 400
+	a = CanonicalMPO([fill(0.3, 1, 2, 1, 2) for _ in 1:L]; scaling=2.5)
+	b = CanonicalMPO([fill(0.3, 1, 2, 1, 2) for _ in 1:L]; scaling=2.5)
+	@test (scaling(a) * scaling(b))^L == Inf
+	d = dot(a, b)
+	@test isfinite(d)
+	n = norm(a)
+	@test isfinite(n) && n > 0
+	# log-scale consistency: dot/norm factor as scaling^L · raw value
+	a0, b0 = copy(a), copy(b)
+	setscaling!(a0, 1.0)
+	setscaling!(b0, 1.0)
+	@test isapprox(log(abs(d)), log(abs(dot(a0, b0))) + L * log(2.5 * 2.5); rtol=1e-6)
+	@test isapprox(log(n), log(norm(a0)) + L * log(2.5); rtol=1e-6)
 end
 
 @testset "todense/tompo roundtrip" begin

@@ -14,11 +14,18 @@ function _dot(hA::MPOHamiltonian, hB::MPOHamiltonian)
 	return _dot(_dense(hA), _dense(hB))
 end
 
+# raw data contraction: the `scaling` of the canonical chains is NOT included
+_dot(hA::CanonicalMPO, hB::CanonicalMPO) = _dot(MPO(hA.data), MPO(hB.data))
+
 """
 	LinearAlgebra.dot(hA::MPO, hB::MPO)
 	LinearAlgebra.dot(hA::MPOHamiltonian, hB::MPOHamiltonian)
+	LinearAlgebra.dot(hA::CanonicalMPO, hB::CanonicalMPO)
 
-Overlap of two operator chains of the same kind `Σ tr(conj(hA)·hB)` (per site).
+Overlap of two operator chains of the same kind `Σ tr(conj(hA)·hB)` (per site). For
+`CanonicalMPO` operands the per-site `scaling` factors are included (total =
+`(scalingA·scalingB)^L`, applied per site during the transfer contraction — no
+`scaling^L` power is materialized).
 """
 function LinearAlgebra.dot(hA::MPO, hB::MPO)
 	(length(hA) == length(hB)) || throw(DimensionMismatch("dimension mismatch"))
@@ -30,6 +37,16 @@ function LinearAlgebra.dot(hA::MPO, hB::MPO)
 end
 
 LinearAlgebra.dot(hA::MPOHamiltonian, hB::MPOHamiltonian) = dot(_dense(hA), _dense(hB))
+
+function LinearAlgebra.dot(hA::CanonicalMPO, hB::CanonicalMPO)
+	(length(hA) == length(hB)) || throw(DimensionMismatch("dimension mismatch"))
+	f = scaling(hA) * scaling(hB)
+	hold = l_LL(hA, hB)
+	for i in 1:length(hA)
+		hold = f * _updateleft(hold, hA[i], hB[i])
+	end
+	return tr(hold)
+end
 
 """
 	LinearAlgebra.norm(h::AbstractMPO)
@@ -181,17 +198,22 @@ Base.:-(hA::MPOHamiltonian, hB::MPOHamiltonian) = hA + (-hB)
 
 distance(hA::MPO, hB::MPO) = _distance(hA, hB)
 distance(hA::MPOHamiltonian, hB::MPOHamiltonian) = _distance(hA, hB)
+distance(hA::CanonicalMPO, hB::CanonicalMPO) = _distance(hA, hB)
 distance2(hA::MPO, hB::MPO) = _distance2(hA, hB)
 distance2(hA::MPOHamiltonian, hB::MPOHamiltonian) = _distance2(hA, hB)
+distance2(hA::CanonicalMPO, hB::CanonicalMPO) = _distance2(hA, hB)
 
 """
 	fidelity(hA::MPO, hB::MPO) -> Real
 	fidelity(hA::MPOHamiltonian, hB::MPOHamiltonian) -> Real
+	fidelity(hA::CanonicalMPO, hB::CanonicalMPO) -> Real
 
 The Hilbert-Schmidt fidelity `|tr(conj(hA)·hB)| / (‖hA‖_HS·‖hB‖_HS)` of two operator
 chains of the same kind. The absolute value discards the overall phase: two chains
 differing by a global phase (or external scale) have `fidelity = 1`, while their
-[`distance`](@ref) is generically nonzero.
+[`distance`](@ref) is generically nonzero. For `CanonicalMPO` operands the fidelity is
+computed from the raw (scale-free) contractions — the `scaling` factors cancel exactly,
+so it stays finite for arbitrarily large scalings.
 """
 function fidelity(hA::MPO, hB::MPO)
 	(length(hA) == length(hB)) || throw(DimensionMismatch("dimension mismatch"))
@@ -201,15 +223,18 @@ function fidelity(hA::MPOHamiltonian, hB::MPOHamiltonian)
 	(length(hA) == length(hB)) || throw(DimensionMismatch("dimension mismatch"))
 	return abs(_dot(hA, hB)) / sqrt(_dot(hA, hA) * _dot(hB, hB))
 end
+fidelity(hA::CanonicalMPO, hB::CanonicalMPO) = fidelity(MPO(hA.data), MPO(hB.data))
 
 """
 	infidelity(hA::MPO, hB::MPO) -> Real
 	infidelity(hA::MPOHamiltonian, hB::MPOHamiltonian) -> Real
+	infidelity(hA::CanonicalMPO, hB::CanonicalMPO) -> Real
 
 The complement of [`fidelity`](@ref): `1 - fidelity`.
 """
 infidelity(hA::MPO, hB::MPO) = 1 - fidelity(hA, hB)
 infidelity(hA::MPOHamiltonian, hB::MPOHamiltonian) = 1 - fidelity(hA, hB)
+infidelity(hA::CanonicalMPO, hB::CanonicalMPO) = 1 - fidelity(hA, hB)
 
 # exact block-native application MPOHamiltonian · MPS: sum over non-zero blocks, with the
 # finite-chain boundary slicing (first site keeps the start row, last keeps the closing col)
