@@ -139,7 +139,7 @@ the [`ALSConvergenceInfo`](@ref) of the sweeps (`info.losses` is the per-sweep
 local-energy history).
 """
 function ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::DMRG2)
-	env = DMRGCache(h, ψ)
+	env = DMRGCache(ψ, h)
 	info = iterative_compute!(env, alg)
 	setscaling!(ψ, 1.0)
 	lmul!(1 / norm(ψ), ψ)

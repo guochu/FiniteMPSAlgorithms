@@ -108,7 +108,7 @@ factor `scaling(H)^L`. The sweeps are documented with their implementations belo
 end
 
 """
-	HadamardTDVPCache(H::CanonicalMPS, ψ::CanonicalMPS)
+	HadamardTDVPCache(ψ::CanonicalMPS, H::CanonicalMPS)
 
 Environment stack of the Hadamard-product flow `dz/dτ = H ∘ z`: `state` (`ψ`) is the
 evolved chain, `H` the diagonal generator, both MPS on the same lattice, and `hstorage`
@@ -135,12 +135,12 @@ struct HadamardTDVPCache{A, B, T}
 end
 
 """
-	HadamardTDVPCache(H::CanonicalMPS, ψ::CanonicalMPS) -> HadamardTDVPCache
+	HadamardTDVPCache(ψ::CanonicalMPS, H::CanonicalMPS) -> HadamardTDVPCache
 
 Build the three-chain environment stack of the guess `ψ` for the Hadamard flow generated
 by `H` (see [`HadamardTDVPCache`](@ref)); the Schmidt values of the guess are reset.
 """
-function HadamardTDVPCache(H::CanonicalMPS, ψ::CanonicalMPS)
+function HadamardTDVPCache(ψ::CanonicalMPS, H::CanonicalMPS)
 	L = length(ψ)
 	(length(H) == L) ||
 		throw(DimensionMismatch("generator and state must have the same length"))

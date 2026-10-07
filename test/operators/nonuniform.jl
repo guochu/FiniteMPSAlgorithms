@@ -68,10 +68,10 @@
 
 	# TDVP1/TDVP2 on the whole space (the Schmidt-bound profile) reproduce exp(-τH)
 	τ = 0.05
-	e1 = DMRGCache(h, copy(ψ))
+	e1 = DMRGCache(copy(ψ), h)
 	sweep!(e1, TDVP1(stepsize=-τ, verbosity=0))
 	@test norm(todense(e1.ket) - exp(-τ * Hd) * v) / norm(v) < 1e-8
-	e2 = DMRGCache(h, copy(ψ))
+	e2 = DMRGCache(copy(ψ), h)
 	sweep!(e2, TDVP2(stepsize=-τ, trunc=NoTruncation(), verbosity=0))
 	@test norm(todense(e2.ket) - exp(-τ * Hd) * v) / norm(v) < 1e-8
 
@@ -80,7 +80,7 @@
 	v0 = todense(ψc)
 	changebond!(ψc; D=6, noise=0)
 	@test bonddims(ψc) == prof[2:end-1]
-	ec = DMRGCache(h, ψc)
+	ec = DMRGCache(ψc, h)
 	sweep!(ec, TDVP2(stepsize=-τ, trunc=truncdim(6), verbosity=0))
 	@test norm(todense(ec.ket) - exp(-τ * Hd) * v0) / norm(v0) < 1e-8
 

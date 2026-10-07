@@ -277,14 +277,14 @@ svdguess_mult(h::MPOHamiltonian, x, D::Int) =
 	svdguess_mult(MPO(tompotensors(h)), x, D)
 
 """
-	MultCache(h, x, bra)
+	MultCache(bra, h, x)
 
 Build the `MultCache` of the iterative `mult`: allocate the environment stack and
 precompute the right environments from the chains as supplied — no regularization is
 performed on any chain, and `alg.D` is ignored. Callers provide a right-canonical `bra`
 (the `mult!` driver never re-gauges or truncates it).
 """
-function MultCache(h, x, bra)
+function MultCache(bra, h, x)
 	T = promote_type(scalartype(h), scalartype(x))
 	cache = MultCache(h, x, bra, Vector{Array{T,3}}(undef, length(x) + 1))
 	_init_hstorage_right!(cache)
@@ -307,7 +307,7 @@ the per-site `scaling` field of the output — a scaling^L power is never materi
 Returns `(out, info)` with `info`, the [`ALSConvergenceInfo`](@ref) of the sweeps.
 """
 function mult!(out, h, x, alg::DMRG1)
-	cache = MultCache(h, x, out)
+	cache = MultCache(out, h, x)
 	info = iterative_compute!(cache, alg)
 	s = _opscaling(h) * _opscaling(x)
 	s == 1 || setscaling!(out, s)
@@ -439,7 +439,7 @@ sweep!(m::MultCache, alg::DMRG2) = vcat(leftsweep!(m, alg), rightsweep!(m, alg))
 # (`_guess_bond`); the two-site sweeps adapt the bond dimension during the iterations,
 # so the guess may be smaller than the final bond
 function mult!(out, h, x, alg::DMRG2)
-	cache = MultCache(h, x, out)
+	cache = MultCache(out, h, x)
 	info = iterative_compute!(cache, alg)
 	# attach the external operand scales and fold the center tensor's norm (the total
 	# data norm — the swept chain is isometric on the other sites) into the `scaling`

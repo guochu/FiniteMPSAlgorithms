@@ -79,7 +79,7 @@ end
 # ---------- TDVP driver ----------
 function evolve(H, ψ0, T, dt, D)
 	ψ = changebond!(copy(ψ0); D)
-	env = DMRGCache(H, ψ)
+	env = DMRGCache(ψ, H)
 	alg = TDVP1(stepsize=dt, verbosity=0)
 	for _ in 1:round(Int, T / dt)
 		sweep!(env, alg)
@@ -110,7 +110,7 @@ end
 # With a complete manifold, a single half-sweep must equal exp(-iH dt/2) exactly.
 function half_check(H, Hd, ψ0, dt, D)
 	ψ = changebond!(copy(ψ0); D)
-	env = DMRGCache(H, ψ)
+	env = DMRGCache(ψ, H)
 	FiniteMPSAlgorithms.leftsweep!(env, TDVP1(stepsize=dt, verbosity=0))
 	v = todense(env.ket)
 	ref = exp(Matrix(-im * Hd * dt / 2)) * todense(ψ)

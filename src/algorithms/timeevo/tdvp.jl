@@ -175,11 +175,11 @@ real time by `τ` (`exp(-i·τ·H)`).
 
   ```julia
   # unitary / Liouville flow  dρ/dt = -i[H, ρ]
-  env = DMRGCache(superoperator(H, :left) - superoperator(H, :right), vectorize(ρ))
+  env = DMRGCache(vectorize(ρ), superoperator(H, :left) - superoperator(H, :right))
   sweep!(env, TDVP1(stepsize=-im * τ))
 
   # symmetric two-sided cooling (imaginary time)
-  env = DMRGCache((superoperator(H, :left) + superoperator(H, :right)) / 2, vectorize(ρ))
+  env = DMRGCache(vectorize(ρ), (superoperator(H, :left) + superoperator(H, :right)) / 2)
   sweep!(env, TDVP1(stepsize=-τ))
   ```
 """
@@ -224,7 +224,7 @@ end
 # ---------- constructors ----------
 
 """
-	TDVPCache(h::AbstractMPO, state) -> TDVPCache
+	TDVPCache(state, h::AbstractMPO) -> TDVPCache
 
 Build the environment stack of the right-canonical guess `state` for the left action of
 `h`; the type of `state` selects the manifold (see [`TDVPCache`](@ref)). The constructor
@@ -233,7 +233,7 @@ canonical". For a `CanonicalMPS` state, `h` is the MPO acting on the state direc
 a vectorized density-operator flow, the superoperator of [`superoperator`](@ref)); for a
 `CanonicalMPO` state it is the operator multiplying the density operator from the left.
 """
-function TDVPCache(h::AbstractMPO, ψ::CanonicalMPS)
+function TDVPCache(ψ::CanonicalMPS, h::AbstractMPO)
 	L = length(ψ)
 	T = promote_type(scalartype(h), scalartype(ψ))
 	unset_svectors!(ψ)
@@ -246,9 +246,9 @@ function TDVPCache(h::AbstractMPO, ψ::CanonicalMPS)
 	return TDVPCache(h, ψ, es)
 end
 
-TDVPCache(h::MPOHamiltonian, ρ::CanonicalMPO) = TDVPCache(MPO(h), ρ)
+TDVPCache(ρ::CanonicalMPO, h::MPOHamiltonian) = TDVPCache(ρ, MPO(h))
 
-function TDVPCache(h::MPO, ρ::CanonicalMPO)
+function TDVPCache(ρ::CanonicalMPO, h::MPO)
 	L = length(ρ)
 	unset_svectors!(ρ)
 	Tb = promote_type(scalartype(ρ), scalartype(h))

@@ -24,7 +24,7 @@
 	# unified sweep interface drives the same iteration
 	ψ3 = randommps(ComplexF64, fill(2, L); D=32)
 	canonicalize!(ψ3)
-	env = DMRGCache(H, ψ3)
+	env = DMRGCache(ψ3, H)
 	for _ in 1:30
 		kvals = sweep!(env, DMRG1(maxiter=1, tol=0.0, verbosity=0))
 	end
@@ -68,7 +68,7 @@ end
 	H = mpo_model(p6)
 	ψs = randommps(ComplexF64, fill(2, 6); D=4)
 	canonicalize!(ψs)
-	env = DMRGCache(H, ψs)
+	env = DMRGCache(ψs, H)
 	kleft = leftsweep!(env, DMRG1(maxiter=1, tol=0.0, verbosity=0))
 	@test length(kleft) == 6
 	kright = rightsweep!(env, DMRG1(maxiter=1, tol=0.0, verbosity=0))

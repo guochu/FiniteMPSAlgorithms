@@ -12,12 +12,12 @@ struct ExcitedStateCache{M<:AbstractMPO, V<:CanonicalMPS, P<:CanonicalMPS, T, OC
 end
 
 """
-	ExcitedStateCache(h::AbstractMPO, ψ::CanonicalMPS, projectors::Vector{CanonicalMPS})
+	ExcitedStateCache(ψ::CanonicalMPS, h::AbstractMPO, projectors::Vector{CanonicalMPS})
 
 Environment cache for the excited-state search of `ψ`: one overlap cache per projector.
 """
-function ExcitedStateCache(h::AbstractMPO, ψ::CanonicalMPS, projectors::Vector{<:CanonicalMPS})
-	env = DMRGCache(h, ψ)
+function ExcitedStateCache(ψ::CanonicalMPS, h::AbstractMPO, projectors::Vector{<:CanonicalMPS})
+	env = DMRGCache(ψ, h)
 	cs = [OverlapCache(ψ, p) for p in projectors]
 	return ExcitedStateCache(h, ψ, projectors, env.hstorage, cs)
 end
@@ -130,7 +130,7 @@ per-sweep local-energy history).
 """
 function excited_state!(ψ::CanonicalMPS, h::AbstractMPO, projectors::Vector{<:CanonicalMPS}, alg::DMRG1=DMRG1())
 	bonddim(ψ) != alg.D && changebond!(ψ; D=alg.D)
-	env = ExcitedStateCache(h, ψ, projectors)
+	env = ExcitedStateCache(ψ, h, projectors)
 	info = iterative_compute!(env, alg)
 	return info
 end

@@ -212,14 +212,14 @@ function svdguess_hadamard(ψA, ψB, D::Int)
 end
 
 """
-	HadamardCache(ketx, kety, bra)
+	HadamardCache(bra, ketx, kety)
 
 Build the `HadamardCache` of the iterative hadamard product: allocate the environment
 stack and precompute the right environments from the chains as supplied — no
 regularization is performed on any chain, and `alg.D` is ignored. Callers provide a
 right-canonical `bra` (the `hadamard!` driver never re-gauges or truncates it).
 """
-function HadamardCache(ketx, kety, bra)
+function HadamardCache(bra, ketx, kety)
 	T = scalartype(bra)
 	cache = HadamardCache(ketx, kety, bra, Vector{Array{T,3}}(undef, length(bra) + 1))
 	_init_hstorage_right!(cache)
@@ -243,7 +243,7 @@ through the per-site `scaling` field, with the ⊙ convention
 Returns `(χ, info)` with `info`, the [`ALSConvergenceInfo`](@ref) of the sweeps.
 """
 function hadamard!(χ, ψA, ψB, alg::DMRG1)
-	cache = HadamardCache(ψA, ψB, χ)
+	cache = HadamardCache(χ, ψA, ψB)
 	info = iterative_compute!(cache, alg)
 	setscaling!(χ, scaling(ψA) * scaling(ψB))
 	return χ, info
@@ -348,7 +348,7 @@ end
 sweep!(m::HadamardCache, alg::DMRG2) = vcat(leftsweep!(m, alg), rightsweep!(m, alg))
 
 function hadamard!(χ, ψA, ψB, alg::DMRG2)
-	cache = HadamardCache(ψA, ψB, χ)
+	cache = HadamardCache(χ, ψA, ψB)
 	info = iterative_compute!(cache, alg)
 	# attach the ⊙ convention scale scaling(ψA)·scaling(ψB) and fold the center norm
 	# into `scaling` (see `mult!`)

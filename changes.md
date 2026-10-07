@@ -1,5 +1,26 @@
 # Interface changes
 
+## Changed: cache constructors take the optimized chain as their first argument
+
+The public constructors of the nine iterative algorithm caches now take the chain being
+optimized / updated **first**, with the operator (and the remaining fixed operands)
+following — mirroring the in-place drivers' argument order (`mult!(out, h, x, alg)`,
+`hadamard!(χ, ψA, ψB, alg)`, `linsolve!(x, A, y, alg)`):
+
+- `DMRGCache(ψ, h)` (was `DMRGCache(h, ψ)`);
+- `ExcitedStateCache(ψ, h, projectors)` (was `(h, ψ, projectors)`);
+- `TDVPCache(state, h)` for both manifolds (was `(h, state)`; the `MPOHamiltonian`
+  convenience method keeps its expanding behavior, `TDVPCache(ρ, h::MPOHamiltonian)`);
+- `CADMRGCache(ψ, h)` and `ThermalDMRGCache(rho, h)` (arguments swapped);
+- `HadamardTDVPCache(ψ, H)` (was `(H, ψ)`);
+- `MultCache(out, h, x)` (was `(h, x, out)`);
+- `HadamardCache(χ, ψA, ψB)` (was `(ψA, ψB, χ)`);
+- `LinsolveCache(x, A, y)` (was `(A, y, x)`).
+
+The struct layouts are unchanged (the raw multi-argument constructors keep the field
+order); only the convenience constructors, their docstrings and every in-repo call site
+(src, tests, debug scripts) are adapted. Full suite: 1012/1012.
+
 ## Changed: `complex` of an already-complex chain returns the same object (no copy)
 
 `Base.complex` on `CanonicalMPS` / `CanonicalMPO` / `MPO` copied the chain even when the

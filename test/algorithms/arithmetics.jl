@@ -286,7 +286,7 @@ end
 	ψ = randommps(ComplexF64, ds; D=8)
 
 	# DMRGCache
-	env = DMRGCache(H, ψ)
+	env = DMRGCache(ψ, H)
 	@test env isa DMRGCache
 	@test length(env.hstorage) == L + 1
 	@test env.H === H
@@ -312,7 +312,7 @@ end
 	# ExcitedStateCache: DMRG environments with orthogonality projectors
 	ψg = randommps(ComplexF64, ds; D=8)
 	proj = [randommps(ComplexF64, ds; D=4)]
-	ec = ExcitedStateCache(H, ψg, proj)
+	ec = ExcitedStateCache(ψg, H, proj)
 	@test ec isa ExcitedStateCache
 	@test length(ec.cstorages) == 1
 
@@ -377,7 +377,7 @@ end
 	# per-site loss monotonicity inside every sweep (random guess -> actual movement).
 	# All losses are in processing-time order. A full sweep processes sites 1:L then
 	# L:1, and the local-target norm is non-decreasing throughout
-	cache = HadamardCache(ψ, φ, randommps(ComplexF64, ds; D=32))
+	cache = HadamardCache(randommps(ComplexF64, ds; D=32), ψ, φ)
 	khist = iterative_compute!(cache, DMRG1(maxiter=12, tol=1e-11, verbosity=0, D=32)).losses
 	χr = cache.bra
 	@test all(kv -> length(kv) == 2 * L, khist)
@@ -514,13 +514,13 @@ end
 	monotone(khist) = all(all(kh2 .>= kh1 .- 1e-8) for (kh1, kh2) in zip(khist, khist[2:end]))
 
 	# mult MPS
-	mc = MultCache(MPO(tompotensors(Hs)), ψs, svdguess_mult(Hs, ψs, 64))
+	mc = MultCache(svdguess_mult(Hs, ψs, 64), MPO(tompotensors(Hs)), ψs)
 	kh = iterative_compute!(mc, nt).losses
 	@test monotone(kh)
 	@test todense(first(mult(MPO(tompotensors(Hs)), ψs, nt))) ≈ Hsd * vψs atol = 1e-8 rtol = 1e-8
 
 	# mult MPO·MPO
-	mc = MultCache(MPO(tompotensors(Hs)), MPO(tompotensors(Hs)), svdguess_mult(MPO(tompotensors(Hs)), MPO(tompotensors(Hs)), 64))
+	mc = MultCache(svdguess_mult(MPO(tompotensors(Hs)), MPO(tompotensors(Hs)), 64), MPO(tompotensors(Hs)), MPO(tompotensors(Hs)))
 	kh = iterative_compute!(mc, nt).losses
 	@test monotone(kh)
 	@test todense(first(mult(MPO(tompotensors(Hs)), MPO(tompotensors(Hs)), nt))) ≈ Hsd * Hsd atol = 1e-8 rtol = 1e-8
@@ -540,7 +540,7 @@ end
 	# hadamard
 	φs = randommps(ComplexF64, dss; D=4)
 	refχs = vψs .* todense(φs)
-	hc = HadamardCache(ψs, φs, svdguess_hadamard(ψs, φs, 64))
+	hc = HadamardCache(svdguess_hadamard(ψs, φs, 64), ψs, φs)
 	kh = iterative_compute!(hc, nt).losses
 	@test monotone(kh)
 	@test todense(first(hadamard(ψs, φs, nt))) ≈ refχs atol = 1e-8 rtol = 1e-8
@@ -550,7 +550,7 @@ end
 	Us = timeevompo(Hs, 0.15, WII())
 	xs_exact = randommps(ComplexF64, dss; D=4)
 	ys = mult(Us, xs_exact)
-	lc = LinsolveCache(Us, ys, randommps(ComplexF64, dss; D=8, normalize=false))
+	lc = LinsolveCache(randommps(ComplexF64, dss; D=8, normalize=false), Us, ys)
 	kh = iterative_compute!(lc, nt2).losses
 	@test monotone(kh)
 	@test abs(dot(todense(lc.ket), todense(xs_exact))) /

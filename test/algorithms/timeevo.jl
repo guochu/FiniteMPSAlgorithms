@@ -11,7 +11,7 @@
 	dt = 0.05
 	nsteps = 10
 	alg = TDVP1(stepsize=-im * dt)   # stepsize = -im*τ: one sweep of exp(-i H τ)
-	env = DMRGCache(H, ψ)
+	env = DMRGCache(ψ, H)
 	ψ_ref = todense(ψ)
 	for t in 1:nsteps
 		sweep!(env, alg)
@@ -28,7 +28,7 @@
 	# uniform TFIM, so more steps and a looser tolerance are needed)
 	ψg = randommps(ComplexF64, fill(2, L); D=8)
 	normalize!(ψg)
-	envg = DMRGCache(H, ψg)
+	envg = DMRGCache(ψg, H)
 	alg_im = TDVP1(stepsize=-0.2)   # stepsize = -τ: one sweep of exp(-H τ)
 	for _ in 1:150
 		sweep!(envg, alg_im)
@@ -104,7 +104,7 @@ end
 	# --- TDVP1 imaginary time converges to the ground state ---
 	ψg = randommps(ComplexF64, [2, 2]; D=4)
 	normalize!(ψg)
-	envg = DMRGCache(hrect, ψg)
+	envg = DMRGCache(ψg, hrect)
 	for _ in 1:200
 		sweep!(envg, TDVP1(stepsize=-0.05))
 	end
@@ -194,7 +194,7 @@ end
 
 	# --- TDVP1 on the non-Hermitian generator (stepsize dt: exp(𝓛·dt)) ---
 	ψt = changebond!(copy(ρ); D=16)
-	env = DMRGCache(𝓛, ψt)
+	env = DMRGCache(ψt, 𝓛)
 	alg = TDVP1(stepsize=T / 40, ishermitian=false, verbosity=0)
 	for _ in 1:40
 		sweep!(env, alg)
@@ -241,13 +241,13 @@ end
 	dt = 0.01
 	ρ2 = randommpo(ComplexF64, [d]; D=4)
 	ρ2d = todense(ρ2)
-	env = TDVPCache(h1mpo, ρ2)
+	env = TDVPCache(ρ2, h1mpo)
 	sweep!(env, TDVP1(stepsize=-dt))
 	@test norm(todense(env.state) - exp(-dt * h1) * ρ2d) / norm(ρ2d) < 1e-8
 
 	# --- L=1 cooling over many steps: ρ(τ) = e^{-τh} ---
 	ρI = tompo(Matrix{ComplexF64}(I, d, d), [d])
-	env = TDVPCache(h1mpo, ρI)
+	env = TDVPCache(ρI, h1mpo)
 	τ = 0.0
 	for _ in 1:20
 		sweep!(env, TDVP1(stepsize=-0.05))
@@ -262,8 +262,8 @@ end
 	h = MPOHamiltonian(heisenberg_terms(L))
 	ρv = randommpo(ComplexF64, fill(2, L); D=4)
 	ψv = vectorize(deepcopy(ρv))
-	envA = TDVPCache(h, ρv)
-	envB = DMRGCache(superoperator(h, :left), ψv)
+	envA = TDVPCache(ρv, h)
+	envB = DMRGCache(ψv, superoperator(h, :left))
 	for _ in 1:2
 		sweep!(envA, TDVP1(stepsize=-0.05, verbosity=0))
 		sweep!(envB, TDVP1(stepsize=-0.05, verbosity=0))
@@ -281,7 +281,7 @@ end
 	ρfull = tompo(Mr, fill(2, L))
 	@test all(==(4), bonddims(ρfull))
 	nt = 5; dt3 = 0.05
-	envi = TDVPCache(h, deepcopy(ρfull))
+	envi = TDVPCache(deepcopy(ρfull), h)
 	for _ in 1:nt
 		sweep!(envi, TDVP1(stepsize=-dt3, verbosity=0))
 	end
@@ -292,7 +292,7 @@ end
 	#     (again on the full manifold, where the step is exact) ---
 	ρrt = deepcopy(ρfull)
 	ψrt = vectorize(ρrt)
-	envrt = DMRGCache(superoperator(h, :left) - superoperator(h, :right), ψrt)
+	envrt = DMRGCache(ψrt, superoperator(h, :left) - superoperator(h, :right))
 	nrt = 5; dt4 = 0.05
 	for _ in 1:nrt
 		sweep!(envrt, TDVP1(stepsize=-im * dt4, verbosity=0))
@@ -309,7 +309,7 @@ end
 	end
 	hf = MPOHamiltonian(termsf)
 	Hf = denseH(L; field)
-	env = TDVPCache(hf, tompo(Matrix{ComplexF64}(I, 2^L, 2^L), fill(2, L)))
+	env = TDVPCache(tompo(Matrix{ComplexF64}(I, 2^L, 2^L), fill(2, L)), hf)
 	prevE = Inf
 	for _ in 1:6
 		sweep!(env, TDVP1(stepsize=-0.25))
@@ -323,8 +323,8 @@ end
 	hd = MPO(h)
 	ρt1 = randommpo(ComplexF64, fill(2, L); D=2)
 	ρt2 = deepcopy(ρt1)
-	e1 = TDVPCache(h, ρt1)
-	e2 = TDVPCache(hd, ρt2)
+	e1 = TDVPCache(ρt1, h)
+	e2 = TDVPCache(ρt2, hd)
 	sweep!(e1, TDVP1(stepsize=-0.1))
 	sweep!(e2, TDVP1(stepsize=-0.1))
 	@test todense(e1.state) == todense(e2.state)
@@ -333,8 +333,8 @@ end
 	ψ1 = randommps(ComplexF64, fill(2, L); D=4)
 	normalize!(ψ1)
 	ψ2 = deepcopy(ψ1)
-	ev1 = TDVPCache(h, ψ1)
-	ev2 = DMRGCache(h, ψ2)
+	ev1 = TDVPCache(ψ1, h)
+	ev2 = DMRGCache(ψ2, h)
 	@test ev1.estorage == ev2.hstorage
 	sweep!(ev1, TDVP1(stepsize=-0.1, verbosity=0))
 	sweep!(ev2, TDVP1(stepsize=-0.1, verbosity=0))
@@ -354,7 +354,7 @@ end
 	vg = todense(ψg)
 	vs = todense(ρs)
 	dtg = -0.05
-	envs = TDVPCache(Hg, copy(ρs))
+	envs = TDVPCache(copy(ρs), Hg)
 	sweep!(envs, TDVP1(stepsize=dtg, ishermitian=false, verbosity=0))
 	@test norm(todense(envs.state) - exp.(dtg .* vg) .* vs) / norm(vs) < 1e-10
 	# the same flow with the scaling absorbed into the generator's tensors
@@ -363,7 +363,7 @@ end
 		Habs[i] = scaling(ψg) * Habs[i]
 	end
 	setscaling!(Habs, 1)
-	envs2 = TDVPCache(copyphydims(Habs), copy(ρs))
+	envs2 = TDVPCache(copy(ρs), copyphydims(Habs))
 	sweep!(envs2, TDVP1(stepsize=dtg, ishermitian=false, verbosity=0))
 	@test norm(todense(envs.state) - todense(envs2.state)) / norm(todense(envs2.state)) < 1e-10
 end
@@ -379,7 +379,7 @@ end
 
 	# --- alg.trunc caps the bond profile: the pair SVD never exceeds it ---
 	ψc = randommps(ComplexF64, ds; D=16)
-	envc = DMRGCache(H, ψc)
+	envc = DMRGCache(ψc, H)
 	sweep!(envc, TDVP2(stepsize=-τ, trunc=truncdim(2), verbosity=0))
 	@test all(<=(2), bonddims(envc.ket))
 
@@ -388,7 +388,7 @@ end
 	#     re-splittings reproduce the exact propagator e^{-τ·H} ---
 	ψ0 = randommps(ComplexF64, ds; D=16)
 	ψ0d = todense(ψ0)
-	env0 = DMRGCache(H, ψ0)
+	env0 = DMRGCache(ψ0, H)
 	sweep!(env0, TDVP2(stepsize=-τ, trunc=NoTruncation(), verbosity=0))
 	@test norm(todense(env0.ket) - exp(-τ * Hd) * ψ0d) / norm(ψ0d) < 1e-10
 
@@ -399,7 +399,7 @@ end
 	ψpd = todense(ψp)                              # the sweeps mutate ψp in place
 	dt = 0.05
 	nrt = 10
-	envp = DMRGCache(H, ψp)
+	envp = DMRGCache(ψp, H)
 	for _ in 1:nrt
 		sweep!(envp, TDVP2(stepsize=-im * dt, trunc=truncdim(4), verbosity=0))
 	end
@@ -428,7 +428,7 @@ end
 	ρed = ex / tr(ex)
 	errs = Float64[]
 	for nst in (20, 40)
-		envI = DMRGCache(G, copy(ψI))
+		envI = DMRGCache(copy(ψI), G)
 		for _ in 1:nst
 			sweep!(envI, TDVP2(stepsize=-β / 2 / nst, trunc=truncdim(16), verbosity=0))
 		end
@@ -451,7 +451,7 @@ end
 	@test all(==(1), bonddims(ρg))
 	rightorth!(ρg)
 	@test iscanonical(ρg)
-	envg = TDVPCache(h3, ρg)
+	envg = TDVPCache(ρg, h3)
 	nst3 = 6
 	for _ in 1:nst3
 		sweep!(envg, TDVP2(stepsize=-β / nst3, trunc=truncdim(4), verbosity=0))
@@ -474,7 +474,7 @@ end
 	vg = todense(ψg)
 	vs = todense(ψs)
 	dtg = -0.05
-	e2s = TDVPCache(Hg, copy(ψs))
+	e2s = TDVPCache(copy(ψs), Hg)
 	sweep!(e2s, TDVP2(stepsize=dtg, trunc=NoTruncation(), ishermitian=false, verbosity=0))
 	@test norm(todense(e2s.state) - exp.(dtg .* vg) .* vs) / norm(vs) < 1e-10
 	Habs = copy(ψg)
@@ -482,7 +482,7 @@ end
 		Habs[i] = scaling(ψg) * Habs[i]
 	end
 	setscaling!(Habs, 1)
-	e2s2 = TDVPCache(copyphydims(Habs), copy(ψs))
+	e2s2 = TDVPCache(copy(ψs), copyphydims(Habs))
 	sweep!(e2s2, TDVP2(stepsize=dtg, trunc=NoTruncation(), ishermitian=false, verbosity=0))
 	@test norm(todense(e2s.state) - todense(e2s2.state)) / norm(todense(e2s2.state)) < 1e-10
 end
@@ -498,7 +498,7 @@ end
 	canonicalize!(ψ1)
 	dt1 = 0.07
 	v1 = todense(copy(ψ1))                    # the sweeps mutate the state in place
-	env1 = HadamardTDVPCache(H1, copy(ψ1))
+	env1 = HadamardTDVPCache(copy(ψ1), H1)
 	sweep!(env1, HadamardTDVP(stepsize=-dt1, verbosity=0))
 	@test norm(todense(env1.state) - exp.(-dt1 .* todense(H1)) .* v1) < 1e-12
 
@@ -515,26 +515,26 @@ end
 	v0 = todense(ψ)
 	Hv = todense(H)
 	for dt in (-0.05, -im * 0.05, -0.03 - 0.04im)
-		env = HadamardTDVPCache(H, copy(ψ))
+		env = HadamardTDVPCache(copy(ψ), H)
 		sweep!(env, HadamardTDVP(stepsize=dt, verbosity=0))
 		@test norm(todense(env.state) - exp.(dt .* Hv) .* v0) / norm(v0) < 1e-10
 	end
 
 	# real time with a real generator preserves the amplitude moduli pointwise
 	Hr = tomps(randn(2^L), ds)
-	envr = HadamardTDVPCache(Hr, copy(ψ))
+	envr = HadamardTDVPCache(copy(ψ), Hr)
 	sweep!(envr, HadamardTDVP(stepsize=-im * 0.05, verbosity=0))
 	@test norm(abs.(todense(envr.state)) - abs.(v0)) < 1e-10
 
 	# two half steps == one full step, and the state's `scaling` flows through untouched
-	envA = HadamardTDVPCache(H, copy(ψ))
+	envA = HadamardTDVPCache(copy(ψ), H)
 	sweep!(envA, HadamardTDVP(stepsize=-0.05, verbosity=0))
 	@test scaling(envA.state) == scaling(ψ)
-	envB = HadamardTDVPCache(H, copy(ψ))
+	envB = HadamardTDVPCache(copy(ψ), H)
 	leftsweep!(envB, HadamardTDVP(stepsize=-0.05, verbosity=0))
 	rightsweep!(envB, HadamardTDVP(stepsize=-0.05, verbosity=0))
 	@test norm(todense(envB.state) - todense(envA.state)) / norm(todense(envA.state)) < 1e-10
-	envC = HadamardTDVPCache(H, copy(ψ))
+	envC = HadamardTDVPCache(copy(ψ), H)
 	sweep!(envC, HadamardTDVP(stepsize=-0.025, verbosity=0))
 	sweep!(envC, HadamardTDVP(stepsize=-0.025, verbosity=0))
 	@test norm(todense(envC.state) - todense(envA.state)) / norm(todense(envA.state)) < 1e-10
@@ -545,20 +545,20 @@ end
 	#     hermitian, while TDVP1 defaults to Lanczos) ---
 	Hd = randommps(ComplexF64, ds; D=16)
 	ψd = randommps(ComplexF64, ds; D=16)
-	envH = HadamardTDVPCache(Hd, copy(ψd))
+	envH = HadamardTDVPCache(copy(ψd), Hd)
 	sweep!(envH, HadamardTDVP(stepsize=-0.05, verbosity=0))
-	envM = TDVPCache(copyphydims(Hd), copy(ψd))
+	envM = TDVPCache(copy(ψd), copyphydims(Hd))
 	sweep!(envM, TDVP1(stepsize=-0.05, ishermitian=false, verbosity=0))
 	@test norm(todense(envH.state) - todense(envM.state)) / norm(todense(envH.state)) < 1e-10
 	# ... and with the generator's scaling absorbed, the same flow
-	envS = HadamardTDVPCache(H, copy(ψ))
+	envS = HadamardTDVPCache(copy(ψ), H)
 	sweep!(envS, HadamardTDVP(stepsize=-0.05, verbosity=0))
 	Hab = copy(H)
 	for i in 1:L
 		Hab[i] = scaling(H) * Hab[i]
 	end
 	setscaling!(Hab, 1)
-	envS2 = HadamardTDVPCache(Hab, copy(ψ))
+	envS2 = HadamardTDVPCache(copy(ψ), Hab)
 	sweep!(envS2, HadamardTDVP(stepsize=-0.05, verbosity=0))
 	@test norm(todense(envS.state) - todense(envS2.state)) / norm(todense(envS.state)) < 1e-10
 
@@ -574,7 +574,7 @@ end
 	changebond!(ψp; D=8, noise=0)
 	@test bonddims(ψp) == [2, 4, 4, 2]
 	dt5 = -0.02
-	envp = HadamardTDVPCache(H5, ψp)         # mutates ψp in place
+	envp = HadamardTDVPCache(ψp, H5)         # mutates ψp in place
 	sweep!(envp, HadamardTDVP(stepsize=dt5, verbosity=0))
 	@test norm(todense(envp.state) - exp.(dt5 .* todense(H5)) .* vp) / norm(vp) < 1e-10
 	for _ in 1:4
@@ -594,16 +594,15 @@ end
 	Hv6 = todense(H6)
 	errs = Float64[]
 	for dt in (-0.02, -0.01)
-		env6 = HadamardTDVPCache(H6, copy(ψ6))
+		env6 = HadamardTDVPCache(copy(ψ6), H6)
 		sweep!(env6, HadamardTDVP(stepsize=dt, verbosity=0))
 		push!(errs, norm(todense(env6.state) - exp.(dt .* Hv6) .* v6) / norm(v6))
 	end
 	@test errs[2] < errs[1] / 1.5
 
 	# --- interface: the cache rejects mismatched chains ---
-	@test_throws DimensionMismatch HadamardTDVPCache(H,
-													 prodmps(ComplexF64, fill(2, L - 1), fill(1, L - 1)))
-	@test_throws DimensionMismatch HadamardTDVPCache(H, tomps(randn(ComplexF64, 3^L), fill(3, L)))
+	@test_throws DimensionMismatch HadamardTDVPCache(prodmps(ComplexF64, fill(2, L - 1), fill(1, L - 1)), H)
+	@test_throws DimensionMismatch HadamardTDVPCache(tomps(randn(ComplexF64, 3^L), fill(3, L)), H)
 	@test HadamardTDVP(stepsize=-0.1) isa FiniteMPSAlgorithms.MPSAlgorithm
 end
 
@@ -620,13 +619,13 @@ end
 	ψ = tomps(randn(ComplexF64, 2^L), ds)
 	canonicalize!(ψ)
 	v0 = todense(ψ)
-	env = HadamardTDVPCache(H, copy(ψ))
+	env = HadamardTDVPCache(copy(ψ), H)
 	sweep!(env, HadamardTDVP2(stepsize=dt, trunc=NoTruncation(), verbosity=0))
 	@test norm(todense(env.state) - exp.(dt .* Hv) .* v0) / norm(v0) < 1e-10
 
 	# --- cross-check: the two-site Hadamard flow with `H` is TDVP2 with the diagonal
 	#     operator `copyphydims(H)` (Arnoldi on both sides, no truncation) ---
-	envM = TDVPCache(copyphydims(H), copy(ψ))
+	envM = TDVPCache(copy(ψ), copyphydims(H))
 	sweep!(envM, TDVP2(stepsize=dt, trunc=NoTruncation(), ishermitian=false, verbosity=0))
 	@test norm(todense(env.state) - todense(envM.state)) / norm(todense(envM.state)) < 1e-10
 
@@ -635,12 +634,12 @@ end
 	ψp = CanonicalMPS([reshape(normalize(randn(ComplexF64, 2)), 1, 2, 1) for _ in 1:L])
 	@test all(==(1), bonddims(ψp))
 	vp = todense(ψp)
-	envp = HadamardTDVPCache(H, copy(ψp))
+	envp = HadamardTDVPCache(copy(ψp), H)
 	sweep!(envp, HadamardTDVP2(stepsize=-0.01, trunc=truncdim(4), verbosity=0))
 	@test bonddims(envp.state) == [2, 4, 2]
 	# ... and from then on the manifold holds the product, so the flow is exact
 	v1 = todense(envp.state)
-	envp2 = HadamardTDVPCache(H, copy(envp.state))
+	envp2 = HadamardTDVPCache(copy(envp.state), H)
 	nst = 10
 	dt2 = -0.01
 	for _ in 1:nst
@@ -651,8 +650,7 @@ end
 	@test norm(todense(envp.state) - exp.(-0.01 .* Hv) .* vp) / norm(vp) < 5e-3
 
 	# --- alg.trunc caps the profile ---
-	envc = HadamardTDVPCache(H,
-							 CanonicalMPS([reshape(normalize(randn(ComplexF64, 2)), 1, 2, 1) for _ in 1:L]))
+	envc = HadamardTDVPCache(CanonicalMPS([reshape(normalize(randn(ComplexF64, 2)), 1, 2, 1) for _ in 1:L]), H)
 	sweep!(envc, HadamardTDVP2(stepsize=dt, trunc=truncdim(2), verbosity=0))
 	@test all(<=(2), bonddims(envc.state))
 
@@ -660,7 +658,7 @@ end
 	#     more accurate at the same total time ---
 	errs = Float64[]
 	for (n, dtc) in ((10, -im * 0.02), (20, -im * 0.01))
-		ec = HadamardTDVPCache(H, copy(ψp))
+		ec = HadamardTDVPCache(copy(ψp), H)
 		for _ in 1:n
 			sweep!(ec, HadamardTDVP2(stepsize=dtc, trunc=truncdim(2), verbosity=0))
 		end

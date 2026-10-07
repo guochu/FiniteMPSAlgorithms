@@ -116,7 +116,7 @@ struct ThermalDMRGCache{H<:AbstractMPO,V<:PositiveMPA,T}
 	hstorage::Vector{Array{T,3}}
 end
 
-function ThermalDMRGCache(h::AbstractMPO, rho::PositiveMPA)
+function ThermalDMRGCache(rho::PositiveMPA, h::AbstractMPO)
 	L = length(rho)
 	T = promote_type(scalartype(h), scalartype(rho))
 	hs = Vector{Array{T,3}}(undef, L + 1)
@@ -526,7 +526,7 @@ The iteration loop is the generic `iterative_compute!` with `β` forwarded to th
 `info` is the returned [`ALSConvergenceInfo`](@ref).
 """
 function thermalstate!(rho::PositiveMPA, h::AbstractMPO, β::Real, alg::PDMRG=PDMRG())
-	env = ThermalDMRGCache(h, rho)
+	env = ThermalDMRGCache(rho, h)
 	info = iterative_compute!(env, alg; β)
 	return env.rho, info
 end
@@ -553,7 +553,7 @@ temperature `β` (`T = 1/β`), with the entropy from the center's local spectrum
 spectrum of `ρ` equals that of its center block).
 """
 function freeenergy(h::AbstractMPO, rho::PositiveMPA, β::Real)
-	env = ThermalDMRGCache(h, rho)
+	env = ThermalDMRGCache(rho, h)
 	s = rho.center[]
 	M = rho.mcenter[]
 	s1, s2, s3, R = size(M)

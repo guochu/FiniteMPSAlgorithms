@@ -206,7 +206,7 @@ struct CADMRGCache{M<:AbstractMPO,V<:CanonicalMPS,T}
 	gates::Vector{CliffordGate}
 end
 
-function CADMRGCache(h::AbstractMPO, ψ::CanonicalMPS)
+function CADMRGCache(ψ::CanonicalMPS, h::AbstractMPO)
 	L = length(ψ)
 	T = promote_type(scalartype(h), scalartype(ψ))
 	unset_svectors!(ψ)
@@ -398,7 +398,7 @@ Clifford circuits together with the state, use `ground_state(h, alg)` which retu
 """
 function ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::CADMRG)
 	hd = _dense_mpo(h)   # CA-DMRG rewrites MPO tensors in place; use dense form
-	env = CADMRGCache(hd, ψ)
+	env = CADMRGCache(ψ, hd)
 	info = iterative_compute!(env, alg)
 	setscaling!(ψ, 1.0)
 	lmul!(1 / norm(ψ), ψ)
@@ -421,7 +421,7 @@ function ground_state(h::MPOHamiltonian, alg::CADMRG)
 	TC = complex(scalartype(h))
 	ψ = randommps(TC, ophydims(h); D=_guess_bond(alg.trunc))
 	hd = _dense_mpo(h)   # CA-DMRG rewrites MPO tensors in place; use dense form
-	env = CADMRGCache(hd, ψ)
+	env = CADMRGCache(ψ, hd)
 	info = iterative_compute!(env, alg)
 	(alg.verbosity > 1) && println("CA-DMRG converged (delta = $(info.itererr))")
 	setscaling!(ψ, 1.0)

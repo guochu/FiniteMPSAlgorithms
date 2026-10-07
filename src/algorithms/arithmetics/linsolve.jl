@@ -196,12 +196,12 @@ sweep!(m::LinsolveCache, alg::IterativeMPSAlgorithm) = vcat(leftsweep!(m, alg), 
 # `svdguess_compress(y, trunc)` — the generic initializers cover the linsolve case
 
 """
-	LinsolveCache(A, y, x)
+	LinsolveCache(x, A, y)
 
 Build the `LinsolveCache` of the iterative `linsolve`: allocate the h/b environment
 stacks and initialize them by a data-level right-orthogonalization of `x`.
 """
-function LinsolveCache(A, y, x)
+function LinsolveCache(x, A, y)
 	T = promote_type(scalartype(A), scalartype(y))
 	m = LinsolveCache(A, y, x,
 					  Vector{Array{T,4}}(undef, length(y) + 1),
@@ -227,7 +227,7 @@ external scales (a scaling^L power is never materialized). Returns `(x, info)` w
 """
 function linsolve!(x, A, y, alg::ALSLinSolve = ALSLinSolve())
 	bonddim(x) != alg.D && changebond!(x; D=alg.D)
-	m = LinsolveCache(A, y, x)
+	m = LinsolveCache(x, A, y)
 	info = iterative_compute!(m, alg; residual=true)
 	# the sweeps solve the raw-data problem A_data·x = y_data; the represented equation
 	# (s_A^L·A_data)·(s_x^L·x) = s_y^L·y_data holds iff s_x = scaling(y)/scaling(A)
@@ -356,7 +356,7 @@ end
 sweep!(m::LinsolveCache, alg::ALSLinSolve2) = vcat(leftsweep!(m, alg), rightsweep!(m, alg))
 
 function linsolve!(x, A, y, alg::ALSLinSolve2)
-	m = LinsolveCache(A, y, x)
+	m = LinsolveCache(x, A, y)
 	info = iterative_compute!(m, alg; residual=true)
 	# the sweeps solve the raw-data problem A_data·x = y_data; the represented equation
 	# (s_A^L·A_data)·(s_x^L·x) = s_y^L·y_data holds iff s_x = scaling(y)/scaling(A):

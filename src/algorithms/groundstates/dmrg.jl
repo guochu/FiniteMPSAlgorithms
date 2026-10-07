@@ -10,7 +10,7 @@ struct DMRGCache{M<:AbstractMPO, V<:CanonicalMPS, T}
 end
 
 """
-	DMRGCache(h::AbstractMPO, ψ::CanonicalMPS) -> DMRGCache
+	DMRGCache(ψ::CanonicalMPS, h::AbstractMPO) -> DMRGCache
 
 Build the environment stack `⟨ψ|W|ψ⟩` for a right-canonical guess `ψ`: `hstorage[1]` is
 the left boundary, `hstorage[L+1]` the right boundary, and the right environments of all
@@ -18,7 +18,7 @@ sites are precomputed (matching the left-to-right first sweep of DMRG1 / TDVP1).
 full sweep is `leftsweep!` (sites `1:L`, QR moves the orthogonality center right)
 followed by `rightsweep!` (sites `L:1`) — this order must not be exchanged.
 """
-function DMRGCache(h::AbstractMPO, ψ::CanonicalMPS)
+function DMRGCache(ψ::CanonicalMPS, h::AbstractMPO)
 	L = length(ψ)
 	T = promote_type(scalartype(h), scalartype(ψ))
 	# the sweeps keep the mixed canonical form of the data but never touch the Schmidt
@@ -130,7 +130,7 @@ materialized as a scaling^L power.
 """
 function ground_state!(ψ::CanonicalMPS, h::AbstractMPO, alg::DMRG1=DMRG1())
 	bonddim(ψ) != alg.D && changebond!(ψ; D=alg.D)
-	env = DMRGCache(h, ψ)
+	env = DMRGCache(ψ, h)
 	info = iterative_compute!(env, alg)
 	setscaling!(ψ, 1.0)
 	lmul!(1 / norm(ψ), ψ)   # data-normalized state (explosion-safe)

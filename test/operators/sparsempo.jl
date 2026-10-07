@@ -177,8 +177,8 @@
 	@testset "TDVP1/DMRG1 dispatch on sparse MPO" begin
 		ψa = randommps(ComplexF64, fill(2, L); D=8)
 		ψb = copy(ψa)
-		enva = DMRGCache(hs, ψa)
-		envb = DMRGCache(hd, ψb)
+		enva = DMRGCache(ψa, hs)
+		envb = DMRGCache(ψb, hd)
 		sweep!(enva, TDVP1(stepsize=-0.05))
 		sweep!(envb, TDVP1(stepsize=-0.05))
 		@test distance(ψa, ψb) < 1.0e-6
