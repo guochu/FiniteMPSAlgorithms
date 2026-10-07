@@ -29,6 +29,12 @@ end
 	H = MPOHamiltonian(t, L)
 	@test maximum(abs.(todense(MPO(tompotensors(H))) - expdecay_dense(a, m, b, [0.4], [1.7], L))) < 1e-12
 
+	# 4-argument convenience: the propagator defaults to the identity
+	t_id = ExpDecayOpTerm(a, b, 0.4, 1.7)
+	@test t_id.m == I(d) && t_id.a == a && t_id.b == b && t_id.α == 0.4 && t_id.λ == 1.7
+	H_id = MPOHamiltonian(t_id, L)
+	@test maximum(abs.(todense(MPO(tompotensors(H_id))) - expdecay_dense(a, I(d), b, [0.4], [1.7], L))) < 1e-12
+
 	# on-site hloc: every D corner carries it, i.e. Σ_i hloc ⊗ I ⋯ on top of the pairs
 	hloc = randn(ComplexF64, d, d)
 	Hloc = MPOHamiltonian(t, L, hloc)
@@ -51,6 +57,12 @@ end
 	Wadd = todense(MPO(tompotensors(Ht))) + todense(MPO(tompotensors(Ht2)))
 	@test maximum(abs.(Wsum - Wadd)) < 1e-12
 	@test maximum(abs.(Wsum - expdecay_dense(a, m, b, αs, λs, L))) < 1e-12
+
+	# 4-argument convenience: identity propagator
+	s_id = ExpDecayOpSum(a, b, αs, λs)
+	@test s_id.m == I(d)
+	@test maximum(abs.(todense(MPO(tompotensors(MPOHamiltonian(s_id, L)))) -
+					   expdecay_dense(a, I(d), b, αs, λs, L))) < 1e-12
 
 	# identity propagator: recovers Σ_k α_k Σ_{i<j} λ^(j-i) a_i b_j exactly
 	sid = ExpDecayOpSum(a, I(2), b, αs, λs)

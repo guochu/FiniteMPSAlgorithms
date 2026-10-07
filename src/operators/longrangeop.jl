@@ -18,11 +18,13 @@
 
 """
 	ExpDecayOpTerm(a, m, b, α, λ)
+	ExpDecayOpTerm(a, b, α, λ)
 
 An exponentially decaying long-range operator term
 `O = α Σ_{i<j} λ^(j-i) · a_i m_(i+1) ⋯ m_(j-1) b_j` (see the module docstring). `a`,
 `m`, `b` are `d×d` matrices, `λ` the decay factor per lattice spacing and `α` the
-overall strength. Converts directly to a [`SchurMPOTensor`](@ref).
+overall strength. The 4-argument form takes the propagator `m` to be the identity.
+Converts directly to a [`SchurMPOTensor`](@ref).
 """
 struct ExpDecayOpTerm{T<:Number}
 	a::Matrix{T}
@@ -44,11 +46,17 @@ end
 scalartype(::Type{<:ExpDecayOpTerm{T}}) where {T} = T
 phydim(t::ExpDecayOpTerm) = size(t.a, 1)
 
+# identity-propagator convenience: ExpDecayOpTerm(a, b, α, λ)
+ExpDecayOpTerm(a::AbstractMatrix, b::AbstractMatrix, α::Number, λ::Number) =
+	ExpDecayOpTerm(a, one(a), b, α, λ)
+
 """
 	ExpDecayOpSum(a, m, b, αs, λs)
+	ExpDecayOpSum(a, b, αs, λs)
 
 The sum of the exponentially decaying terms [`ExpDecayOpTerm(a, m, b, αs[k], λs[k])`](@ref
-ExpDecayOpTerm) over all parameter pairs (αs[k], λs[k]). Converts directly to a
+ExpDecayOpTerm) over all parameter pairs (αs[k], λs[k]). The 4-argument form takes the
+propagator `m` to be the identity. Converts directly to a
 [`SchurMPOTensor`](@ref) with one internal channel per pair.
 """
 struct ExpDecayOpSum{T<:Number}
@@ -78,6 +86,9 @@ struct ExpDecayOpSum{T<:Number}
 end
 
 ExpDecayOpSum(t::ExpDecayOpTerm) = ExpDecayOpSum(t.a, t.m, t.b, [t.α], [t.λ])
+# identity-propagator convenience: ExpDecayOpSum(a, b, αs, λs)
+ExpDecayOpSum(a::AbstractMatrix, b::AbstractMatrix, αs::AbstractVector, λs::AbstractVector) =
+	ExpDecayOpSum(a, one(a), b, αs, λs)
 scalartype(::Type{<:ExpDecayOpSum{T}}) where {T} = T
 phydim(s::ExpDecayOpSum) = size(s.a, 1)
 
