@@ -56,7 +56,7 @@ CanonicalMPS(::Type{T}, L::Int; d::Int=2) where {T<:Number} = CanonicalMPS(T, fi
 Base.copy(ψ::CanonicalMPS) = CanonicalMPS(copy(ψ.data), _copy_s(ψ), Ref(scaling(ψ)))
 Base.copy!(dst::CanonicalMPS, src::CanonicalMPS) = (copy!(dst.data, src.data); copy!(dst.s, src.s); setscaling!(dst, scaling(src)); dst)
 function Base.complex(ψ::CanonicalMPS{T, R}) where {T, R}
-	T <: Complex && return copy(ψ)
+	T <: Complex && return ψ
 	return CanonicalMPS(complex.(ψ.data), [ismissing(s) ? s : complex.(s) for s in ψ.s], Ref(scaling(ψ)))
 end
 

@@ -168,6 +168,7 @@ _rawelement(m::SparseMPOTensor, i::Int, j::Int) = m.Os[i, j]
 Base.copy(x::SparseMPOTensor) = SparseMPOTensor(copy(x.Os), phydim(x))
 scalartype(::Type{SparseMPOTensor{T}}) where {T} = T
 function Base.complex(x::SparseMPOTensor{T}) where {T}
+	T <: Complex && return x
 	TC = complex(T)
 	return SparseMPOTensor{TC}(complex.(x.Os), phydim(x))
 end
@@ -337,6 +338,7 @@ Base.copy(W::SchurMPOTensor{T}) where {T} =
 		Base.RefValue{Union{Matrix{T}, T}}(_copy_orelse(getfield(W, :_D)[])), phydim(W))
 
 function Base.complex(W::SchurMPOTensor{T}) where {T}
+	T <: Complex && return W
 	TC = complex(T)
 	return SchurMPOTensor{TC}(complex.(W.A), complex.(W.B), complex.(W.C),
 		Base.RefValue{Union{Matrix{TC}, TC}}(complex(getfield(W, :_D)[])), phydim(W))

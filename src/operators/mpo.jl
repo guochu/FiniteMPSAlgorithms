@@ -35,7 +35,7 @@ MPO(h::CanonicalMPO) = MPO(h.data)
 
 Base.copy(h::MPO) = MPO(copy(h.data))
 Base.copy!(dst::MPO, src::MPO) = (copy!(dst.data, src.data); dst)
-Base.complex(h::MPO{T}) where {T} = T <: Complex ? copy(h) : MPO(complex.(h.data))
+Base.complex(h::MPO{T}) where {T} = T <: Complex ? h : MPO(complex.(h.data))
 
 function Base.show(io::IO, h::MPO)
 	print(io, "MPO{", scalartype(h), "} with ", length(h), " sites, maxbond = ", bonddim(h))

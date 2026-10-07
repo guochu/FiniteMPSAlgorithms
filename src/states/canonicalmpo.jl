@@ -54,7 +54,7 @@ CanonicalMPO(::Type{T}, L::Int; d::Int=2) where {T<:Number} = CanonicalMPO(T, fi
 Base.copy(ρ::CanonicalMPO) = CanonicalMPO(copy(ρ.data), _copy_s(ρ), Ref(scaling(ρ)))
 Base.copy!(dst::CanonicalMPO, src::CanonicalMPO) = (copy!(dst.data, src.data); copy!(dst.s, src.s); setscaling!(dst, scaling(src)); dst)
 function Base.complex(ρ::CanonicalMPO{T, R}) where {T, R}
-	T <: Complex && return copy(ρ)
+	T <: Complex && return ρ
 	return CanonicalMPO(complex.(ρ.data), [ismissing(s) ? s : complex.(s) for s in ρ.s], Ref(scaling(ρ)))
 end
 

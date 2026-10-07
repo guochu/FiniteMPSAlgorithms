@@ -1,5 +1,14 @@
 # Interface changes
 
+## Changed: `complex` of an already-complex chain returns the same object (no copy)
+
+`Base.complex` on `CanonicalMPS` / `CanonicalMPO` / `MPO` copied the chain even when the
+element type was already complex; the `SchurMPOTensor` / `SparseMPOTensor` methods
+converted unconditionally. All of them now return the input as-is when
+`scalartype <: Complex` (matching `Base.complex(z::Complex) = z` and the existing
+`MPOHamiltonian` behavior); real inputs still produce a converted copy. Note the
+aliasing: mutating a complex chain in place is visible through its `complex` image.
+
 ## Fixed: `max_bonddims` respects the state-space bound from both chain ends
 
 `max_bonddims(ds, D)` — the profile behind `randommps`, the random seq2seq MPO and the
