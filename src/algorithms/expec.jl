@@ -20,7 +20,7 @@ The matrix element `⟨ψA|h|ψB⟩` of the represented chains (no normalization
 	for debugging on small systems; use [`expectationvalue`](@ref) instead.
 """
 function expectation(ψA::CanonicalMPS, h::AbstractMPO, ψB::CanonicalMPS)
-	(length(ψA) == length(h) == length(ψB)) || throw(ArgumentError("dimension mismatch"))
+	(length(ψA) == length(h) == length(ψB)) || throw(DimensionMismatch("dimension mismatch"))
 	sA = scaling(ψA)
 	sB = scaling(ψB)
 	sh = h isa CanonicalMPO ? scaling(h) : one(sA * sB)
@@ -50,7 +50,7 @@ The (unnormalized) expectation value of the represented chains: `⟨ψ|h|ψ⟩` 
 expectation(h::AbstractMPO, ψ::CanonicalMPS) = expectation(ψ, h, ψ)
 
 function expectation(h::AbstractMPO, ρ::CanonicalMPO)
-	(length(h) == length(ρ)) || throw(ArgumentError("dimension mismatch"))
+	(length(h) == length(ρ)) || throw(DimensionMismatch("dimension mismatch"))
 	s = scaling(ρ)
 	sh = h isa CanonicalMPO ? scaling(h) : one(s)
 	T = promote_type(scalartype(h), scalartype(ρ))
@@ -225,7 +225,7 @@ overflow (unlike [`expectation`](@ref)); the `scaling^L` of a `CanonicalMPO` ope
 `h` is part of the represented value `h` and is kept.
 """
 function expectationvalue(h::AbstractMPO, ψ::CanonicalMPS)
-	(length(h) == length(ψ)) || throw(ArgumentError("dimension mismatch"))
+	(length(h) == length(ψ)) || throw(DimensionMismatch("dimension mismatch"))
 	sh = h isa CanonicalMPO ? scaling(h) : 1.0
 	hold = l_LL(ψ, h, ψ)
 	for i in 1:length(h)
@@ -237,7 +237,7 @@ function expectationvalue(h::AbstractMPO, ψ::CanonicalMPS)
 end
 
 function expectationvalue(h::AbstractMPO, ρ::CanonicalMPO)
-	(length(h) == length(ρ)) || throw(ArgumentError("dimension mismatch"))
+	(length(h) == length(ρ)) || throw(DimensionMismatch("dimension mismatch"))
 	sh = h isa CanonicalMPO ? scaling(h) : 1.0
 	T = promote_type(scalartype(h), scalartype(ρ))
 	c = ones(T, 1, 1)

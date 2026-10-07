@@ -24,10 +24,10 @@ An exponentially decaying long-range operator term
 `m`, `b` are `d×d` matrices, `λ` the decay factor per lattice spacing and `α` the
 overall strength. Converts directly to a [`SchurMPOTensor`](@ref).
 """
-struct ExpDecayOpTerm{M<:AbstractMatrix,T<:Number}
-	a::M
-	m::M
-	b::M
+struct ExpDecayOpTerm{T<:Number}
+	a::Matrix{T}
+	m::Matrix{T}
+	b::Matrix{T}
 	α::T
 	λ::T
 	function ExpDecayOpTerm(a::AbstractMatrix, m::AbstractMatrix, b::AbstractMatrix,
@@ -36,12 +36,12 @@ struct ExpDecayOpTerm{M<:AbstractMatrix,T<:Number}
 		(size(a, 2) == size(m, 1) == size(m, 2) == size(b, 1) == size(b, 2) == d) ||
 			throw(DimensionMismatch("a, m, b must be square matrices of equal size"))
 		T = promote_type(typeof(α), typeof(λ), scalartype(a), scalartype(m), scalartype(b))
-		return new{Matrix{T},T}(convert(Matrix{T}, a), convert(Matrix{T}, m),
+		return new{T}(convert(Matrix{T}, a), convert(Matrix{T}, m),
 			convert(Matrix{T}, b), convert(T, α), convert(T, λ))
 	end
 end
 
-scalartype(::Type{<:ExpDecayOpTerm{M,T}}) where {M,T} = T
+scalartype(::Type{<:ExpDecayOpTerm{T}}) where {T} = T
 phydim(t::ExpDecayOpTerm) = size(t.a, 1)
 
 """
@@ -51,10 +51,10 @@ The sum of the exponentially decaying terms [`ExpDecayOpTerm(a, m, b, αs[k], λ
 ExpDecayOpTerm) over all parameter pairs (αs[k], λs[k]). Converts directly to a
 [`SchurMPOTensor`](@ref) with one internal channel per pair.
 """
-struct ExpDecayOpSum{M<:AbstractMatrix,T<:Number}
-	a::M
-	m::M
-	b::M
+struct ExpDecayOpSum{T<:Number}
+	a::Matrix{T}
+	m::Matrix{T}
+	b::Matrix{T}
 	αs::Vector{T}
 	λs::Vector{T}
 	function ExpDecayOpSum(a::AbstractMatrix, m::AbstractMatrix, b::AbstractMatrix,
@@ -71,14 +71,14 @@ struct ExpDecayOpSum{M<:AbstractMatrix,T<:Number}
 		for M3 in (a, m, b)
 			T = promote_type(T, scalartype(M3))
 		end
-		return new{Matrix{T},T}(convert(Matrix{T}, a), convert(Matrix{T}, m),
+		return new{T}(convert(Matrix{T}, a), convert(Matrix{T}, m),
 			convert(Matrix{T}, b), convert(Vector{T}, collect(αs)),
 			convert(Vector{T}, collect(λs)))
 	end
 end
 
 ExpDecayOpSum(t::ExpDecayOpTerm) = ExpDecayOpSum(t.a, t.m, t.b, [t.α], [t.λ])
-scalartype(::Type{<:ExpDecayOpSum{M,T}}) where {M,T} = T
+scalartype(::Type{<:ExpDecayOpSum{T}}) where {T} = T
 phydim(s::ExpDecayOpSum) = size(s.a, 1)
 
 # the W-form site tensor of an ExpDecayOpSum: n internal channels (one per parameter
@@ -89,8 +89,7 @@ phydim(s::ExpDecayOpSum) = size(s.a, 1)
 # vacuum row (the starts) and the closing column (the closes) — the
 # `MPOHamiltonian(::Vector{<:SchurMPOTensor})` constructor handles this through the
 # row/column selection of `tompotensors`.
-function SchurMPOTensor(s::ExpDecayOpSum{M,T}, hloc::AbstractMatrix) where {M,T}
-	# (M = Matrix{T} by construction, so the Schur tensor is parameterized by T alone)
+function SchurMPOTensor(s::ExpDecayOpSum{T}, hloc::AbstractMatrix = zeros(T, phydim(s), phydim(s))) where {T}
 	d = phydim(s)
 	n = length(s.αs)
 	(size(hloc, 1) == size(hloc, 2) == d) ||
@@ -99,6 +98,7 @@ function SchurMPOTensor(s::ExpDecayOpSum{M,T}, hloc::AbstractMatrix) where {M,T}
 	for I in eachindex(logical)
 		logical[I] = 0.0
 	end
+	logical[1, 1] = logical[n + 2, n + 2] = 1   # the implied identity corners
 	for k in 1:n
 		logical[1, k+1] = s.αs[k] * s.λs[k] * s.a    # C: vacuum -> channel k
 		logical[k+1, k+1] = s.λs[k] * s.m            # A: propagate channel k
@@ -107,7 +107,8 @@ function SchurMPOTensor(s::ExpDecayOpSum{M,T}, hloc::AbstractMatrix) where {M,T}
 	logical[1, n+2] = hloc                           # D: on-site term
 	return SchurMPOTensor{T}(logical)
 end
-SchurMPOTensor(t::ExpDecayOpTerm, hloc::AbstractMatrix) = SchurMPOTensor(ExpDecayOpSum(t), hloc)
+SchurMPOTensor(t::ExpDecayOpTerm, hloc::AbstractMatrix = zeros(scalartype(t), phydim(t), phydim(t))) =
+	SchurMPOTensor(ExpDecayOpSum(t), hloc)
 
 """
 	MPOHamiltonian(s::ExpDecayOpSum, L::Int, [hloc]) -> MPOHamiltonian
@@ -121,6 +122,17 @@ MPOHamiltonian(s::ExpDecayOpSum, L::Int, hloc::AbstractMatrix = zeros(scalartype
 	MPOHamiltonian([SchurMPOTensor(s, hloc) for _ in 1:L])
 MPOHamiltonian(t::ExpDecayOpTerm, L::Int, hloc::AbstractMatrix = zeros(scalartype(t), phydim(t), phydim(t))) =
 	MPOHamiltonian(ExpDecayOpSum(t), L, hloc)
+
+"""
+	MPOHamiltonian(s::ExpDecayOpSum, hlocs::AbstractVector{<:AbstractMatrix}) -> MPOHamiltonian
+
+The exponentially decaying operator on a chain whose length is `length(hlocs)`, with a
+**per-site** on-site operator `hlocs[i]` in the `D` corner of site `i` (each `hlocs[i]`
+must match the common local dimension `phydim(s)`; the operator content may differ from
+site to site).
+"""
+MPOHamiltonian(s::ExpDecayOpSum, hlocs::AbstractVector{<:AbstractMatrix}) =
+	MPOHamiltonian([SchurMPOTensor(s, hloc) for hloc in hlocs])
 
 # debug constructor: expand the exact W-form representation into the (typically much
 # larger) explicit OpSum of all two-site terms

@@ -74,18 +74,9 @@ function _reduce_site(A::MPSTensor, X::MPOTensor, cleft, cright)
 	@tensor tmp[-1, -2, -3] := cleft[-1, 1, 2] * A[2, 3, 4] * X[1, -2, 5, 3] * cright[-3, 5, 4]
 	return tmp
 end
-function _reduce_site(A::MPSTensor, X::AbstractSparseMPOTensor, cleft, cright)
-	T = promote_type(scalartype(A), scalartype(cleft), scalartype(X))
-	tmp = zeros(T, size(cleft, 1), phydim(X), size(cright, 1))
-	for (wL, wR) in keys(X)
-		O = X[wL, wR]
-		hl = cleft[:, wL, :]
-		hr = cright[:, wR, :]
-		@tensor tn[a, p, c] := hl[a, bL] * A[bL, q, bR] * O[p, q] * hr[c, bR]
-		tmp .+= tn
-	end
-	return tmp
-end
+# block-sparse MPO site tensors: densify (a wrapper copy) and take the dense path
+_reduce_site(A::MPSTensor, X::SchurMPOTensor, cleft, cright) =
+	_reduce_site(A, tompotensor(X), cleft, cright)
 function _reduce_site(A::MPOTensor, X::MPOTensor, cleft, cright)
 	@tensor tmp[-1, -2, -3, -4] := cleft[-1, 1, 2] * A[2, 3, 4, -4] * X[1, -2, 5, 3] * cright[-3, 5, 4]
 	return tmp
@@ -192,13 +183,15 @@ function _svd_mult(h::AbstractMPO, x, alg::SVDCompression)
 	chain isa Union{CanonicalMPS, CanonicalMPO} && return chain, err
 	return CanonicalMPO(chain.data), err
 end
+# MPOHamiltonian first operands join the dense layer through `_dense`
+_svd_mult(h::MPOHamiltonian, x, alg::SVDCompression) = _svd_mult(_dense(h), x, alg)
 
 # naive on-the-fly SVD of the exact product: the site tensors of `h·x` are formed one at
 # a time and streamed through a truncating right-orthogonalization (never materializing
 # the full exact product)
 _naive_svd_mult(h::MPOHamiltonian, x::CanonicalMPS, trunc::TruncationScheme) =
 	_naive_svd_mult(MPO(tompotensors(h)), x, trunc)
-_naive_svd_mult(h::MPOHamiltonian, x::AbstractMPO, trunc::TruncationScheme) =
+_naive_svd_mult(h::MPOHamiltonian, x::MPO, trunc::TruncationScheme) =
 	_naive_svd_mult(MPO(tompotensors(h)), x, trunc)
 function _naive_svd_mult(h::AbstractMPO, x::CanonicalMPS, trunc::TruncationScheme)
 	# exact product site tensor (aL·bL, po, aR·bR); the carry acts on the composite right
@@ -222,7 +215,7 @@ function _naive_svd_mult(h::AbstractMPO, x::CanonicalMPS, trunc::TruncationSchem
 	end
 	return _naive_svd_guess(site, length(h); trunc)
 end
-function _naive_svd_mult(h::AbstractMPO, x::AbstractMPO, trunc::TruncationScheme)
+function _naive_svd_mult(h::AbstractMPO, x::MPO, trunc::TruncationScheme)
 	# exact product site tensor (aA·aB, poA, aA2·aB2, q); carry folded in as above
 	site = (i, carry) -> begin
 		WA = h[i]   # (aA, poA, aA2, p)
@@ -240,6 +233,9 @@ function _naive_svd_mult(h::AbstractMPO, x::AbstractMPO, trunc::TruncationScheme
 	end
 	return _naive_svd_guess(site, length(h); trunc)
 end
+# canonical (density-matrix) operands use the same streaming construction
+_naive_svd_mult(h::AbstractMPO, x::CanonicalMPO, trunc::TruncationScheme) =
+	_naive_svd_mult(h, MPO(x.data), trunc)
 
 _wrap_mult_guess(data, ::CanonicalMPS) = CanonicalMPS(Vector{Array{scalartype(data[1]),3}}(data))
 _wrap_mult_guess(data, ::AbstractMPO) = CanonicalMPO(Vector{Array{scalartype(data[1]),4}}(data))
@@ -276,13 +272,9 @@ function svdguess_mult(h, x, D::Int)
 	data, _ = _naive_svd_mult(h, x, truncdim(D))
 	return _wrap_mult_guess(data, x)
 end
-# block-sparse operands are expanded into the dense MPO layer
+# block-sparse first operands are expanded into the dense MPO layer
 svdguess_mult(h::MPOHamiltonian, x, D::Int) =
 	svdguess_mult(MPO(tompotensors(h)), x, D)
-svdguess_mult(h::AbstractMPO, x::MPOHamiltonian, D::Int) =
-	svdguess_mult(h, MPO(tompotensors(x)), D)
-svdguess_mult(h::MPOHamiltonian, x::MPOHamiltonian, D::Int) =
-	svdguess_mult(MPO(tompotensors(h)), MPO(tompotensors(x)), D)
 
 """
 	MultCache(h, x, bra)
@@ -338,7 +330,7 @@ route supply a bond cap: `mult(h, x, DMRG1(; ...); D=D)` — the initial guess i
 by `svdguess_mult(h, x, D)`.
 """
 function mult(h::AbstractMPO, x, alg::SVDCompression=DefaultMultAlg)
-	(length(h) == length(x)) || throw(ArgumentError("dimension mismatch"))
+	(length(h) == length(x)) || throw(DimensionMismatch("dimension mismatch"))
 	return _svd_mult(h, x, alg)[1]
 end
 
@@ -355,7 +347,7 @@ custom ansatz with its own bond profile (ignoring `alg.D` entirely), call
 [`ALSConvergenceInfo`](@ref) of the sweeps (the SVD route returns the chain only).
 """
 function mult(h::AbstractMPO, x, alg::DMRG1)
-	(length(h) == length(x)) || throw(ArgumentError("dimension mismatch"))
+	(length(h) == length(x)) || throw(DimensionMismatch("dimension mismatch"))
 	return mult!(svdguess_mult(h, x, alg.D), h, x, alg)
 end
 
@@ -459,7 +451,7 @@ function mult!(out, h, x, alg::DMRG2)
 end
 
 function mult(h::AbstractMPO, x, alg::DMRG2)
-	(length(h) == length(x)) || throw(ArgumentError("dimension mismatch"))
+	(length(h) == length(x)) || throw(DimensionMismatch("dimension mismatch"))
 	return mult!(svdguess_mult(h, x, _guess_bond(alg.trunc)), h, x, alg)
 end
 mult(hA::MPOHamiltonian, x, alg::DMRG2) = mult(MPO(tompotensors(hA)), x, alg)

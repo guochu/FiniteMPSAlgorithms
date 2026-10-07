@@ -12,8 +12,8 @@
 Two-site effective Hamiltonian: the MPO tensors of sites `s` and `s+1` together with
 their left and right environments.
 """
-struct TwoSiteHeff{W1<:Union{MPOTensor,AbstractSparseMPOTensor},
-				   W2<:Union{MPOTensor,AbstractSparseMPOTensor},T}
+struct TwoSiteHeff{W1<:Union{MPOTensor,SchurMPOTensor},
+				   W2<:Union{MPOTensor,SchurMPOTensor},T}
 	W1::W1
 	W2::W2
 	left::Array{T,3}
@@ -31,29 +31,11 @@ function ac2_prime(x::AbstractArray{T,4}, heff::TwoSiteHeff) where {T}
 	return y
 end
 
-# sparse MPO tensors: materialize the two-site operator block by block
+# sparse MPO tensors: densify both sites (a wrapper copy each) and take the dense path
 function ac2_prime(x::AbstractArray{T,4},
-				   heff::TwoSiteHeff{<:AbstractSparseMPOTensor,<:AbstractSparseMPOTensor}) where {T}
-	W1, W2 = heff.W1, heff.W2
-	hl, hr = heff.left, heff.right
-	d1, d2 = phydim(W1), phydim(W2)
-	y = zeros(T, size(hl, 1), d1, d2, size(hr, 1))
-	# sum over the combined MPO bond (wL from W1, wR from W2) and the connecting bond b
-	for (wL, b) in keys(W1)
-		O1 = W1[wL, b]   # d1×d1 operator (or scalar)
-		O1m = O1 isa Number ? O1 * I : O1
-		for (b2, wR) in keys(W2)
-			b2 == b || continue
-			O2 = W2[b2, wR]  # d2×d2 operator (or scalar)
-			O2m = O2 isa Number ? O2 * I : O2
-			hl_s = hl[:, wL, :]
-			hr_s = hr[:, wR, :]
-			@tensor yn[aL, p1, p2, c] := hl_s[aL, bl] * x[bl, q1, q2, br] *
-										  O1m[p1, q1] * O2m[p2, q2] * hr_s[c, br]
-			y .+= yn
-		end
-	end
-	return y
+				   heff::TwoSiteHeff{<:SchurMPOTensor,<:SchurMPOTensor}) where {T}
+	return ac2_prime(x, TwoSiteHeff(tompotensor(heff.W1), tompotensor(heff.W2),
+									heff.left, heff.right))
 end
 
 # ---------- algorithm type ----------

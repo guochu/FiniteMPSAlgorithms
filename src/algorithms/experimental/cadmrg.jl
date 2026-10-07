@@ -224,19 +224,9 @@ updateleft!(env::CADMRGCache, site::Integer) =
 updateright!(env::CADMRGCache, site::Integer) =
 	(env.hstorage[site] = _updateright(env.hstorage[site+1], env.ket[site], env.H[site], env.ket[site]); env)
 
-# Convert a (possibly sparse) MPO tensor to a dense 4-index array W[wL, p_out, wR, p_in].
-function _dense_mpotensor(W::AbstractSparseMPOTensor)
-	d = phydim(W)
-	wL = size(W, 1); wR = size(W, 2)
-	T = scalartype(W)
-	Wd = zeros(T, wL, d, wR, d)
-	for (i, j) in keys(W)
-		O = W[i, j]
-		Om = O isa Number ? O * Matrix{T}(I, d, d) : convert(Matrix{T}, O)
-		Wd[i, :, j, :] = Om
-	end
-	return Wd
-end
+# Convert a (possibly sparse) MPO tensor to a dense 4-index array W[wL, p_out, wR, p_in]:
+# the sparse block storage wraps the same layout, so this is a copy.
+_dense_mpotensor(W::SchurMPOTensor) = tompotensor(W)
 _dense_mpotensor(W::MPOTensor) = W
 
 # Convert an entire MPO to dense MPO form (CA-DMRG rewrites MPO tensors in place).
@@ -248,7 +238,7 @@ function _dense_mpo(h::AbstractMPO)
 end
 # Schur-form Hamiltonians keep the full logical shape at every site (no boundary
 # collapse), so the dense conversion must select the boundary channels first
-_dense_mpo(h::MPOHamiltonian{<:SchurMPOTensor}) = _dense_mpo(MPO(tompotensors(h)))
+_dense_mpo(h::MPOHamiltonian) = _dense_mpo(MPO(tompotensors(h)))
 
 # ---------- local two-site update with Clifford search ----------
 

@@ -3,7 +3,7 @@
 
 # unconventioned transfer-chain contraction (scaling not included)
 function _dot(ψA::CanonicalMPS, ψB::CanonicalMPS)
-	(length(ψA) == length(ψB)) || throw(ArgumentError("dimension mismatch"))
+	(length(ψA) == length(ψB)) || throw(DimensionMismatch("dimension mismatch"))
 	hold = l_LL(ψA, ψB)
 	for i in 1:length(ψA)
 		hold = _updateleft(hold, ψA[i], ψB[i])
@@ -18,7 +18,7 @@ Overlap `⟨ψA|ψB⟩`, including the per-site `scaling` factors (total = `(sca
 applied per site during the transfer contraction — no `scaling^L` power is materialized).
 """
 function LinearAlgebra.dot(ψA::CanonicalMPS, ψB::CanonicalMPS)
-	(length(ψA) == length(ψB)) || throw(ArgumentError("dimension mismatch"))
+	(length(ψA) == length(ψB)) || throw(DimensionMismatch("dimension mismatch"))
 	f = scaling(ψA) * scaling(ψB)
 	hold = l_LL(ψA, ψB)
 	for i in 1:length(ψA)
@@ -51,7 +51,7 @@ Base.:-(ψ::CanonicalMPS) = (-1) * ψ
 
 # scaling-free (raw data) MPO·MPS application: `h`'s `scaling` is NOT included
 function _apply_data(h::AbstractMPO, ψ::CanonicalMPS)
-	(length(h) == length(ψ)) || throw(ArgumentError("dimension mismatch"))
+	(length(h) == length(ψ)) || throw(DimensionMismatch("dimension mismatch"))
 	T = promote_type(scalartype(h), scalartype(ψ))
 	data = Vector{Array{T,3}}(undef, length(ψ))
 	for i in 1:length(ψ)
@@ -160,7 +160,7 @@ contractions — the `scaling` factors cancel exactly (equivalent to the direct 
 with `dot`/`norm`), so it stays finite for arbitrarily large scalings.
 """
 function fidelity(ψA::CanonicalMPS, ψB::CanonicalMPS)
-	(length(ψA) == length(ψB)) || throw(ArgumentError("dimension mismatch"))
+	(length(ψA) == length(ψB)) || throw(DimensionMismatch("dimension mismatch"))
 	return abs(_dot(ψA, ψB)) / sqrt(_dot(ψA, ψA) * _dot(ψB, ψB))
 end
 

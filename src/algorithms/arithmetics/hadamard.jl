@@ -281,8 +281,8 @@ function hadamard(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::SVDCompression=Defa
 end
 
 function hadamard(ψA::CanonicalMPS, ψB::CanonicalMPS, alg::DMRG1)
-        _validate_hadamard(ψA, ψB)
-        return hadamard!(svdguess_hadamard(ψA, ψB, alg.D), ψA, ψB, alg)
+	_validate_hadamard(ψA, ψB)
+	return hadamard!(svdguess_hadamard(ψA, ψB, alg.D), ψA, ψB, alg)
 end
 
 # ---------- two-site (DMRG2) sweeps and interface ----------

@@ -68,19 +68,29 @@ end
 	Hos = MPOHamiltonian(opsum)
 	@test maximum(abs.(todense(MPO(tompotensors(Hos))) - Wsum)) < 1e-12
 
+	# per-site on-site operators: the chain length is length(hlocs)
+	hlocs = [randn(2, 2) for _ in 1:L]
+	Hlocs = MPOHamiltonian(s, hlocs)
+	@test length(Hlocs) == L
+	# equals the zero-hloc decay chain plus the on-site chain (a block-native sum check,
+	# cf. the DenseMPO test in sparsempo.jl)
+	Hons = MPOHamiltonian(L, [OpTerm(1.0, i => hlocs[i]) for i in 1:L]...)
+	Href = MPO(MPOHamiltonian(s, L)) + MPO(Hons)
+	@test maximum(abs.(todense(MPO(Hlocs)) - todense(Href))) < 1e-12
+
 	# ground state of an exponentially decaying perturbed TFIM: the exact sum of the
 	# OpTerm-built TFIM chain and the ExpDecay chain. DMRG assumes a Hermitian operator, so
 	# the decay chain uses σy at both ends (Hermitian, complex) with an identity propagator:
 	# Σ_{i<j} λ^(j-i) σy_i σy_j stays Hermitian while keeping ComplexF64 arithmetic.
-	tfim = OpSum(fill(2, L))
-	for i in 1:L
-		push!(tfim, OpTerm(-1.0, i => Float64[0 1; 1 0]))
+	tfim = OpTerm(-1.0, 1 => Float64[0 1; 1 0])
+	for i in 2:L
+		tfim += OpTerm(-1.0, i => Float64[0 1; 1 0])
 	end
 	for i in 1:L-1
-		push!(tfim, OpTerm(-1.0, i => Float64[1 0; 0 -1], i + 1 => Float64[1 0; 0 -1]))
+		tfim += OpTerm(-1.0, i => Float64[1 0; 0 -1], i + 1 => Float64[1 0; 0 -1])
 	end
 	Hdecay = MPOHamiltonian(ExpDecayOpSum(_SY, I(2), _SY, [0.3], [0.05]), L)
-	Hmixed = MPOHamiltonian(MPO(tompotensors(MPOHamiltonian(tfim))) + Hdecay)
+	Hmixed = hamiltonian(MPO(tompotensors(MPOHamiltonian(tfim))) + MPO(Hdecay))
 	E, ψ, _ = ground_state(Hmixed, DMRG1(maxiter=30, tol=1e-10, D=16))
 	@test isfinite(real(E))
 	# the variational energy of the converged state matches its expectation value
@@ -90,20 +100,26 @@ end
 @testset "OpSum validation" begin
 	SX = Float64[0 1; 1 0]
 	SZ = Float64[1 0; 0 -1]
-	s = OpSum([2, 2])
-	push!(s, term(1 => SX))
-	push!(s, term(-0.5, 1 => SZ, 2 => SX))
-	@test length(s) == 2 && s[1] isa OpTerm && first(s.data) === s[1]
-	# iterating an OpSum yields its terms
-	@test collect(s) == s.data
-	# out-of-range position
-	@test_throws ArgumentError push!(s, term(4 => SX))
-	# operator dimension does not match the local dimension
-	@test_throws DimensionMismatch push!(s, term(1 => randn(ComplexF64, 3, 3)))
+	s = term(1 => SX) + term(-0.5, 1 => SZ, 2 => SX)
+	@test s isa OpSum && length(s.data) == 2 && s.data[1] isa OpTerm
+	@test s.ds == [2, 2]
+	# the lattice of a plain-term sum is inferred from the operators
+	@test scalartype(s) == Float64
+	# conflicting operator dimensions on one site
+	@test_throws DimensionMismatch term(1 => SX) + term(1 => randn(ComplexF64, 3, 3))
+	# mixed scalar types are promoted
+	sc = term(1 => SX) + term(-0.5im, 2 => SX)
+	@test scalartype(sc) == ComplexF64
 	# batch construction is validated identically
 	s2 = OpSum([2, 2], [term(1 => SX), term(-0.5, 1 => SZ, 2 => SX)])
-	@test s2.data == s.data
+	@test s2.data == s.data && s2.ds == s.ds
 	# a validated OpSum assembles the same Hamiltonian as the raw (L, terms) route
 	@test todense(MPO(tompotensors(MPOHamiltonian(s2)))) ≈
 		  todense(MPO(tompotensors(MPOHamiltonian(2, s2.data...)))) atol = 1e-14
+	# OpSum + OpTerm / OpTerm + OpSum / OpSum + OpSum accumulate on the same lattice
+	s3 = s2 + term(0.5, 2 => SX)
+	@test length(s3.data) == 3
+	s4 = term(0.25, 2 => SZ) + s3
+	@test length(s4.data) == 4
+	@test s4 + s2 isa OpSum && length((s4 + s2).data) == 6
 end

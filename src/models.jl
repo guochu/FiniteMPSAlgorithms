@@ -46,15 +46,15 @@ function heisenberg_hamiltonian(L::Int; J::Real=1.0, Δ::Real=1.0, h::Real=0.0,
 							   T::Type=ComplexF64)
 	L >= 2 || throw(ArgumentError("L must be at least 2"))
 	sx, sy, sz = Sx(T), Sy(T), Sz(T)
-	terms = OpSum(fill(2, L))
-	for i in 1:L-1
-		push!(terms, OpTerm(J, i => sx, i + 1 => sx))
-		push!(terms, OpTerm(J, i => sy, i + 1 => sy))
-		push!(terms, OpTerm(J * Δ, i => sz, i + 1 => sz))
+	terms = OpTerm(J, 1 => sx, 2 => sx) + OpTerm(J, 1 => sy, 2 => sy) +
+			OpTerm(J * Δ, 1 => sz, 2 => sz)
+	for i in 2:L-1
+		terms += OpTerm(J, i => sx, i + 1 => sx) + OpTerm(J, i => sy, i + 1 => sy) +
+				 OpTerm(J * Δ, i => sz, i + 1 => sz)
 	end
 	if !iszero(h)
 		for i in 1:L
-			push!(terms, OpTerm(-h, i => sz))
+			terms += OpTerm(-h, i => sz)
 		end
 	end
 	return MPOHamiltonian(terms)
@@ -73,13 +73,13 @@ Transverse-field Ising chain on `L` sites with open boundaries,
 function tfim_hamiltonian(L::Int; J::Real=1.0, h::Real=1.0, T::Type=ComplexF64)
 	L >= 2 || throw(ArgumentError("L must be at least 2"))
 	sx, sz = σx(T), σz(T)
-	terms = OpSum(fill(2, L))
-	for i in 1:L-1
-		push!(terms, OpTerm(-J, i => sx, i + 1 => sx))
+	terms = OpTerm(-J, 1 => sx, 2 => sx)
+	for i in 2:L-1
+		terms += OpTerm(-J, i => sx, i + 1 => sx)
 	end
 	if !iszero(h)
 		for i in 1:L
-			push!(terms, OpTerm(-h, i => sz))
+			terms += OpTerm(-h, i => sz)
 		end
 	end
 	return MPOHamiltonian(terms)
@@ -122,21 +122,22 @@ function fermi_hubbard(L::Int; t::Real=1.0, U::Real=0.0, μ::Real=0.0,
 	d_dn = kron(sz, sm)                  # ↓ annihilation, carrying the ↑ parity
 	P = kron(sz, sz)                     # on-site parity P = (−1)^n
 	n_up, n_dn = d_up' * d_up, d_dn' * d_dn
-	terms = OpSum(fill(4, L))
+	terms = OpTerm(-t, 1 => d_up' * P, 2 => d_up) + OpTerm(-t, 1 => d_dn' * P, 2 => d_dn) +
+			OpTerm(-t, 1 => (d_up' * P)', 2 => d_up') + OpTerm(-t, 1 => (d_dn' * P)', 2 => d_dn')
 	for (dc, d) in ((d_up' * P, d_up), (d_dn' * P, d_dn))
-		for i in 1:L-1
-			push!(terms, OpTerm(-t, i => dc, i + 1 => d))       # c†σ,ᵢ cσ,ᵢ₊₁
-			push!(terms, OpTerm(-t, i => dc', i + 1 => d'))     # its hermitian conjugate
+		for i in 2:L-1
+			terms += OpTerm(-t, i => dc, i + 1 => d)       # c†σ,ᵢ cσ,ᵢ₊₁
+			terms += OpTerm(-t, i => dc', i + 1 => d')     # its hermitian conjugate
 		end
 	end
 	if !iszero(U)
 		for i in 1:L
-			push!(terms, OpTerm(U, i => n_up * n_dn))
+			terms += OpTerm(U, i => n_up * n_dn)
 		end
 	end
 	if !iszero(μ)
 		for i in 1:L
-			push!(terms, OpTerm(-μ, i => n_up + n_dn))
+			terms += OpTerm(-μ, i => n_up + n_dn)
 		end
 	end
 	return MPOHamiltonian(terms)

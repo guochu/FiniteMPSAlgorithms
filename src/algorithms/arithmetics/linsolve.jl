@@ -116,14 +116,14 @@ function _init_storages_right!(m::LinsolveCache)
 end
 
 function _site_solve(m::LinsolveCache, s::Integer, solver::KrylovKit.LinearSolver)
-        W = m.mpo[s]
-        t = _b_target(W, m.bra[s], m.bstorage[s], m.bstorage[s+1])
-        shape = (size(m.hstorage[s], 1), size(W, 2), size(m.hstorage[s+1], 1))
-        z0 = size(m.ket[s]) == shape ? m.ket[s] : zero(t)
-        # the local normal equation is solved iteratively (KrylovKit) on the linear
-        # operator action — the dense H matrix is never formed
-        z, _ = KrylovKit.linsolve(y -> _h_apply(y, W, m.hstorage[s], m.hstorage[s+1]), t, z0, solver)
-        return z, t
+	W = m.mpo[s]
+	t = _b_target(W, m.bra[s], m.bstorage[s], m.bstorage[s+1])
+	shape = (size(m.hstorage[s], 1), size(W, 2), size(m.hstorage[s+1], 1))
+	z0 = size(m.ket[s]) == shape ? m.ket[s] : zero(t)
+	# the local normal equation is solved iteratively (KrylovKit) on the linear
+	# operator action — the dense H matrix is never formed
+	z, _ = KrylovKit.linsolve(y -> _h_apply(y, W, m.hstorage[s], m.hstorage[s+1]), t, z0, solver)
+	return z, t
 end
 
 # the exact global residual² ‖A·x − y‖², evaluated from the local decomposition at the
@@ -261,7 +261,7 @@ function linsolve(A::AbstractMPO, y::CanonicalMPS, alg::ALSLinSolve = ALSLinSolv
 end
 
 linsolve(A::MPOHamiltonian, y::CanonicalMPS, alg::ALSLinSolve = ALSLinSolve()) =
-        linsolve(MPO(tompotensors(A)), y, alg)
+	linsolve(MPO(tompotensors(A)), y, alg)
 
 # ---------- two-site (ALSLinSolve2) sweeps and interface ----------
 

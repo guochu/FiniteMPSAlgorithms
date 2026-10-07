@@ -21,7 +21,7 @@
 	end
 	ops = [spin_ops(d) for d in ds]
 	Jz, Jxy, hfield = 1.0, 0.6, 0.35
-	terms = OpSum(ds)
+	terms = OpTerm[]
 	for i in 1:L
 		push!(terms, OpTerm(-hfield, i => ops[i][1]))
 	end
@@ -32,10 +32,10 @@
 	end
 	# a long-range term: its gap sites carry their own dimensions
 	push!(terms, OpTerm(0.2, 1 => ops[1][1], L => ops[L][1]))
-	h = MPOHamiltonian(terms)
+	h = MPOHamiltonian(OpSum(ds, terms))
 	# the OpTerm check only asks for square operators; OpSum validates against `ds`
 	@test OpTerm(1.0, 1 => randn(ComplexF64, 2, 2), 2 => randn(ComplexF64, 3, 3)) isa OpTerm
-	@test_throws DimensionMismatch push!(OpSum(ds), OpTerm(1.0, 1 => randn(ComplexF64, 3, 3)))
+	@test_throws DimensionMismatch OpSum(ds, [OpTerm(1.0, 1 => randn(ComplexF64, 3, 3))])
 
 	op_at(op, i) = reshape(kron([k == i ? op : Matrix{ComplexF64}(I, d, d)
 								 for (k, d) in enumerate(ds)]...), prod(ds), prod(ds))
@@ -47,7 +47,7 @@
 	@test ophydims(h) == ds
 	@test norm(todense(h) - Hd) / norm(Hd) < 1e-12
 	@test norm(todense(MPO(h)) - Hd) / norm(Hd) < 1e-12
-	@test norm(todense(MPOHamiltonian(tompotensors(h))) - Hd) / norm(Hd) < 1e-12
+	@test norm(todense(hamiltonian(tompotensors(h))) - Hd) / norm(Hd) < 1e-12
 
 	# ---- states on the same lattice: amplitudes, expectations and the algorithms ----
 	prof = [1, 2, 6, 3, 1]                    # the Schmidt-bound profile for ds

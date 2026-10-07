@@ -1,8 +1,8 @@
 # linear algebra and exact (strict) algorithms for operator chains
 
 # transfer-chain contraction of two operator chains (scaling not included)
-function _dot(hA::AbstractMPO, hB::AbstractMPO)
-	(length(hA) == length(hB)) || throw(ArgumentError("dimension mismatch"))
+function _dot(hA::MPO, hB::MPO)
+	(length(hA) == length(hB)) || throw(DimensionMismatch("dimension mismatch"))
 	hold = l_LL(hA, hB)
 	for i in 1:length(hA)
 		hold = _updateleft(hold, hA[i], hB[i])
@@ -10,23 +10,26 @@ function _dot(hA::AbstractMPO, hB::AbstractMPO)
 	return tr(hold)
 end
 
-"""
-	LinearAlgebra.dot(hA, hB)
+function _dot(hA::MPOHamiltonian, hB::MPOHamiltonian)
+	return _dot(_dense(hA), _dense(hB))
+end
 
-Overlap of two operator chains `Σ tr(conj(hA)·hB)` (per site), including `scaling` of
-`CanonicalMPO` inputs (applied per site during the transfer contraction — no `scaling^L`
-power is materialized).
 """
-function LinearAlgebra.dot(hA::AbstractMPO, hB::AbstractMPO)
-	(length(hA) == length(hB)) || throw(ArgumentError("dimension mismatch"))
-	sA = hA isa CanonicalMPO ? scaling(hA) : 1.0
-	sB = hB isa CanonicalMPO ? scaling(hB) : 1.0
+	LinearAlgebra.dot(hA::MPO, hB::MPO)
+	LinearAlgebra.dot(hA::MPOHamiltonian, hB::MPOHamiltonian)
+
+Overlap of two operator chains of the same kind `Σ tr(conj(hA)·hB)` (per site).
+"""
+function LinearAlgebra.dot(hA::MPO, hB::MPO)
+	(length(hA) == length(hB)) || throw(DimensionMismatch("dimension mismatch"))
 	hold = l_LL(hA, hB)
 	for i in 1:length(hA)
-		hold = (sA * sB) * _updateleft(hold, hA[i], hB[i])
+		hold = _updateleft(hold, hA[i], hB[i])
 	end
 	return tr(hold)
 end
+
+LinearAlgebra.dot(hA::MPOHamiltonian, hB::MPOHamiltonian) = dot(_dense(hA), _dense(hB))
 
 """
 	LinearAlgebra.norm(h::AbstractMPO)
@@ -86,7 +89,7 @@ Raw (strict) operator product of the chain data: bond dimensions grow, no trunca
 no `scaling` folded in.
 """
 function _mul_data(hA::AbstractMPO, hB::AbstractMPO)
-	(length(hA) == length(hB)) || throw(ArgumentError("dimension mismatch"))
+	(length(hA) == length(hB)) || throw(DimensionMismatch("dimension mismatch"))
 	T = promote_type(scalartype(hA), scalartype(hB))
 	data = Vector{Array{T,4}}(undef, length(hA))
 	for i in 1:length(hA)
@@ -116,103 +119,84 @@ function _plus_data(hA::AbstractMPO, hB::AbstractMPO)
 	return MPO(r)
 end
 
-# fold the represented per-site scale `scaling^L` of a CanonicalMPO into its raw data
-# (site 1), returning a plain MPO; the canonical gauge is not preserved
-function _fold_scaling(h::CanonicalMPO)
-	d = copy(h.data)
-	isempty(d) || (d[1] = scaling(h)^length(h) * d[1])
-	return MPO(d)
-end
-
 """
 	Base.:*(hA::CanonicalMPO, hB::CanonicalMPO) -> CanonicalMPO
 
-Exact (strict) operator product: bond dimensions grow, no truncation. The represented
-product is bilinear in the represented chains, so the result carries
-`scaling(hA)·scaling(hB)`.
+Exact (strict) operator product of two canonical chains: bond dimensions grow, no
+truncation. The represented product is bilinear in the represented chains, so the
+result carries `scaling(hA)·scaling(hB)`.
 """
 function Base.:*(hA::CanonicalMPO, hB::CanonicalMPO)
 	r = _mul_data(hA, hB)
 	return CanonicalMPO(r.data; scaling=scaling(hA) * scaling(hB))
 end
+
 """
-	Base.:*(hA::CanonicalMPO, hB::AbstractMPO) -> CanonicalMPO
-	Base.:*(hA::AbstractMPO, hB::CanonicalMPO) -> CanonicalMPO
+	Base.:*(hA::MPO, hB::MPO) -> MPO
+
+Exact (strict) operator product of two chains of the same kind: bond dimensions grow,
+no truncation.
+"""
+Base.:*(hA::MPO, hB::MPO) = _mul_data(hA, hB)
+
+"""
+	Base.:*(hA::CanonicalMPO, hB::MPO) -> CanonicalMPO
+	Base.:*(hA::MPO, hB::CanonicalMPO) -> CanonicalMPO
 
 Exact (strict) operator product; the `scaling` of the `CanonicalMPO` factor carries
 into the result.
 """
-Base.:*(hA::CanonicalMPO, hB::AbstractMPO) =
+Base.:*(hA::CanonicalMPO, hB::MPO) =
 	CanonicalMPO(_mul_data(hA, hB).data; scaling=scaling(hA))
-Base.:*(hA::AbstractMPO, hB::CanonicalMPO) =
+Base.:*(hA::MPO, hB::CanonicalMPO) =
 	CanonicalMPO(_mul_data(hA, hB).data; scaling=scaling(hB))
 
 """
-	Base.:*(hA::AbstractMPO, hB::AbstractMPO) -> MPO
+	Base.:+(hA::MPO, hB::MPO) -> MPO
 
-Exact (strict) operator product: bond dimensions grow, no truncation. The external
-`scaling` of `CanonicalMPO` factors is included (see the specialized methods).
+Exact (strict) sum of two chains of the same kind as a block-diagonal direct product
+(no truncation).
 """
-Base.:*(hA::AbstractMPO, hB::AbstractMPO) = _mul_data(hA, hB)
+Base.:+(hA::MPO, hB::MPO) = _plus_data(hA, hB)
+Base.:-(hA::MPO, hB::MPO) = hA + (-hB)
+Base.:-(hA::MPOHamiltonian, hB::MPOHamiltonian) = hA + (-hB)
 
-"""
-	Base.:+(hA::CanonicalMPO, hB::CanonicalMPO) -> CanonicalMPO
-
-Exact (strict) sum as a block-diagonal direct product (no truncation). The `scaling` of
-both summands is folded into the data and the result has `scaling = 1` (mirroring the
-`CanonicalMPS` sum).
-"""
-Base.:+(hA::CanonicalMPO, hB::CanonicalMPO) =
-	CanonicalMPO(_plus_data(_fold_scaling(hA), _fold_scaling(hB)).data)
-"""
-	Base.:+(hA::CanonicalMPO, hB::AbstractMPO) -> MPO
-	Base.:+(hA::AbstractMPO, hB::CanonicalMPO) -> MPO
-
-Exact (strict) sum; the `scaling` of the `CanonicalMPO` summand is folded into the data
-of the plain-MPO result.
-"""
-Base.:+(hA::CanonicalMPO, hB::AbstractMPO) = _plus_data(_fold_scaling(hA), hB)
-Base.:+(hA::AbstractMPO, hB::CanonicalMPO) = _plus_data(hA, _fold_scaling(hB))
+distance(hA::MPO, hB::MPO) = _distance(hA, hB)
+distance(hA::MPOHamiltonian, hB::MPOHamiltonian) = _distance(hA, hB)
+distance2(hA::MPO, hB::MPO) = _distance2(hA, hB)
+distance2(hA::MPOHamiltonian, hB::MPOHamiltonian) = _distance2(hA, hB)
 
 """
-	Base.:+(hA::AbstractMPO, hB::AbstractMPO) -> MPO
+	fidelity(hA::MPO, hB::MPO) -> Real
+	fidelity(hA::MPOHamiltonian, hB::MPOHamiltonian) -> Real
 
-Exact (strict) sum as a block-diagonal direct product (no truncation); the `scaling` of
-`CanonicalMPO` summands is included (see the specialized methods).
+The Hilbert-Schmidt fidelity `|tr(conj(hA)·hB)| / (‖hA‖_HS·‖hB‖_HS)` of two operator
+chains of the same kind. The absolute value discards the overall phase: two chains
+differing by a global phase (or external scale) have `fidelity = 1`, while their
+[`distance`](@ref) is generically nonzero.
 """
-Base.:+(hA::AbstractMPO, hB::AbstractMPO) = _plus_data(hA, hB)
-Base.:-(hA::AbstractMPO, hB::AbstractMPO) = hA + (-hB)
-
-distance(hA::AbstractMPO, hB::AbstractMPO) = _distance(hA, hB)
-distance2(hA::AbstractMPO, hB::AbstractMPO) = _distance2(hA, hB)
-
-"""
-	fidelity(hA::AbstractMPO, hB::AbstractMPO) -> Real
-
-The Hilbert-Schmidt fidelity `|tr(conj(hA)·hB)| / (‖hA‖_HS·‖hB‖_HS)` of the operator
-chains. Like [`distance`](@ref) it includes the `scaling` of `CanonicalMPO` inputs, but
-the absolute value discards the overall phase: two chains differing by a global phase
-(or external scale) have `fidelity = 1`, while their `distance` is generically nonzero.
-Computed from raw (scale-free) transfer contractions — the `scaling` factors cancel
-exactly (equivalent to the direct formula with `dot`/`norm`), so it stays finite for
-arbitrarily large scalings.
-"""
-function fidelity(hA::AbstractMPO, hB::AbstractMPO)
-	(length(hA) == length(hB)) || throw(ArgumentError("dimension mismatch"))
+function fidelity(hA::MPO, hB::MPO)
+	(length(hA) == length(hB)) || throw(DimensionMismatch("dimension mismatch"))
+	return abs(_dot(hA, hB)) / sqrt(_dot(hA, hA) * _dot(hB, hB))
+end
+function fidelity(hA::MPOHamiltonian, hB::MPOHamiltonian)
+	(length(hA) == length(hB)) || throw(DimensionMismatch("dimension mismatch"))
 	return abs(_dot(hA, hB)) / sqrt(_dot(hA, hA) * _dot(hB, hB))
 end
 
 """
-	infidelity(hA::AbstractMPO, hB::AbstractMPO) -> Real
+	infidelity(hA::MPO, hB::MPO) -> Real
+	infidelity(hA::MPOHamiltonian, hB::MPOHamiltonian) -> Real
 
 The complement of [`fidelity`](@ref): `1 - fidelity`.
 """
-infidelity(hA::AbstractMPO, hB::AbstractMPO) = 1 - fidelity(hA, hB)
+infidelity(hA::MPO, hB::MPO) = 1 - fidelity(hA, hB)
+infidelity(hA::MPOHamiltonian, hB::MPOHamiltonian) = 1 - fidelity(hA, hB)
 
 # exact block-native application MPOHamiltonian · MPS: sum over non-zero blocks, with the
 # finite-chain boundary slicing (first site keeps the start row, last keeps the closing col)
 function Base.:*(h::MPOHamiltonian, ψ::CanonicalMPS)
-	(length(h) == length(ψ)) || throw(ArgumentError("dimension mismatch"))
+	(length(h) == length(ψ)) || throw(DimensionMismatch("dimension mismatch"))
 	L = length(ψ)
 	T = promote_type(scalartype(h), scalartype(ψ))
 	data = Vector{Array{T,3}}(undef, L)
@@ -224,7 +208,6 @@ function Base.:*(h::MPOHamiltonian, ψ::CanonicalMPS)
 		cols = i == L ? (cL:cL) : 1:size(W, 2)
 		r = zeros(T, length(rows), phydim(W), length(cols), size(A, 1), size(A, 3))
 		for (ia, wL) in enumerate(rows), (ib, wR) in enumerate(cols)
-			contains(W, wL, wR) || continue
 			O = W[wL, wR]
 			@tensor tn[p, a, b] := O[p, q] * A[a, q, b]
 			r[ia, :, ib, :, :] .+= tn
@@ -240,25 +223,14 @@ end
 
 _dense(h::MPOHamiltonian) = MPO(tompotensors(h))
 
-_dot(hA::MPOHamiltonian, hB::AbstractMPO) = _dot(_dense(hA), hB)
-_dot(hA::AbstractMPO, hB::MPOHamiltonian) = _dot(hA, _dense(hB))
-_dot(hA::MPOHamiltonian, hB::MPOHamiltonian) = _dot(_dense(hA), _dense(hB))
-
 LinearAlgebra.tr(h::MPOHamiltonian) = tr(_dense(h))
-
-Base.:*(hA::MPOHamiltonian, hB::AbstractMPO) = _dense(hA) * hB
-Base.:*(hA::AbstractMPO, hB::MPOHamiltonian) = hA * _dense(hB)
-Base.:*(hA::MPOHamiltonian, hB::MPOHamiltonian) = _dense(hA) * _dense(hB)
-# disambiguation: the scale-free Hamiltonian mixes with a CanonicalMPO through the
-# scaling-aware wrappers (the result keeps the canonical factor's scale)
-Base.:*(hA::MPOHamiltonian, hB::CanonicalMPO) = _dense(hA) * hB
-Base.:*(hA::CanonicalMPO, hB::MPOHamiltonian) = hA * _dense(hB)
-
-Base.:+(hA::MPOHamiltonian, hB::AbstractMPO) = _dense(hA) + hB
-Base.:+(hA::AbstractMPO, hB::MPOHamiltonian) = hA + _dense(hB)
-Base.:+(hA::MPOHamiltonian, hB::MPOHamiltonian) = _dense(hA) + _dense(hB)
-Base.:+(hA::MPOHamiltonian, hB::CanonicalMPO) = _dense(hA) + hB
-Base.:+(hA::CanonicalMPO, hB::MPOHamiltonian) = hA + _dense(hB)
+# block-native sum: per site the auxiliary (channel) dimensions of the site tensors add
+# (see +(SchurMPOTensor, SchurMPOTensor)), mirroring the dense chain sum — the result is
+# again a (typically sparser) MPOHamiltonian
+function Base.:+(hA::MPOHamiltonian, hB::MPOHamiltonian)
+	(length(hA) == length(hB)) || throw(DimensionMismatch("dimension mismatch"))
+	return MPOHamiltonian([hA[i] + hB[i] for i in 1:length(hA)])
+end
 
 LinearAlgebra.lmul!(f::Number, h::MPOHamiltonian) = (isempty(h.data) || lmul!(f, h.data[1]); h)
 

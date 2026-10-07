@@ -9,7 +9,7 @@ struct OverlapCache{A, B, T}
 end
 
 function OverlapCache(ψA::CanonicalMPS, ψB::CanonicalMPS)
-	(length(ψA) == length(ψB)) || throw(ArgumentError("dimension mismatch"))
+	(length(ψA) == length(ψB)) || throw(DimensionMismatch("dimension mismatch"))
 	# bra is the optimized side: reset its Schmidt values (sweeps never touch them)
 	unset_svectors!(ψA)
 	L = length(ψB)
@@ -24,7 +24,7 @@ function OverlapCache(ψA::CanonicalMPS, ψB::CanonicalMPS)
 end
 
 function OverlapCache(hA::AbstractMPO, hB::AbstractMPO)
-	(length(hA) == length(hB)) || throw(ArgumentError("dimension mismatch"))
+	(length(hA) == length(hB)) || throw(DimensionMismatch("dimension mismatch"))
 	hA isa CanonicalMPO && unset_svectors!(hA)
 	L = length(hB)
 	T = promote_type(scalartype(hA), scalartype(hB))

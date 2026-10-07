@@ -40,26 +40,10 @@ function _updatetraceright(v::AbstractVector, W::MPOTensor)
 	return vnew
 end
 
-# block-sparse MPO site tensors: sum the three-chain contraction over the non-zero operator
-# blocks (scalar blocks expand to scalar·identity via the sparse-tensor getindex)
-function _updateleft(hold::AbstractArray{T,3}, Aj::MPSTensor, W::AbstractSparseMPOTensor, Bj::MPSTensor) where {T}
-	hnew = zeros(T, size(Aj, 3), size(W, 2), size(Bj, 3))
-	for (wL, wR) in keys(W)
-		O = W[wL, wR]
-		hslice = hold[:, wL, :]
-		@tensor hn[a, c] := conj(Aj[1, p, a]) * hslice[1, 2] * O[p, q] * Bj[2, q, c]
-		hnew[:, wR, :] .+= hn
-	end
-	return hnew
-end
+# block-sparse MPO site tensors: densify and take the dense path (the sparse block
+# storage is a wrapper around the same 4-index layout, so this is a copy)
+_updateleft(hold::AbstractArray{T,3}, Aj::MPSTensor, W::SchurMPOTensor, Bj::MPSTensor) where {T} =
+	_updateleft(hold, Aj, tompotensor(W), Bj)
 
-function _updateright(hold::AbstractArray{T,3}, Aj::MPSTensor, W::AbstractSparseMPOTensor, Bj::MPSTensor) where {T}
-	hnew = zeros(T, size(Aj, 1), size(W, 1), size(Bj, 1))
-	for (wL, wR) in keys(W)
-		O = W[wL, wR]
-		hslice = hold[:, wR, :]
-		@tensor hn[a, c] := conj(Aj[a, p, 1]) * hslice[1, 2] * O[p, q] * Bj[c, q, 2]
-		hnew[:, wL, :] .+= hn
-	end
-	return hnew
-end
+_updateright(hold::AbstractArray{T,3}, Aj::MPSTensor, W::SchurMPOTensor, Bj::MPSTensor) where {T} =
+	_updateright(hold, Aj, tompotensor(W), Bj)

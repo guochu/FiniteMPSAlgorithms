@@ -53,18 +53,63 @@ end
 	# timeevompo: evolve a single SchurMPOTensor by WI
 	Wschur = H[1]
 	Wevolved = timeevompo(Wschur, 0.1, WI())
-	@test Wevolved isa AbstractSparseMPOTensor
-	# timeevompo on full Hamiltonian
+	@test Wevolved isa MPOTensor
+	# timeevompo on full Hamiltonian: the evolved operator is a dense finite-chain MPO
 	Hevolved = timeevompo(H, 0.05, WII())
-	@test Hevolved isa MPOHamiltonian
+	@test Hevolved isa MPO
 	# default-algorithm form
 	Hevolved2 = timeevompo(H, 0.05)
-	@test Hevolved2 isa MPOHamiltonian
+	@test Hevolved2 isa MPO
 	# stepper type hierarchy
 	@test WI() isa FirstOrderStepper && WII() isa FirstOrderStepper
 	@test ComplexStepper() isa SecondOrderStepper
 	@test WI() isa FiniteMPSAlgorithms.MPSAlgorithm && ComplexStepper(stepper=WII()) isa FiniteMPSAlgorithms.MPSAlgorithm
 	@test ComplexStepper().stepper isa WII   # default stepper
+end
+
+@testset "WI/WII/TDVP on a rectangular MPOHamiltonian" begin
+	# the 2-site rectangular chain (space_l ≠ space_r at both sites) of
+	# test/operators/sparsempo.jl: the represented operator is H = 0.5·I⊗σz + σx⊗σx
+	Random.seed!(555)
+	o1 = Matrix{Any}(undef, 2, 3); o1 .= 0.0
+	o1[1, 1] = 1; o1[2, 3] = 1; o1[1, 2] = _SX
+	o2 = Matrix{Any}(undef, 3, 2); o2 .= 0.0
+	o2[1, 1] = 1; o2[3, 2] = 1; o2[1, 2] = 0.5 * _SZ; o2[2, 2] = _SX
+	hrect = MPOHamiltonian([SchurMPOTensor(o1), SchurMPOTensor(o2)])
+	Hd = 0.5 * kron(I(2), _SZ) + kron(_SX, _SX)
+	Uexact(dt) = exp(Matrix(-im * Hd * dt))
+	ψ0 = randommps(ComplexF64, [2, 2]; D=4)
+	normalize!(ψ0)
+	v0 = todense(ψ0)
+	tr = truncdimcutoff(16, 1.0e-12)
+	dt = -im * 0.1
+
+	# --- WI/WII/ComplexStepper real time vs exact diagonalization ---
+	# note: on this 2-site chain the cross-site term C₁⊗B₂ involves no interior-channel
+	# pair (the first site has no interior row, the last no interior column), so the
+	# single-site block exponentials reduce to first order in dt for the cross-site term.
+	# The MPO product of the two complex half steps additionally mixes the √δ₁/√δ₂
+	# branch factors of the two chains (first-order cross paths), so the ComplexStepper
+	# is structurally meaningless here and only run as a smoke test.
+	ψw = copy(ψ0)
+	timeevo!(ψw, hrect, dt, WII(); trunc=tr)
+	@test norm(todense(ψw) - Uexact(0.1) * v0) < 0.2
+	ψc = copy(ψ0)
+	timeevo!(ψc, hrect, dt, ComplexStepper(); trunc=tr)
+	# non-mutating form: the same result, ψ0 untouched
+	ψn = timeevo(ψ0, hrect, dt, WII(); trunc=tr)
+	@test todense(ψn) ≈ todense(ψw) atol = 1.0e-9
+	@test todense(ψ0) ≈ v0 atol = 1.0e-12
+
+	# --- TDVP1 imaginary time converges to the ground state ---
+	ψg = randommps(ComplexF64, [2, 2]; D=4)
+	normalize!(ψg)
+	envg = DMRGCache(hrect, ψg)
+	for _ in 1:200
+		sweep!(envg, TDVP1(stepsize=-0.05))
+	end
+	nrm = norm(envg.ket)
+	@test real(expectation(hrect, envg.ket)) / nrm^2 ≈ eigmin(Hermitian(Hd)) atol = 1e-6
 end
 
 @testset "Lindblad open-system evolution (WI/WII/TDVP) vs ED" begin
@@ -136,14 +181,14 @@ end
 	# --- WII (two steps) ---
 	ψw = copy(ρ)
 	for _ in 1:2
-		timeevolve!(ψw, 𝓛, T / 2, WII(); trunc=truncdimcutoff(64, 1.0e-12))
+		timeevo!(ψw, 𝓛, T / 2, WII(); trunc=truncdimcutoff(64, 1.0e-12))
 	end
 	@test relerr(todense(ψw)) < 5e-3
 
 	# --- WI (first order, 10 steps) ---
 	ψwi = copy(ρ)
 	for _ in 1:10
-		timeevolve!(ψwi, 𝓛, T / 10, WI(); trunc=truncdimcutoff(64, 1.0e-12))
+		timeevo!(ψwi, 𝓛, T / 10, WI(); trunc=truncdimcutoff(64, 1.0e-12))
 	end
 	@test relerr(todense(ψwi)) < 5e-2
 
@@ -165,11 +210,12 @@ end
 	I2 = Matrix{ComplexF64}(I, 2, 2)
 
 	heisenberg_terms(L) = begin
-		terms = OpSum(fill(2, L))
-		for i in 1:L-1
-			push!(terms, OpTerm(1.0, i => σx, i + 1 => σx))
-			push!(terms, OpTerm(1.0, i => σy, i + 1 => σy))
-			push!(terms, OpTerm(1.0, i => σz, i + 1 => σz))
+		terms = OpTerm(1.0, 1 => σx, 2 => σx) + OpTerm(1.0, 1 => σy, 2 => σy) +
+				OpTerm(1.0, 1 => σz, 2 => σz)
+		for i in 2:L-1
+			terms += OpTerm(1.0, i => σx, i + 1 => σx) +
+					 OpTerm(1.0, i => σy, i + 1 => σy) +
+					 OpTerm(1.0, i => σz, i + 1 => σz)
 		end
 		terms
 	end
@@ -259,7 +305,7 @@ end
 	termsf = heisenberg_terms(L)
 	field = randn(L)
 	for i in 1:L
-		push!(termsf, OpTerm(field[i], i => σz))
+		termsf += OpTerm(field[i], i => σz)
 	end
 	hf = MPOHamiltonian(termsf)
 	Hf = denseH(L; field)
@@ -399,7 +445,7 @@ end
 	L3 = 3
 	ds3 = fill(2, L3)
 	p3 = model_params(L3)
-	h3 = MPOHamiltonian(mpo_model(p3))
+	h3 = mpo_model(p3)
 	Hd3 = dense_model(p3)
 	ρg = tompo(Matrix{ComplexF64}(I, 2^L3, 2^L3), ds3)
 	@test all(==(1), bonddims(ρg))

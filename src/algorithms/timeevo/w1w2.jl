@@ -45,22 +45,12 @@ The two half steps of [`ComplexStepper`](@ref): `U₁ = exp(H·dt₁)`, `U₂ = 
 """
 complex_stepper(dt::Number) = ((1 - im) * dt / 2, (1 + im) * dt / 2)
 
-# Schur block extraction: A = interior, B = last column interior (completions),
-# C = first row interior (starts), D = top-right corner (on-site terms)
-
-function _SiteW_impl(WA, WB, WC, WD)
-	s1, s2 = size(WA)
-	r = Matrix{Any}(undef, s1 + 1, s2 + 1)
-	r[1, 1] = WD
-	for l in 2:s2+1
-		r[1, l] = WC[l-1]
-	end
-	for l in 2:s1+1
-		r[l, 1] = WB[l-1]
-	end
-	r[2:end, 2:end] .= WA
-	return SparseMPOTensor(r)
-end
+# the evolved W-form site tensor of a Schur tensor: the two unit levels collapse into
+# one channel — the vacuum diagonal carries the evolved on-site term — so the logical
+# shape is (a+1, c+1) for an (a+2)×(c+2) Schur tensor:
+#   [ D(dt)  C' ]
+#   [ B'     A  ]
+# the finite-chain boundaries select row 1 / column 1 (`_leftrow`/`_rightcol`).
 
 function _sqrt2(dt::Complex)
 	r = sqrt(dt)
@@ -79,74 +69,81 @@ end
 
 """
 	timeevompo(m::SchurMPOTensor, dt, alg)
-	timeevompo(h::SparseMPOHamiltonian, dt, alg=WII())
+	timeevompo(h::MPOHamiltonian, dt, alg=WII())
 
 Evolve a Schur-form Hamiltonian by one step `dt` with the stepping algorithm `alg`
-([`WI`](@ref), [`WII`](@ref), or [`ComplexStepper`](@ref)), returning the evolved sparse
-MPO (a `SparseMPOHamiltonian{<:SparseMPOTensor}`; `ComplexStepper` returns the pair of
-half-step results).
+([`WI`](@ref), [`WII`](@ref), or [`ComplexStepper`](@ref)). The single-tensor methods
+return the evolved full-logical-shape 4-index tensor; the Hamiltonian method assembles
+them into the dense finite-chain [`MPO`](@ref) (the vacuum row of the first site and the
+closing column of the last site; the channel-1 diagonal carries the on-site evolution).
+`ComplexStepper` returns the pair of half-step results.
 """
 function timeevompo(m::SchurMPOTensor, dt::Number, alg::WI)
-	d = phydim(m)
+	# the evolution introduces the scalar type of dt (e.g. complex time for real-time
+	# evolution of a real-valued W)
+	T = promote_type(scalartype(m), typeof(dt))
+	a, c, d = size(m.A, 1), size(m.A, 3), size(m.A, 2)
 	δ₁, δ₂ = _sqrt2(dt)
-	# raw blocks may store proportional-to-identity scalars — expand to dense blocks
-	WA = _expand_element.(m.A, d)
-	WB = δ₁ .* _expand_element.(m.B, d)
-	WC = δ₂ .* _expand_element.(m.C, d)
-	D = _expand_element(m.D, d)
-	WD = isometry(scalartype(D), d) + dt * D
-	return _SiteW_impl(WA, WB, WC, WD)
+	O = zeros(T, a + 1, d, c + 1, d)
+	O[1, :, 1, :] .= isometry(T, d) .+ dt .* m.D
+	O[1, :, 2:c+1, :] .= δ₂ .* m.C
+	O[2:a+1, :, 1, :] .= δ₁ .* m.B
+	O[2:a+1, :, 2:c+1, :] .= m.A
+	return O
 end
 
 function timeevompo(m::SchurMPOTensor, dt::Number, alg::WII)
-	# raw blocks may store proportional-to-identity scalars — expand to dense blocks
-	d = phydim(m)
-	A = _expand_element.(m.A, d)
-	B = _expand_element.(m.B, d)
-	C = _expand_element.(m.C, d)
-	D = _expand_element(m.D, d)
-	Ddt = dt * D
+	T = promote_type(scalartype(m), typeof(dt))
+	a, c, d = size(m.A, 1), size(m.A, 3), size(m.A, 2)
+	δ₁, δ₂ = _sqrt2(dt)
+	Ddt = dt .* m.D
 	WD = exp(Ddt)
 	mo = zero(Ddt)
-	nA_rows, nA_cols = size(A)
-	nB, nC = length(B), length(C)
-	δ₁, δ₂ = _sqrt2(dt)
-
-	T = typeof(Ddt)
-	WA = Array{T,2}(undef, nA_rows, nA_cols)
-	WB = Array{T,1}(undef, nB)
-	WC = Array{T,1}(undef, nC)
-
-	# rectangular edge tensors (first row / last column of the chain) have empty A/B or
-	# A/C blocks; the missing entries enter the block matrix as zeros and the undefined
-	# output slots are simply not stored. `max(..., 1)` keeps the loop running when one
-	# of the index sets is empty (e.g. the C evolution on the first site).
-	for a in 1:max(nB, nA_rows, 1), b in 1:max(nC, nA_cols, 1)
-		Ab = (a <= nA_rows && b <= nA_cols) ? A[a, b] : mo
-		Bb = (a <= nB) ? B[a] : mo
-		Cb = (b <= nC) ? C[b] : mo
-		tmp = [Ddt mo mo mo; δ₂*Cb Ddt mo mo; δ₁*Bb mo Ddt mo; Ab δ₁*Bb δ₂*Cb Ddt]
-		ex = exp(tmp)
-		ex = ex[:, 1:d]
-		(b <= nC) && (WC[b] = ex[(d+1):2d, :])
-		(a <= nB) && (WB[a] = ex[(2d+1):3d, :])
-		(a <= nA_rows && b <= nA_cols) && (WA[a, b] = ex[(3d+1):4d, :])
+	# the block exponential acts channel by channel: for every interior (row, column)
+	# block pair, the closed 4×4 block propagator is exponentiated and its evolved
+	# C (starts), B (completions) and A (propagation) blocks read off
+	WA = Array{T,4}(undef, a, d, c, d)
+	WB = Array{T,3}(undef, a, d, d)
+	WC = Array{T,3}(undef, d, c, d)
+	for i in 1:a, j in 1:c
+		# the block propagator of MPSKit's WII (`WIIStep`): B only couples to D
+		# (`∂_t B = BD + DB`), C only to D, A couples to D and to B/C via √δ —
+		# exponentiated exactly with the 4d×4d matrix exponential
+		tmp = [Ddt                mo                    mo                mo;
+			   δ₂ .* m.C[:, j, :] Ddt                   mo                mo;
+			   δ₁ .* m.B[i, :, :] mo                    Ddt               mo;
+			   m.A[i, :, j, :]    δ₁ .* m.B[i, :, :]    δ₂ .* m.C[:, j, :] Ddt]
+		ex = exp(tmp)[:, 1:d]
+		WC[:, j, :] = ex[(d+1):2d, :]
+		WB[i, :, :] = ex[(2d+1):3d, :]
+		WA[i, :, j, :] = ex[(3d+1):4d, :]
 	end
-	return _SiteW_impl(WA, WB, WC, WD)
+	O = zeros(T, a + 1, d, c + 1, d)
+	O[1, :, 1, :] .= WD
+	O[1, :, 2:c+1, :] .= WC
+	O[2:a+1, :, 1, :] .= WB
+	O[2:a+1, :, 2:c+1, :] .= WA
+	return O
 end
 
-function timeevompo(h::MPOHamiltonian{<:SchurMPOTensor}, dt::Number, alg::FirstOrderStepper)
-	return MPOHamiltonian([timeevompo(h[i], dt, alg) for i in 1:length(h)])
+function timeevompo(h::MPOHamiltonian, dt::Number, alg::FirstOrderStepper)
+	L = length(h)
+	O = [timeevompo(h[i], dt, alg) for i in 1:L]
+	# the finite chain keeps the vacuum row of the first site and the closing column of
+	# the last site (the channel-1 diagonal carries the on-site evolution)
+	O[1] = O[1][1:1, :, :, :]
+	O[L] = O[L][:, :, 1:1, :]
+	return MPO(O)
 end
 
-function timeevompo(h::Union{SchurMPOTensor,MPOHamiltonian{<:SchurMPOTensor}}, dt::Number, alg::ComplexStepper)
+function timeevompo(h::Union{SchurMPOTensor,MPOHamiltonian}, dt::Number, alg::ComplexStepper)
 	dt1, dt2 = complex_stepper(dt)
 	return timeevompo(h, dt1, alg.stepper), timeevompo(h, dt2, alg.stepper)
 end
 
 # two-argument convenience (defaults to WII); a fallback on alg::MPSAlgorithm would be
 # ambiguous with the ComplexStepper method above
-timeevompo(h::MPOHamiltonian{<:SchurMPOTensor}, dt::Number) = timeevompo(h, dt, WII())
+timeevompo(h::MPOHamiltonian, dt::Number) = timeevompo(h, dt, WII())
 
 # ---------- applying the evolved MPO to a state ----------
 
@@ -156,21 +153,39 @@ timeevompo(h::MPOHamiltonian{<:SchurMPOTensor}, dt::Number) = timeevompo(h, dt, 
 # non-unitary (e.g. Lindblad) evolution operators.
 
 """
-	timeevolve!(ψ::CanonicalMPS, h::MPOHamiltonian, dt, alg=WII(); trunc=Defaults.alg_trunc())
-	timeevolve!(ψ, h, dt, ComplexStepper(); trunc)
+	timeevo(ψ::CanonicalMPS, h::MPOHamiltonian, dt, alg::FirstOrderStepper;
+			trunc=Defaults.alg_trunc()) -> ψ'
+	timeevo(ψ, h, dt, alg::ComplexStepper; trunc) -> ψ'
 
-One W-matrix time step: build the evolved MPO with [`timeevompo`](@ref) and apply it to
-`ψ` with the truncation `trunc` (via [`mult`](@ref)). `ComplexStepper` composes the two
-half steps for second-order accuracy.
+Non-mutating variant of [`timeevo!`](@ref): one W-matrix time step — build the evolved
+MPO with [`timeevompo`](@ref) and apply it to `ψ` with the truncation `trunc` (via
+[`mult`](@ref)) — returned as a new `CanonicalMPS`, leaving `ψ` untouched. The
+`ComplexStepper` composes the two half steps for second-order accuracy.
 """
-function timeevolve!(ψ::CanonicalMPS, h::MPOHamiltonian{<:SchurMPOTensor}, dt::Number,
-					 alg::MPSAlgorithm=WII(); trunc::TruncationScheme=Defaults.alg_trunc())
-	if alg isa ComplexStepper
-		dt1, dt2 = complex_stepper(dt)
-		W1, W2 = timeevompo(h, dt1, alg.stepper), timeevompo(h, dt2, alg.stepper)
-		copy!(ψ, mult(W1, ψ, SVDCompression(trunc=trunc)))
-		return copy!(ψ, mult(W2, ψ, SVDCompression(trunc=trunc)))
-	end
-	W = timeevompo(h, dt, alg)
-	return copy!(ψ, mult(W, ψ, SVDCompression(trunc=trunc)))
+timeevo(ψ::CanonicalMPS, h::MPOHamiltonian, dt::Number, alg::FirstOrderStepper;
+		trunc::TruncationScheme=Defaults.alg_trunc()) =
+	mult(timeevompo(h, dt, alg), ψ, SVDCompression(trunc=trunc))
+
+function timeevo(ψ::CanonicalMPS, h::MPOHamiltonian, dt::Number, alg::ComplexStepper;
+				 trunc::TruncationScheme=Defaults.alg_trunc())
+	dt1, dt2 = complex_stepper(dt)
+	φ = mult(timeevompo(h, dt1, alg.stepper), ψ, SVDCompression(trunc=trunc))
+	return mult(timeevompo(h, dt2, alg.stepper), φ, SVDCompression(trunc=trunc))
+end
+
+"""
+	timeevo!(ψ::CanonicalMPS, h::MPOHamiltonian, dt, alg=WII(); trunc=Defaults.alg_trunc())
+	timeevo!(ψ, h, dt, ComplexStepper(); trunc)
+
+In-place one W-matrix time step: `copy!`s the result of the non-mutating [`timeevo`](@ref)
+into `ψ` (see there for the algorithm; `ComplexStepper` composes the two half steps for
+second-order accuracy).
+"""
+function timeevo!(ψ::CanonicalMPS, h::MPOHamiltonian, dt::Number,
+				  alg::MPSAlgorithm=WII(); trunc::TruncationScheme=Defaults.alg_trunc())
+	φ = timeevo(ψ, h, dt, alg; trunc)
+	# an element-type promotion (e.g. a real state evolved in complex time) cannot be
+	# copied back into ψ: return the promoted state directly
+	scalartype(φ) == scalartype(ψ) && return copy!(ψ, φ)
+	return φ
 end

@@ -95,8 +95,14 @@ end
 	@test yc ≈ yref atol = 1e-12
 
 	# --- ac_prime / Heff: dense branch vs the direct four-tensor contraction ---
+	# the W-form requires identity corners at (1,1) and (wl,wr)
 	Random.seed!(3)
 	Wd = randn(ComplexF64, 3, 2, 4, 2)     # (wL, p', wR, p)
+	Wd[1, :, 1, :] = Matrix{ComplexF64}(I, 2, 2)
+	Wd[3, :, 4, :] = Matrix{ComplexF64}(I, 2, 2)
+	# strictly upper-triangular Schur structure: lower-triangular blocks and the last
+	# row (except the closing corner) have no Schur-form slot
+	Wd[2, :, 1, :] .= 0; Wd[3, :, 1:3, :] .= 0
 	hl = randn(ComplexF64, 5, 3, 6)        # (a', wL, l)
 	hr = randn(ComplexF64, 7, 4, 8)        # (c', wR, r)
 	xc = randn(ComplexF64, 6, 2, 8)        # (l, p, r)
@@ -107,12 +113,19 @@ end
 	@test ac_prime(xc, Heff(Wd, hl, hr)) ≈ yref atol = 1e-12
 
 	# --- sparse branch vs the dense branch on an equivalent operator ---
-	blocks = [Wd[wl, :, wr, :] for wl in 1:3, wr in 1:4]
-	Ws = SparseMPOTensor(blocks)
+	blocks = Matrix{Any}(undef, 3, 4)
+	blocks .= 0
+	blocks[1, 1] = 1; blocks[3, 4] = 1     # implied identity corners
+	for j in 1:4, i in 1:3
+		((i == 1 && j == 1) || (i == 3 && j == 4)) && continue
+		iszero(Wd[i, :, j, :]) || (blocks[i, j] = Wd[i, :, j, :])
+	end
+	Ws = SchurMPOTensor(blocks)
 	@test ac_prime(xc, Ws, hl, hr) ≈ yref atol = 1e-12
 	heff_s = Heff(Ws, hl, hr)
 	@test ac_prime(xc, heff_s) ≈ yref atol = 1e-12
-	@test heff_s.W === Ws && heff_s.left === hl && heff_s.right === hr
+	# the site tensor is stored as-is: Heff does not convert the Schur form
+	@test heff_s.W == Ws && heff_s.left === hl && heff_s.right === hr
 end
 
 @testset "dmrg2" begin

@@ -173,6 +173,18 @@ spectrum:
 
 If the input is right-canonical and the truncation error is small, the right-canonical
 form is preserved without any `canonicalize!`.
+
+**The Hastings trick.** The fold–SVD–back-project update above is the two-site
+application trick introduced for the light-cone TEBD by M. Hastings, "Light cone
+Matrix Product", *J. Math. Phys.* **50**, 095207 (2009) (aligned with TEMPO/GTEMPO).
+Its decisive advantage is that — unlike a naive two-site SVD followed by
+re-orthogonalization — it updates both sites from a *single* decomposition while
+keeping the gauge and the local spectrum consistent. **Caveat:** the exact
+preservation of the strict canonical form relies on the truncated SVD being exact for
+the state at hand: only for a *sufficiently small truncation error* does the MPS
+remain strictly canonical. For aggressive truncations the *gauge* property degrades
+(the back-projected left factor is no longer exactly right-orthogonal) and the
+canonical form is only approximate.
 """
 function apply!(g::UnitaryGate{2}, ψ::CanonicalMPS; trunc::TruncationScheme=Defaults.alg_trunc())
 	i, j = g.positions
@@ -188,26 +200,29 @@ function apply!(g::UnitaryGate{2}, ψ::CanonicalMPS; trunc::TruncationScheme=Def
 end
 
 """
-	apply!(g::GeneralGate{2}, ψ::CanonicalMPS; trunc=Defaults.alg_trunc()) -> ψ
+	apply!(g::GeneralGate{2}, ψ::CanonicalMPS; trunc=Defaults.alg_trunc(),
+	       canonicalize=true) -> ψ
 
 Apply a possibly non-unitary two-site gate with the same Hastings update as
 [`UnitaryGate`](@ref) (identical fold–SVD–back-project step; the gate sites may be any
 ascending pair, moved next to each other with content swaps). A non-unitary `G` breaks
 the right-orthogonality of the left factor (the *gauge* property of the Hastings
-update), so the state is re-canonicalized with `canonicalize!` afterwards. Initializes
-the canonical form if needed.
+update), so the state is re-canonicalized with [`truncate!`](@ref) afterwards (an SVD
+sweep under the truncation scheme `trunc`); pass `canonicalize=false` to skip this
+re-canonicalization sweep. Initializes the canonical form if needed.
 """
-function apply!(g::GeneralGate{2}, ψ::CanonicalMPS; trunc::TruncationScheme=Defaults.alg_trunc())
+function apply!(g::GeneralGate{2}, ψ::CanonicalMPS; trunc::TruncationScheme=Defaults.alg_trunc(),
+				canonicalize::Bool=true)
 	i, j = g.positions
 	(1 <= i < j <= length(ψ)) || throw(BoundsError())
 	for b in j-1:-1:i+1
 		swap!(ψ, b; trunc)
 	end
 	_nn_gate_apply!(g, ψ, i; trunc)
+	canonicalize && truncate!(ψ; trunc)
 	for b in i+1:j-1
 		swap!(ψ, b; trunc)
 	end
-	canonicalize!(ψ)
 	return ψ
 end
 

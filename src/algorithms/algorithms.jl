@@ -14,10 +14,10 @@ include("groundstates/dmrg2.jl")
 include("groundstates/excited.jl")
 # ml: machine learning applications
 include("ml/seq2seq.jl")
-# timeevo: time evolution (TDVP, TEBD gates, W-matrix evolution)
+# timeevo: time evolution (W-matrix evolution, TDVP, TEBD gates)
+include("timeevo/w1w2.jl")
 include("timeevo/tdvp.jl")
 include("timeevo/hadamardtdvp.jl")
-include("timeevo/w1w2.jl")
 include("timeevo/tebd.jl")
 include("expec.jl")
 # sampling: direct configuration sampling from a canonical MPS

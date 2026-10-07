@@ -112,7 +112,7 @@ function compress(x, alg::DMRG1)
 	return compress!(out, x, alg)
 end
 compress(h::MPOHamiltonian, alg::DMRG1) =
-        compress(MPO(tompotensors(h)), alg)
+	compress(MPO(tompotensors(h)), alg)
 
 # ---------- two-site (DMRG2) sweeps and interface ----------
 

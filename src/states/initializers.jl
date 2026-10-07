@@ -173,3 +173,13 @@ Returns `ψ` and the maximal truncation error.
 """
 truncate!(ψ::CanonicalMPS; trunc::TruncationScheme=Defaults.alg_orth_trunc()) =
 	canonicalize!(ψ; alg=Orthogonalize(SVD(), trunc, false))
+
+"""
+	truncate!(ρ::CanonicalMPO; trunc=Defaults.alg_orth_trunc()) -> (ρ, err)
+
+Truncate the operator chain `ρ` by canonicalizing with an SVD sweep under the truncation
+scheme `trunc` (the operator-space analog of the [`CanonicalMPS`](@ref) method). Returns
+`ρ` and the maximal truncation error.
+"""
+truncate!(ρ::CanonicalMPO; trunc::TruncationScheme=Defaults.alg_orth_trunc()) =
+	canonicalize!(ρ; alg=Orthogonalize(SVD(), trunc, false))

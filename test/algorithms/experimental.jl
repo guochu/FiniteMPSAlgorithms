@@ -8,14 +8,14 @@
 
 	# TFIM: H = -J Σ Z_i Z_{i+1} - h Σ X_i
 	ds = fill(2, L)
-	terms = OpSum(ds)
+	terms = OpTerm[]
 	for i in 1:L-1
 		push!(terms, OpTerm(-J, i => SZ, i + 1 => SZ))
 	end
 	for i in 1:L
 		push!(terms, OpTerm(-h, i => SX))
 	end
-	H = MPOHamiltonian(terms)
+	H = MPOHamiltonian(OpSum(ds, terms))
 
 	# exact diagonalization reference (site 1 = most significant kron factor)
 	op(ops...) = reshape(kron(ops...), 2^L, 2^L)

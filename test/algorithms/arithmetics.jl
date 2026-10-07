@@ -22,15 +22,15 @@
 	@test todense(out3) ≈ vHψ atol = 1e-6 * norm(vHψ)
 
 	# --- mult MPO·MPO ---
-	prod_exact = H * H
+	prod_exact = MPO(H) * MPO(H)
 	@test todense(prod_exact) ≈ Hd * Hd atol = 1e-8
-	prod_svd = mult(H, H, SVDCompression(trunc=truncdim(64)))
+	prod_svd = mult(MPO(H), MPO(H), SVDCompression(trunc=truncdim(64)))
 	@test prod_svd isa CanonicalMPO
 	# compare the represented dense operators: a cross-gauge transfer-chain `distance`
 	# (raw bond-121 vs canonical bond-64) loses ~1e-6 to cancellation even when the
 	# operators agree to machine precision
 	@test norm(todense(prod_exact) - todense(prod_svd)) < 1e-6
-	prod_als, _ = mult(H, H, DMRG1(maxiter=20, tol=1e-10, D=16))
+	prod_als, _ = mult(MPO(H), MPO(H), DMRG1(maxiter=20, tol=1e-10, D=16))
 	@test prod_als isa CanonicalMPO
 	@test norm(todense(prod_exact) - todense(prod_als)) < 1e-5
 
@@ -45,7 +45,7 @@
 	# (exact bond is 22). Note the SVD route's `scaling` field additionally absorbs the
 	# data norms during canonicalization (data-normalized gauge): the represented value
 	# is the contract, not the raw `scaling` number.
-	rho_exact = H * ρ
+	rho_exact = mult(H, ρ, SVDCompression(trunc=NoTruncation()))
 	δ = norm(todense(rho_exact))
 	@test norm(todense(rho_svd) - todense(rho_exact)) / δ < 5e-2
 	@test norm(todense(rho_als) - todense(rho_exact)) / δ < 5e-2
@@ -421,7 +421,7 @@ end
 
         # scaled canonical MPO input: the represented equation U·x = y holds with the
         # operands' external scales (the solution carries scaling(y)/scaling(A))
-        Uc = CanonicalMPO(MPO(tompotensors(U)).data)
+        Uc = CanonicalMPO(U.data)
         setscaling!(Uc, 2.5)
         yUc = copy(yU)
         setscaling!(yUc, 2.5)              # represented y = 2.5^L·U·x_exact
@@ -459,7 +459,7 @@ end
 	@test iscanonical(out)
 
 	# mult MPO·MPO
-	prod2, _ = mult(H, H, DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(16), verbosity=0))
+	prod2, _ = mult(MPO(H), MPO(H), DMRG2(maxiter=10, tol=1e-10, trunc=truncdim(16), verbosity=0))
 	@test norm(todense(prod2) - Hd * Hd) < 1e-5
 
 	# mult with the DMRG2 in-place driver (the dense MPO layer; sparse Hamiltonians are
@@ -520,7 +520,7 @@ end
 	@test todense(first(mult(MPO(tompotensors(Hs)), ψs, nt))) ≈ Hsd * vψs atol = 1e-8 rtol = 1e-8
 
 	# mult MPO·MPO
-	mc = MultCache(MPO(tompotensors(Hs)), MPO(tompotensors(Hs)), svdguess_mult(Hs, Hs, 64))
+	mc = MultCache(MPO(tompotensors(Hs)), MPO(tompotensors(Hs)), svdguess_mult(MPO(tompotensors(Hs)), MPO(tompotensors(Hs)), 64))
 	kh = iterative_compute!(mc, nt).losses
 	@test monotone(kh)
 	@test todense(first(mult(MPO(tompotensors(Hs)), MPO(tompotensors(Hs)), nt))) ≈ Hsd * Hsd atol = 1e-8 rtol = 1e-8
@@ -550,7 +550,7 @@ end
 	Us = timeevompo(Hs, 0.15, WII())
 	xs_exact = randommps(ComplexF64, dss; D=4)
 	ys = mult(Us, xs_exact)
-	lc = LinsolveCache(MPO(tompotensors(Us)), ys, randommps(ComplexF64, dss; D=8, normalize=false))
+	lc = LinsolveCache(Us, ys, randommps(ComplexF64, dss; D=8, normalize=false))
 	kh = iterative_compute!(lc, nt2).losses
 	@test monotone(kh)
 	@test abs(dot(todense(lc.ket), todense(xs_exact))) /
@@ -558,7 +558,7 @@ end
 
 	# two-site linsolve with a scaled canonical MPO and an independently scaled rhs:
 	# the represented equation (s_A^L·A)·x = s_y^L·(A·x_exact) must be solved
-	Uc2 = CanonicalMPO(MPO(tompotensors(Us)).data)
+	Uc2 = CanonicalMPO(Us.data)
 	setscaling!(Uc2, 3.0)
 	ysc = copy(ys)
 	setscaling!(ysc, 1.4)

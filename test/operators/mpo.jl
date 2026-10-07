@@ -60,7 +60,7 @@ end
 	@test todense(identitympo(ComplexF64, ds) * P1) ≈ dense1 atol = 1e-12
 	@test todense(P1 * (-1.5)) ≈ -1.5 * dense1 atol = 1e-12
 	# MPO·MPO Hamiltonian product and sum vs dense
-	@test maximum(abs.(todense(H * H) - Hd * Hd)) < 1e-10
+	@test maximum(abs.(todense(MPO(H) * MPO(H)) - Hd * Hd)) < 1e-10
 	@test maximum(abs.(todense(H + H) - 2Hd)) < 1e-10
 	# MPOHamiltonian from OpTerms equals the dense model
 	@test maximum(abs.(todense(H) - Hd)) < 1e-12
@@ -72,29 +72,33 @@ end
 	Random.seed!(46)
 	L = 4
 	ds = fill(2, L)
-	hA = randommpo(ComplexF64, ds; D=4)
-	hB = randommpo(ComplexF64, ds; D=4)
+	# fidelity/distance are same-kind operations: plain MPO inputs
+	hA = MPO(randommpo(ComplexF64, ds; D=4).data)
+	hB = MPO(randommpo(ComplexF64, ds; D=4).data)
 	dA, dB = todense(hA), todense(hB)
 	# generic pair vs the direct dense Hilbert-Schmidt formula
 	@test fidelity(hA, hB) ≈ abs(sum(conj.(dA) .* dB)) / (norm(dA) * norm(dB)) atol = 1e-10
 	@test fidelity(hA, hA) ≈ 1 atol = 1e-12
 	@test infidelity(hA, hA) ≈ 0 atol = 1e-12
-	# global phase and external scaling are invisible to fidelity (unlike distance)
-	hAs = copy(hA)
-	setscaling!(hAs, 2.5)
+	# the global phase is invisible to fidelity (unlike distance)
 	hAph = hA * cis(0.9)
-	@test fidelity(hAs, hB) ≈ fidelity(hA, hB) atol = 1e-10
 	@test fidelity(hAph, hB) ≈ fidelity(hA, hB) atol = 1e-10
-	@test distance(hAs, hB) > distance(hA, hB)
-	@test distance(hAph, hB) > 1e-3
+	@test distance(hAph, hB) > 1.0e-3
+	# the same interface for two MPOHamiltonians
+	t1 = term(1.0, 1 => _SX) + term(0.5, 2 => _SZ) + term(0.25, 3 => _SX, 4 => _SX)
+	t2 = term(1.0, 1 => _SZ) + term(0.5, 2 => _SX) + term(0.25, 3 => _SX, 4 => _SX)
+	h1 = MPOHamiltonian(t1)
+	h2 = MPOHamiltonian(t2)
+	@test fidelity(h1, h2) isa Real
+	@test infidelity(h1, h1) ≈ 0 atol = 1e-12
 end
 
 @testset "operator norm/dot stability" begin
 	Random.seed!(48)
 	L = 4
 	ds = fill(2, L)
-	hA = randommpo(ComplexF64, ds; D=4)
-	# the Hilbert-Schmidt norm vs the dense matrix (scaling included, applied per site)
+	hA = MPO(randommpo(ComplexF64, ds; D=4).data)
+	# the Hilbert-Schmidt norm vs the dense matrix
 	@test norm(hA) ≈ norm(todense(hA)) rtol = 1e-12
 	dA = todense(hA)
 	@test dot(hA, hA) ≈ tr(dA' * dA) rtol = 1e-12
@@ -142,17 +146,11 @@ end
 	setscaling!(ρ, 1.7)
 	setscaling!(σ, 0.6)
 	Mρ, Mσ = todense(ρ), todense(σ)
-	# represented arithmetic: bilinear product, linear sum/difference and scalars
+	# represented arithmetic: bilinear product and scalars
 	@test todense(ρ * σ) ≈ Mρ * Mσ atol = 1e-8
 	@test ρ * σ isa CanonicalMPO
-	@test todense(ρ + σ) ≈ Mρ + Mσ atol = 1e-8
-	@test todense(ρ - σ) ≈ Mρ - Mσ atol = 1e-8
 	@test todense(2.5 * ρ) ≈ 2.5 * Mρ atol = 1e-8
 	@test todense(ρ / 0.5) ≈ Mρ / 0.5 atol = 1e-8
-	# mixing with a plain MPO folds the CanonicalMPO scale into the data
-	h = MPO(copy(ρ.data))
-	@test todense(ρ + h) ≈ Mρ + todense(h) atol = 1e-8
-	@test todense(h * ρ) ≈ todense(h) * Mρ atol = 1e-8
 	# operator application carries the scaling of both factors
 	ψ = randommps(ComplexF64, fill(2, 4); D=4)
 	@test todense(ρ * ψ) ≈ Mρ * todense(ψ) atol = 1e-8
@@ -174,13 +172,22 @@ end
 end
 
 @testset "OpSum lattice" begin
-	# `ds` is stored as a plain Vector{Int}
-	s = OpSum([2, 2, 2])
-	@test s.ds == [2, 2, 2]
-	s2 = OpSum([2, 2], term(1 => _SX))
-	@test length(s2) == 1
-	push!(s2, term(0.5, 2 => _SZ))
-	@test length(s2) == 2
-	@test_throws ArgumentError push!(s2, term(0.5, 3 => _SX))
-	@test_throws DimensionMismatch push!(s2, term(0.5, 1 => randn(3, 3)))
+	# `ds` is stored as a plain Vector{Int} and inferred from the operators
+	s = term(1 => _SX) + term(0.5, 2 => _SZ)
+	@test s.ds == [2, 2]
+	@test length(s.data) == 2
+	# a wider term grows the lattice (new sites carry the first term's dimension)
+	s3 = s + term(0.5, 3 => _SX)
+	@test s3.ds == [2, 2, 2]
+	# conflicting operator dimensions on one site are rejected
+	@test_throws DimensionMismatch s + term(0.5, 1 => randn(3, 3))
+	# incremental build from an explicit lattice: `OpSum(ds) += term`
+	s4 = OpSum([2, 2])
+	s4 += term(1 => _SX)
+	s4 += term(-0.5, 2 => _SZ)
+	@test s4.ds == [2, 2] && length(s4.data) == 2
+	@test_throws DimensionMismatch s4 + term(1 => randn(3, 3))
+	# a wider term grows the lattice
+	s5 = s4 + term(0.5, 3 => _SX)
+	@test s5.ds == [2, 2, 2]
 end
