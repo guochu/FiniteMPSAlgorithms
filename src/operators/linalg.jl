@@ -119,6 +119,14 @@ function _plus_data(hA::AbstractMPO, hB::AbstractMPO)
 	return MPO(r)
 end
 
+# fold the represented per-site scale `scaling^L` of a CanonicalMPO into its raw data
+# (site 1), returning a plain MPO; the canonical gauge is not preserved
+function _fold_scaling(h::CanonicalMPO)
+	d = copy(h.data)
+	isempty(d) || (d[1] = scaling(h)^length(h) * d[1])
+	return MPO(d)
+end
+
 """
 	Base.:*(hA::CanonicalMPO, hB::CanonicalMPO) -> CanonicalMPO
 
@@ -152,7 +160,17 @@ Base.:*(hA::MPO, hB::CanonicalMPO) =
 	CanonicalMPO(_mul_data(hA, hB).data; scaling=scaling(hB))
 
 """
-	Base.:+(hA::MPO, hB::MPO) -> MPO
+	Base.:+(hA::CanonicalMPO, hB::CanonicalMPO) -> CanonicalMPO
+
+Exact (strict) sum as a block-diagonal direct product (no truncation). The `scaling` of
+both summands is folded into the data and the result has `scaling = 1` (mirroring the
+`CanonicalMPS` sum).
+"""
+Base.:+(hA::CanonicalMPO, hB::CanonicalMPO) =
+	CanonicalMPO(_plus_data(_fold_scaling(hA), _fold_scaling(hB)).data)
+
+"""
+	Base.:*(hA::MPO, hB::MPO) -> MPO
 
 Exact (strict) sum of two chains of the same kind as a block-diagonal direct product
 (no truncation).

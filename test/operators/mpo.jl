@@ -146,9 +146,12 @@ end
 	setscaling!(ρ, 1.7)
 	setscaling!(σ, 0.6)
 	Mρ, Mσ = todense(ρ), todense(σ)
-	# represented arithmetic: bilinear product and scalars
+	# represented arithmetic: bilinear product, linear sum and scalars
 	@test todense(ρ * σ) ≈ Mρ * Mσ atol = 1e-8
 	@test ρ * σ isa CanonicalMPO
+	@test todense(ρ + σ) ≈ Mρ + Mσ atol = 1e-8
+	@test ρ + σ isa CanonicalMPO
+	@test scaling(ρ + σ) == 1
 	@test todense(2.5 * ρ) ≈ 2.5 * Mρ atol = 1e-8
 	@test todense(ρ / 0.5) ≈ Mρ / 0.5 atol = 1e-8
 	# operator application carries the scaling of both factors
