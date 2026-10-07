@@ -43,6 +43,10 @@ scalartype(::Type{OpTerm{T}}) where {T} = T
 Base.:(==)(a::OpTerm, b::OpTerm) = a.coeff == b.coeff && a.positions == b.positions &&
 	a.operators == b.operators
 
+# the hermitian conjugate: conjugated coefficient, adjointed operators (positions keep
+# their order — each local operator is adjointed in place)
+Base.adjoint(t::OpTerm) = OpTerm(conj(t.coeff), t.positions, adjoint.(t.operators))
+
 OpTerm(coeff::Number, pairs::Pair{Int,<:AbstractMatrix}...) =
 	OpTerm(coeff, Int[first.(pairs)...], AbstractMatrix[last.(pairs)...])
 
@@ -84,6 +88,8 @@ phydims(x::OpSum) = x.ds
 phydim(x::OpSum, site) = x.ds[site]
 
 Base.:(==)(a::OpSum, b::OpSum) = a.ds == b.ds && a.data == b.data
+
+Base.adjoint(s::OpSum) = OpSum(s.ds, adjoint.(s.data))
 
 _convert_term(::Type{T}, t::OpTerm{T}) where {T} = t
 _convert_term(::Type{T}, t::OpTerm) where {T} = OpTerm(T(t.coeff), t.positions, t.operators)

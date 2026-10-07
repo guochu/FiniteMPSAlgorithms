@@ -217,6 +217,28 @@ function Base.:*(h::MPOHamiltonian, ψ::CanonicalMPS)
 	return CanonicalMPS(data; scaling=scaling(ψ))
 end
 
+"""
+	Base.adjoint(h::MPO) -> MPO
+
+The hermitian conjugate chain: the site order is reversed and every site tensor is
+adjointed (conjugated and transposed in the `(wl, po, wr, pi)` convention), so that
+`todense(adjoint(h)) == adjoint(todense(h))`.
+"""
+Base.adjoint(h::MPO) = MPO([permutedims(conj(W), (1, 4, 3, 2)) for W in h.data])
+
+"""
+	Base.adjoint(ρ::CanonicalMPO) -> CanonicalMPO
+
+The hermitian conjugate of a canonical chain: every site tensor is adjointed in place
+(local operators conjugated, `(po, pi)` swapped; the site positions are kept) and the
+external `scaling` is conjugated. The gauge of the returned chain is not canonicalized —
+run `canonicalize!` if the canonical form is needed.
+"""
+function Base.adjoint(ρ::CanonicalMPO)
+	data = [permutedims(conj(W), (1, 4, 3, 2)) for W in ρ.data]
+	return CanonicalMPO(data; scaling=conj(scaling(ρ)))
+end
+
 # ---------- MPOHamiltonian operands: expand the block chain into the dense MPO layer
 # (exact products/sums/orth are written on 4-index site tensors; block-native paths are
 # the DMRG/TDVP environments and the MPO·MPS exact product) ----------

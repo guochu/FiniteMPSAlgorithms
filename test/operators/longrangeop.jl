@@ -64,6 +64,17 @@ end
 	@test maximum(abs.(todense(MPO(tompotensors(MPOHamiltonian(s_id, L)))) -
 					   expdecay_dense(a, I(d), b, αs, λs, L))) < 1e-12
 
+	# adjoint: adjointed operators and conjugated couplings; the represented chain
+	# matches the dense matrix adjoint
+	t_a = adjoint(t)
+	@test t_a.a == adjoint(a) && t_a.m == adjoint(m) && t_a.b == adjoint(b)
+	@test t_a.α == conj(0.4) && t_a.λ == conj(1.7)
+	sa = adjoint(s)
+	@test sa.a == adjoint(a) && sa.m == adjoint(m) && sa.b == adjoint(b)
+	@test sa.αs == conj.(αs) && sa.λs == conj.(λs)
+	@test maximum(abs.(todense(MPO(tompotensors(MPOHamiltonian(sa, L)))) -
+					   adjoint(expdecay_dense(a, m, b, αs, λs, L)))) < 1e-12
+
 	# identity propagator: recovers Σ_k α_k Σ_{i<j} λ^(j-i) a_i b_j exactly
 	sid = ExpDecayOpSum(a, I(2), b, αs, λs)
 	Hid = MPOHamiltonian(sid, L)

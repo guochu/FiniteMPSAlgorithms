@@ -43,11 +43,8 @@ MPOHamiltonian(data::AbstractVector{<:SchurMPOTensor{T}}) where {T<:Number} =
 # from a vector of block matrices
 MPOHamiltonian(data::Vector{<:Matrix}) = MPOHamiltonian([SchurMPOTensor(c) for c in data])
 
-MPOHamiltonian(h::MPOHamiltonian) = h
-
 MPO(h::MPOHamiltonian) = MPO(tompotensors(h))
 
-Base.getindex(h::MPOHamiltonian, i::Int, j::Int, k::Int) = h[i][j, k]
 Base.copy(h::MPOHamiltonian) = MPOHamiltonian(copy(h.data))
 Base.complex(h::MPOHamiltonian{T}) where {T} =
 	T <: Complex ? h : MPOHamiltonian([complex(h[i]) for i in 1:length(h)])
@@ -95,7 +92,7 @@ function _tompotensors(h::MPOHamiltonian, leftrow::Int, rightcol::Int)
 	dj = phydim(h[1])
 	tmp = zeros(T, 1, dj, size(h[1], 2), dj)
 	for i in 1:size(h[1], 2)
-		tmp[1, :, i, :] = h[1, leftrow, i]
+		tmp[1, :, i, :] = h[1][leftrow, i]
 	end
 	mpotensors[1] = tmp
 	for n in 2:L-1
@@ -104,7 +101,7 @@ function _tompotensors(h::MPOHamiltonian, leftrow::Int, rightcol::Int)
 	dj = phydim(h[L])
 	tmp = zeros(T, size(h[L], 1), dj, 1, dj)
 	for i in 1:size(h[L], 1)
-		tmp[i, :, 1, :] = h[L, i, rightcol]
+		tmp[i, :, 1, :] = h[L][i, rightcol]
 	end
 	mpotensors[L] = tmp
 	return mpotensors

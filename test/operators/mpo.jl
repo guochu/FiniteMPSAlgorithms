@@ -171,6 +171,36 @@ end
 	@test todense(ρc) ≈ todense(ρp) atol = 1e-12
 end
 
+@testset "operator adjoint" begin
+	Random.seed!(50)
+	L = 4
+	ds = fill(2, L)
+	# MPO: the site-reversed, per-site-adjointed chain vs the dense matrix adjoint
+	hA = MPO(randommpo(ComplexF64, ds; D=4).data)
+	@test todense(adjoint(hA)) ≈ adjoint(todense(hA)) atol = 1e-12
+	hAA = adjoint(adjoint(hA))
+	@test hAA.data == hA.data
+	# CanonicalMPO: the external scaling folds into the data
+	ρ = randommpo(ComplexF64, ds; D=4)
+	setscaling!(ρ, 1.7)
+	@test todense(adjoint(ρ)) ≈ adjoint(todense(ρ)) atol = 1e-12
+	# OpTerm: conjugated coefficient, adjointed operators, involution
+	σx = Float64[0 1; 1 0]
+	σy = ComplexF64[0 -im; im 0]
+	t = OpTerm(1.5 - 0.3im, [1, 3], [σx, σy])
+	ta = adjoint(t)
+	@test ta.coeff == conj(t.coeff)
+	@test ta.positions == t.positions
+	@test ta.operators == adjoint.(t.operators)
+	@test adjoint(ta) == t
+	# OpSum: term-wise adjoint; the represented operators match the dense adjoint
+	s = t + OpTerm(0.5, 2 => σy)
+	sa = adjoint(s)
+	@test length(sa.data) == 2
+	@test all(k -> sa.data[k] == adjoint(s.data[k]), 1:2)
+	@test todense(MPOHamiltonian(adjoint(s))) ≈ adjoint(todense(MPOHamiltonian(s))) atol = 1e-12
+end
+
 @testset "OpSum lattice" begin
 	# `ds` is stored as a plain Vector{Int} and inferred from the operators
 	s = term(1 => _SX) + term(0.5, 2 => _SZ)

@@ -50,6 +50,11 @@ phydim(t::ExpDecayOpTerm) = size(t.a, 1)
 ExpDecayOpTerm(a::AbstractMatrix, b::AbstractMatrix, α::Number, λ::Number) =
 	ExpDecayOpTerm(a, one(a), b, α, λ)
 
+# the hermitian conjugate: adjointed operators, conjugated couplings (λ^(j-i) conj(λ)^
+# under the adjoint is carried by the adjointed propagator/endpoint chain)
+Base.adjoint(t::ExpDecayOpTerm) =
+	ExpDecayOpTerm(adjoint(t.a), adjoint(t.m), adjoint(t.b), conj(t.α), conj(t.λ))
+
 """
 	ExpDecayOpSum(a, m, b, αs, λs)
 	ExpDecayOpSum(a, b, αs, λs)
@@ -72,12 +77,9 @@ struct ExpDecayOpSum{T<:Number}
 			throw(DimensionMismatch("a, m, b must be square matrices of equal size"))
 		(length(αs) == length(λs) && !isempty(αs)) ||
 			throw(ArgumentError("αs and λs must be non-empty vectors of equal length"))
-		T = Float64
+		T = promote_type(scalartype(a), scalartype(m), scalartype(b))
 		for v in (αs..., λs...)
 			T = promote_type(T, typeof(v))
-		end
-		for M3 in (a, m, b)
-			T = promote_type(T, scalartype(M3))
 		end
 		return new{T}(convert(Matrix{T}, a), convert(Matrix{T}, m),
 			convert(Matrix{T}, b), convert(Vector{T}, collect(αs)),
@@ -89,6 +91,9 @@ ExpDecayOpSum(t::ExpDecayOpTerm) = ExpDecayOpSum(t.a, t.m, t.b, [t.α], [t.λ])
 # identity-propagator convenience: ExpDecayOpSum(a, b, αs, λs)
 ExpDecayOpSum(a::AbstractMatrix, b::AbstractMatrix, αs::AbstractVector, λs::AbstractVector) =
 	ExpDecayOpSum(a, one(a), b, αs, λs)
+
+Base.adjoint(s::ExpDecayOpSum) =
+	ExpDecayOpSum(adjoint(s.a), adjoint(s.m), adjoint(s.b), conj.(s.αs), conj.(s.λs))
 scalartype(::Type{<:ExpDecayOpSum{T}}) where {T} = T
 phydim(s::ExpDecayOpSum) = size(s.a, 1)
 

@@ -475,5 +475,5 @@ function expectation(pt::PauliTerm, camp::CAMPS)
 		W[1, :, 1, :] .= _pauli_matrix(paulis[s])
 		h = _updateleft(h, camp.ket[s], W, camp.ket[s])
 	end
-	return coeff * h[1, 1, 1]
+	return coeff * h[1][1, 1]
 end
